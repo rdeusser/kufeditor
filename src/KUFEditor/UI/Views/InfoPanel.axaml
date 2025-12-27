@@ -1,0 +1,181 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="500"
+             x:Class="KUFEditor.UI.Views.InfoPanel">
+
+    <UserControl.Styles>
+        <Style Selector="TextBlock.section-header">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Opacity" Value="0.6"/>
+            <Setter Property="LetterSpacing" Value="0.8"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+        </Style>
+
+        <Style Selector="TextBlock.field-label">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Opacity" Value="0.6"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
+        </Style>
+
+        <Style Selector="TextBlock.field-value">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+        </Style>
+
+        <Style Selector="Border.snapshot-item">
+            <Setter Property="Background" Value="#15FFFFFF"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+
+        <Style Selector="Border.snapshot-item:pointerover">
+            <Setter Property="Background" Value="#25FFFFFF"/>
+        </Style>
+
+        <Style Selector="Button.action-button">
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+        </Style>
+
+        <Style Selector="Button.action-button:pointerover">
+            <Setter Property="Background" Value="#30FFFFFF"/>
+        </Style>
+
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <Style Selector="Button.primary:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight1}"/>
+        </Style>
+
+        <Style Selector="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+        </Style>
+
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Header with collapse button -->
+        <Border DockPanel.Dock="Top"
+                Background="Transparent"
+                Padding="16,16,16,12">
+            <DockPanel>
+                <Button DockPanel.Dock="Right"
+                        Name="CollapseButton"
+                        Content="›"
+                        FontSize="16"
+                        FontWeight="Bold"
+                        Width="28"
+                        Height="28"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        ToolTip.Tip="Collapse panel"
+                        Click="OnCollapseClick"/>
+                <TextBlock Text="INFO"
+                           FontSize="11"
+                           FontWeight="Bold"
+                           Opacity="0.6"
+                           LetterSpacing="0.8"
+                           VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Content -->
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      Padding="16,0,16,16">
+            <StackPanel Name="ContentPanel">
+                <!-- No file selected message -->
+                <TextBlock Name="NoFileMessage"
+                           Text="Select a file to view details"
+                           Opacity="0.5"
+                           FontStyle="Italic"
+                           TextAlignment="Center"
+                           Margin="0,20"/>
+
+                <!-- File Info Section -->
+                <StackPanel Name="FileInfoSection" IsVisible="False">
+                    <TextBlock Text="FILE" Classes="section-header"/>
+
+                    <TextBlock Text="Name" Classes="field-label"/>
+                    <TextBlock Name="FileName" Text="-" Classes="field-value"/>
+
+                    <TextBlock Text="Path" Classes="field-label"/>
+                    <TextBlock Name="FilePath" Text="-" Classes="field-value"/>
+
+                    <TextBlock Text="Size" Classes="field-label"/>
+                    <TextBlock Name="FileSize" Text="-" Classes="field-value"/>
+
+                    <TextBlock Text="Modified" Classes="field-label"/>
+                    <TextBlock Name="FileModified" Text="-" Classes="field-value"/>
+
+                    <TextBlock Text="Type" Classes="field-label"/>
+                    <TextBlock Name="FileType" Text="-" Classes="field-value"/>
+                </StackPanel>
+
+                <!-- Snapshots Section -->
+                <StackPanel Name="SnapshotsSection" IsVisible="False" Margin="0,16,0,0">
+                    <TextBlock Text="SNAPSHOTS" Classes="section-header"/>
+
+                    <!-- Snapshot List -->
+                    <ListBox Name="SnapshotList"
+                             Margin="0,0,0,12"/>
+
+                    <!-- No snapshots message -->
+                    <TextBlock Name="NoSnapshotsMessage"
+                               Text="No snapshots for this file"
+                               Opacity="0.5"
+                               FontStyle="Italic"
+                               Margin="0,0,0,12"/>
+
+                    <!-- Restore from pristine -->
+                    <Button Name="RestorePristineButton"
+                            Content="Restore Original"
+                            Classes="action-button"
+                            ToolTip.Tip="Restore from pristine backup"
+                            Click="OnRestorePristine"
+                            Margin="0,0,0,8"/>
+
+                    <!-- Restore selected snapshot -->
+                    <Button Name="RestoreSnapshotButton"
+                            Content="Restore Selected"
+                            Classes="action-button"
+                            IsEnabled="False"
+                            Click="OnRestoreSnapshot"
+                            Margin="0,0,0,8"/>
+
+                    <!-- Create new snapshot -->
+                    <Button Name="NewSnapshotButton"
+                            Content="New Snapshot"
+                            Classes="action-button primary"
+                            Click="OnNewSnapshot"/>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

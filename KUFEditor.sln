@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor", "src\KUFEditor\KUFEditor.csproj", "{A733B766-2D6D-445D-8D7D-E2D39ABCB0EA}"
 EndProject
@@ -7,6 +7,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor.Maps", "src\KUFEditor.Maps\KUFEditor.Maps.csproj", "{C6D4F4F2-2D6D-445D-8D7D-E2D39ABCB0EA}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor.Assets", "src\KUFEditor.Assets\KUFEditor.Assets.csproj", "{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor.Core.Tests", "tests\KUFEditor.Core.Tests\KUFEditor.Core.Tests.csproj", "{E8F6G6G4-2D6D-445D-8D7D-E2D39ABCB0EA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -30,5 +32,9 @@ Global
 		{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E8F6G6G4-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E8F6G6G4-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E8F6G6G4-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E8F6G6G4-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

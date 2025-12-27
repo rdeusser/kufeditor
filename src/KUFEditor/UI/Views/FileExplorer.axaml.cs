@@ -118,11 +118,3 @@ public partial class FileExplorer : UserControl
 
     public event EventHandler<string>? FileOpened;
 }
-
-public class FileItem
-{
-    public string Name { get; set; } = string.Empty;
-    public string Path { get; set; } = string.Empty;
-    public bool IsDirectory { get; set; }
-    public ObservableCollection<FileItem> Children { get; set; } = new();
-}

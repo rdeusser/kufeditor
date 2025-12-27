@@ -1,0 +1,132 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
+             x:Class="KUFEditor.UI.Views.WorkspaceNavigator">
+
+    <UserControl.Styles>
+        <Style Selector="ComboBox.game-selector">
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+        </Style>
+
+        <Style Selector="ComboBox.game-selector:pointerover /template/ Border#Background">
+            <Setter Property="Background" Value="#30FFFFFF"/>
+        </Style>
+
+        <Style Selector="TreeViewItem">
+            <Setter Property="IsExpanded" Value="False"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <Style Selector="TreeViewItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight3}"/>
+            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="Opacity" Value="0.6"/>
+        </Style>
+
+        <Style Selector="TreeViewItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight2}"/>
+            <Setter Property="CornerRadius" Value="5"/>
+        </Style>
+
+        <Style Selector="TextBlock.category-header">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Opacity" Value="0.6"/>
+            <Setter Property="LetterSpacing" Value="0.8"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+
+        <Style Selector="TextBox.search-box">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <Style Selector="TextBox.search-box:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+        </Style>
+
+        <Style Selector="Expander">
+            <Setter Property="IsExpanded" Value="True"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <Style Selector="Expander /template/ ToggleButton#PART_toggle">
+            <Setter Property="Padding" Value="8,6"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Game Selector -->
+        <Border DockPanel.Dock="Top"
+                Padding="12,12,12,8">
+            <ComboBox Name="GameSelector"
+                      Classes="game-selector"
+                      SelectedIndex="0">
+                <ComboBoxItem Content="Crusaders"/>
+                <ComboBoxItem Content="Heroes"/>
+            </ComboBox>
+        </Border>
+
+        <!-- Search Box -->
+        <Border DockPanel.Dock="Top"
+                Margin="12,0,12,12">
+            <TextBox Name="SearchBox"
+                     Watermark="Search files..."
+                     Classes="search-box"/>
+        </Border>
+
+        <!-- File Categories -->
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      Margin="8,0">
+            <StackPanel Margin="4,0,4,8">
+                <!-- SOX Files -->
+                <Expander Name="SoxExpander">
+                    <Expander.Header>
+                        <TextBlock Text="SOX FILES" Classes="category-header"/>
+                    </Expander.Header>
+                    <TreeView Name="SoxTree"
+                              Background="Transparent"
+                              Margin="0,4,0,0"/>
+                </Expander>
+
+                <!-- Missions -->
+                <Expander Name="MissionsExpander">
+                    <Expander.Header>
+                        <TextBlock Text="MISSIONS" Classes="category-header"/>
+                    </Expander.Header>
+                    <TreeView Name="MissionsTree"
+                              Background="Transparent"
+                              Margin="0,4,0,0"/>
+                </Expander>
+
+                <!-- Save Games -->
+                <Expander Name="SavesExpander">
+                    <Expander.Header>
+                        <TextBlock Text="SAVE GAMES" Classes="category-header"/>
+                    </Expander.Header>
+                    <TreeView Name="SavesTree"
+                              Background="Transparent"
+                              Margin="0,4,0,0"/>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>
