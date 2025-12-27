@@ -162,6 +162,27 @@ public partial class EditorArea : UserControl
             Tabs.Remove(tab);
         }
     }
+
+    /// <summary>
+    /// Refreshes a file in the editor by reloading its content.
+    /// </summary>
+    public void RefreshFile(string path)
+    {
+        var existing = Tabs.FirstOrDefault(t => t.FilePath == path);
+        if (existing == null) return;
+
+        // recreate the editor content
+        existing.EditorContent = CreateEditor(path);
+
+        // force UI update by removing and re-adding
+        var index = Tabs.IndexOf(existing);
+        Tabs.Remove(existing);
+        Tabs.Insert(index, existing);
+
+        var tabControl = this.FindControl<TabControl>("EditorTabs");
+        if (tabControl != null)
+            tabControl.SelectedItem = existing;
+    }
 }
 
 public class EditorTab

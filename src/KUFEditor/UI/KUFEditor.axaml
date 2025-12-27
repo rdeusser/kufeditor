@@ -75,17 +75,17 @@
                     <ColumnDefinition Width="8"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="320" MinWidth="200"/>
+                    <ColumnDefinition Width="300" MinWidth="200"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <!-- File Explorer -->
+                <!-- Workspace Navigator (replaces File Explorer) -->
                 <Border Grid.Column="0" Grid.Row="0"
                         Classes="panel-container"
-                        Name="FileExplorerContainer">
-                    <views:FileExplorer Name="FileExplorer"/>
+                        Name="WorkspaceContainer">
+                    <views:WorkspaceNavigator Name="WorkspaceNavigator"/>
                 </Border>
 
                 <!-- Left Splitter -->
@@ -101,14 +101,15 @@
 
                 <!-- Right Splitter -->
                 <GridSplitter Grid.Column="3" Grid.Row="0"
+                              Name="InfoPanelSplitter"
                               ResizeDirection="Columns"
                               HorizontalAlignment="Stretch"/>
 
-                <!-- Properties Panel -->
+                <!-- Info Panel (replaces Properties Panel, collapsible) -->
                 <Border Grid.Column="4" Grid.Row="0"
                         Classes="panel-container"
-                        Name="PropertiesContainer">
-                    <views:PropertiesPanel Name="PropertiesPanel"/>
+                        Name="InfoPanelContainer">
+                    <views:InfoPanel Name="InfoPanel"/>
                 </Border>
             </Grid>
         </Panel>

@@ -24,6 +24,8 @@ public partial class KUFEditor : Window
     private string? currentFolder;
     private Settings settings;
     private BackupManager? backupManager;
+    private bool _infoPanelCollapsed;
+    private double _infoPanelWidth = 300;
 
     public KUFEditor()
     {
@@ -34,15 +36,17 @@ public partial class KUFEditor : Window
         settings = Settings.Load(settingsPath);
 
         // initialize backup manager
-        if (!string.IsNullOrEmpty(settings.BackupDirectory))
+        var backupDir = settings.BackupDirectory;
+        if (string.IsNullOrEmpty(backupDir))
         {
-            backupManager = new BackupManager(settings.BackupDirectory);
+            backupDir = Settings.GetDefaultBackupDirectory();
         }
+        backupManager = new BackupManager(backupDir);
 
         SetupUI();
 
         // setup memory monitoring
-        memoryTimer = new Timer(5000); // update every 5 seconds
+        memoryTimer = new Timer(5000);
         memoryTimer.Elapsed += UpdateMemoryStatus;
         memoryTimer.Start();
 
@@ -72,54 +76,95 @@ public partial class KUFEditor : Window
             settings.CrusadersPath = crusadersPath;
             settings.HeroesPath = heroesPath;
             settings.Save(Settings.GetDefaultSettingsPath());
-        }
 
-        // auto-load game directories
-        if (!string.IsNullOrEmpty(crusadersPath))
-        {
-            LoadGameDirectory(crusadersPath, "Crusaders");
-        }
-
-        if (!string.IsNullOrEmpty(heroesPath))
-        {
-            LoadGameDirectory(heroesPath, "Heroes");
-        }
-    }
-
-    private void LoadGameDirectory(string gamePath, string gameType)
-    {
-        var fileExplorer = this.FindControl<FileExplorer>("FileExplorer");
-        if (fileExplorer != null)
-        {
-            var soxPath = Path.Combine(gamePath, "Data", "SOX");
-            if (!Directory.Exists(soxPath))
-                soxPath = Path.Combine(gamePath, "Data", "Sox");
-
-            if (Directory.Exists(soxPath))
+            // capture pristine backups on first setup
+            if (backupManager != null)
             {
-                fileExplorer.LoadDirectory(soxPath);
-                UpdateStatus($"Loaded {gameType} SOX files from: {soxPath}");
+                if (!string.IsNullOrEmpty(crusadersPath))
+                {
+                    UpdateStatus("Capturing pristine backups for Crusaders...");
+                    backupManager.CapturePristine(crusadersPath, "Crusaders");
+                }
+                if (!string.IsNullOrEmpty(heroesPath))
+                {
+                    UpdateStatus("Capturing pristine backups for Heroes...");
+                    backupManager.CapturePristine(heroesPath, "Heroes");
+                }
             }
         }
+
+        // initialize workspace navigator
+        var navigator = this.FindControl<WorkspaceNavigator>("WorkspaceNavigator");
+        if (navigator != null)
+        {
+            navigator.Initialize(settings);
+        }
+
+        // initialize info panel
+        var infoPanel = this.FindControl<InfoPanel>("InfoPanel");
+        if (infoPanel != null && backupManager != null)
+        {
+            infoPanel.Initialize(backupManager);
+        }
+
+        UpdateStatus("KUFEditor ready.");
     }
 
     private void SetupUI()
     {
-        var fileExplorer = this.FindControl<FileExplorer>("FileExplorer");
+        var navigator = this.FindControl<WorkspaceNavigator>("WorkspaceNavigator");
         var editorArea = this.FindControl<EditorArea>("EditorArea");
+        var infoPanel = this.FindControl<InfoPanel>("InfoPanel");
 
-        if (fileExplorer != null && editorArea != null)
+        if (navigator != null && editorArea != null)
         {
-            fileExplorer.FileOpened += (sender, path) =>
+            navigator.FileOpened += (sender, path) =>
             {
                 editorArea.OpenFile(path);
-                var properties = this.FindControl<PropertiesPanel>("PropertiesPanel");
-                properties?.ShowFileProperties(path);
+                infoPanel?.ShowFile(path);
                 UpdateStatus($"Opened file: {Path.GetFileName(path)}");
+            };
+
+            navigator.GameChanged += (sender, game) =>
+            {
+                infoPanel?.SetCurrentGame(game);
+                UpdateStatus($"Switched to {game}");
+            };
+        }
+
+        if (infoPanel != null)
+        {
+            infoPanel.CollapseRequested += (sender, args) => ToggleInfoPanel();
+            infoPanel.FileRestored += (sender, path) =>
+            {
+                // reload the file in editor if it's open
+                editorArea?.RefreshFile(path);
+                UpdateStatus($"Restored file: {Path.GetFileName(path)}");
             };
         }
 
         UpdateStatus("KUFEditor initialized. Ready to edit Kingdom Under Fire game files.");
+    }
+
+    private void ToggleInfoPanel()
+    {
+        var container = this.FindControl<Border>("InfoPanelContainer");
+        var splitter = this.FindControl<GridSplitter>("InfoPanelSplitter");
+
+        if (container == null) return;
+
+        _infoPanelCollapsed = !_infoPanelCollapsed;
+
+        if (_infoPanelCollapsed)
+        {
+            container.IsVisible = false;
+            if (splitter != null) splitter.IsVisible = false;
+        }
+        else
+        {
+            container.IsVisible = true;
+            if (splitter != null) splitter.IsVisible = true;
+        }
     }
 
     private async void OnNewFile(object? sender, RoutedEventArgs e)
@@ -173,15 +218,12 @@ public partial class KUFEditor : Window
         if (result != null)
         {
             currentFolder = result;
-            var fileExplorer = this.FindControl<FileExplorer>("FileExplorer");
-            fileExplorer?.LoadDirectory(result);
             UpdateStatus($"Opened folder: {result}");
         }
     }
 
     private void OnSave(object? sender, RoutedEventArgs e)
     {
-        // implement save logic
         UpdateStatus("File saved");
     }
 
@@ -195,14 +237,12 @@ public partial class KUFEditor : Window
         var result = await dialog.ShowAsync(this);
         if (result != null)
         {
-            // implement save as logic
             UpdateStatus($"Saved as: {result}");
         }
     }
 
     private void OnSaveAll(object? sender, RoutedEventArgs e)
     {
-        // implement save all logic
         UpdateStatus("All files saved");
     }
 
@@ -214,24 +254,19 @@ public partial class KUFEditor : Window
         }
     }
 
-    private void OnToggleFileExplorer(object? sender, RoutedEventArgs e)
+    private void OnToggleWorkspace(object? sender, RoutedEventArgs e)
     {
-        var container = this.FindControl<Border>("FileExplorerContainer");
+        var container = this.FindControl<Border>("WorkspaceContainer");
         if (container != null)
         {
             container.IsVisible = !container.IsVisible;
         }
     }
 
-    private void OnToggleProperties(object? sender, RoutedEventArgs e)
+    private void OnToggleInfoPanel(object? sender, RoutedEventArgs e)
     {
-        var container = this.FindControl<Border>("PropertiesContainer");
-        if (container != null)
-        {
-            container.IsVisible = !container.IsVisible;
-        }
+        ToggleInfoPanel();
     }
-
 
     private void OnThemeChange(object? sender, RoutedEventArgs e)
     {
@@ -242,7 +277,6 @@ public partial class KUFEditor : Window
                 ? ThemeVariant.Dark
                 : ThemeVariant.Light;
 
-            // uncheck other theme options
             if (item.Parent is MenuItem parent)
             {
                 foreach (var child in parent.Items.OfType<MenuItem>())
@@ -253,17 +287,14 @@ public partial class KUFEditor : Window
         }
     }
 
-
     private void OnOpenSoxViewer(object? sender, RoutedEventArgs e)
     {
         UpdateStatus("SOX Editor opened.");
     }
 
-
     private void OnValidateFiles(object? sender, RoutedEventArgs e)
     {
         UpdateStatus("Validating files...");
-        // implement validation logic
         UpdateStatus("Validation complete.");
     }
 
@@ -275,7 +306,6 @@ public partial class KUFEditor : Window
             return;
         }
 
-        // create a dialog to select which game to backup
         var dialog = new Window
         {
             Title = "Create Backup",
@@ -394,14 +424,11 @@ public partial class KUFEditor : Window
             return;
         }
 
-        UpdateStatus("Opening restore dialog...");
-        // implement restore dialog later
-        await ShowError("Restore functionality not yet implemented.");
+        UpdateStatus("Use the Info Panel to restore files from snapshots.");
     }
 
     private async void OnBatchProcess(object? sender, RoutedEventArgs e)
     {
-        // implement batch processing dialog
         UpdateStatus("Batch processing started...");
     }
 
@@ -472,11 +499,11 @@ public partial class KUFEditor : Window
         var editorArea = this.FindControl<EditorArea>("EditorArea");
         editorArea?.OpenFile(path);
 
+        var infoPanel = this.FindControl<InfoPanel>("InfoPanel");
+        infoPanel?.ShowFile(path);
+
         AddToRecentFiles(path);
         UpdateStatus($"Opened: {path}");
-
-        var properties = this.FindControl<PropertiesPanel>("PropertiesPanel");
-        properties?.ShowFileProperties(path);
     }
 
     private void AddToRecentFiles(string path)
