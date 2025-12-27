@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="450"
+             xmlns:local="clr-namespace:KUFEditor.UI.Views"
+             x:Class="KUFEditor.UI.Views.EditorArea">
+    <DockPanel>
+        <TabControl Name="EditorTabs">
+            <TabControl.ItemTemplate>
+                <DataTemplate x:DataType="local:EditorTab">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right"
+                                Content="×"
+                                Classes="close-button"
+                                Width="20"
+                                Height="20"
+                                Margin="4,0,0,0"
+                                Click="OnCloseTab"/>
+                        <TextBlock Text="{Binding Name}"
+                                   Margin="4,2"/>
+                    </DockPanel>
+                </DataTemplate>
+            </TabControl.ItemTemplate>
+
+            <TabControl.ContentTemplate>
+                <DataTemplate x:DataType="local:EditorTab">
+                    <ContentControl Content="{Binding EditorContent}"/>
+                </DataTemplate>
+            </TabControl.ContentTemplate>
+        </TabControl>
+    </DockPanel>
+</UserControl>

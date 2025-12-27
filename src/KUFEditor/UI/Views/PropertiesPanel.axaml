@@ -1,0 +1,111 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="450"
+             x:Class="KUFEditor.UI.Views.PropertiesPanel">
+
+    <UserControl.Styles>
+        <Style Selector="Border.property-card">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="Padding" Value="0,0,0,16"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
+        </Style>
+
+        <Style Selector="TextBlock.property-label">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="LetterSpacing" Value="0.3"/>
+        </Style>
+
+        <Style Selector="TextBlock.property-value">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+        </Style>
+
+        <Style Selector="TextBox.property-input">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+        </Style>
+
+        <Style Selector="TextBox.property-input:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+
+        <Style Selector="Expander">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#20FFFFFF"/>
+        </Style>
+
+        <Style Selector="Expander /template/ ToggleButton#PART_toggle">
+            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top"
+                Background="Transparent"
+                Padding="16,16,16,12">
+            <TextBlock Text="PROPERTIES"
+                       FontSize="11"
+                       FontWeight="Bold"
+                       Opacity="0.6"
+                       LetterSpacing="0.8"/>
+        </Border>
+
+        <ScrollViewer>
+            <StackPanel Name="PropertiesContainer"
+                        Margin="12">
+                <Border Classes="property-card">
+                    <StackPanel>
+                        <TextBlock Text="NAME"
+                                   Classes="property-label"/>
+                        <TextBox Name="NameProperty"
+                                 Classes="property-input"/>
+
+                        <TextBlock Text="TYPE"
+                                   Classes="property-label"/>
+                        <TextBlock Name="TypeProperty"
+                                   Classes="property-value"/>
+
+                        <TextBlock Text="SIZE"
+                                   Classes="property-label"/>
+                        <TextBlock Name="SizeProperty"
+                                   Classes="property-value"/>
+
+                        <TextBlock Text="PATH"
+                                   Classes="property-label"/>
+                        <TextBlock Name="PathProperty"
+                                   Classes="property-value"
+                                   Margin="0"/>
+                    </StackPanel>
+                </Border>
+
+                <Expander Header="Advanced Properties"
+                          IsExpanded="False"
+                          Margin="0,4,0,0">
+                    <StackPanel Name="AdvancedProperties"
+                                Margin="12">
+                        <!-- dynamic properties will be added here -->
+                    </StackPanel>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

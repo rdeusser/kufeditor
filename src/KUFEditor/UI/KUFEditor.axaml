@@ -1,0 +1,116 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:views="clr-namespace:KUFEditor.UI.Views"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="720"
+        x:Class="KUFEditor.UI.KUFEditor"
+        Title="KUFEditor - Kingdom Under Fire Editor"
+        Width="1280" Height="720"
+        WindowStartupLocation="CenterScreen"
+        TransparencyLevelHint="AcrylicBlur"
+        Background="{DynamicResource SystemChromeMediumColor}">
+
+    <Window.Styles>
+        <Style Selector="Border.panel-container">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeLowColor}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Margin" Value="6"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="ClipToBounds" Value="False"/>
+            <Setter Property="BoxShadow" Value="0 2 8 0 #10000000"/>
+        </Style>
+
+        <Style Selector="GridSplitter">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="12"/>
+        </Style>
+
+        <Style Selector="GridSplitter:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight3}"/>
+            <Setter Property="Opacity" Value="0.3"/>
+        </Style>
+    </Window.Styles>
+
+    <DockPanel>
+        <!-- Status Bar -->
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource SystemChromeLowColor}"
+                BorderThickness="0"
+                Height="32"
+                Padding="16,0"
+                BoxShadow="0 -1 3 0 #08000000">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right"
+                           Orientation="Horizontal"
+                           Spacing="16">
+                    <TextBlock Name="MemoryStatus"
+                               Text="Memory: 0 MB"
+                               VerticalAlignment="Center"
+                               FontSize="11"
+                               Opacity="0.7"/>
+
+                    <TextBlock Name="CursorPosition"
+                               Text="Ln 1, Col 1"
+                               VerticalAlignment="Center"
+                               FontSize="11"
+                               Opacity="0.7"/>
+                </StackPanel>
+
+                <TextBlock Name="StatusText"
+                           Text="Ready"
+                           VerticalAlignment="Center"
+                           FontSize="12"
+                           FontWeight="Medium"
+                           Opacity="0.8"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Main Content Area -->
+        <Panel Margin="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="280" MinWidth="200"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="320" MinWidth="200"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- File Explorer -->
+                <Border Grid.Column="0" Grid.Row="0"
+                        Classes="panel-container"
+                        Name="FileExplorerContainer">
+                    <views:FileExplorer Name="FileExplorer"/>
+                </Border>
+
+                <!-- Left Splitter -->
+                <GridSplitter Grid.Column="1" Grid.Row="0"
+                              ResizeDirection="Columns"
+                              HorizontalAlignment="Stretch"/>
+
+                <!-- Editor Area -->
+                <Border Grid.Column="2" Grid.Row="0"
+                        Classes="panel-container">
+                    <views:EditorArea Name="EditorArea"/>
+                </Border>
+
+                <!-- Right Splitter -->
+                <GridSplitter Grid.Column="3" Grid.Row="0"
+                              ResizeDirection="Columns"
+                              HorizontalAlignment="Stretch"/>
+
+                <!-- Properties Panel -->
+                <Border Grid.Column="4" Grid.Row="0"
+                        Classes="panel-container"
+                        Name="PropertiesContainer">
+                    <views:PropertiesPanel Name="PropertiesPanel"/>
+                </Border>
+            </Grid>
+        </Panel>
+    </DockPanel>
+</Window>

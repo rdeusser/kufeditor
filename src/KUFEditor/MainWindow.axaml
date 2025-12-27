@@ -1,0 +1,141 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:views="clr-namespace:KUFEditor.UI.Views"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="720"
+        x:Class="KUFEditor.MainWindow"
+        Title="KUFEditor - Kingdom Under Fire Editor"
+        Width="1280" Height="720"
+        WindowStartupLocation="CenterScreen">
+
+    <DockPanel>
+        <!-- Menu Bar -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New" HotKey="Ctrl+N" Click="OnNewFile"/>
+                <MenuItem Header="_Open..." HotKey="Ctrl+O" Click="OnOpenFile"/>
+                <MenuItem Header="Open _Folder..." HotKey="Ctrl+Shift+O" Click="OnOpenFolder"/>
+                <Separator/>
+                <MenuItem Header="_Save" HotKey="Ctrl+S" Click="OnSave"/>
+                <MenuItem Header="Save _As..." HotKey="Ctrl+Shift+S" Click="OnSaveAs"/>
+                <MenuItem Header="Save A_ll" Click="OnSaveAll"/>
+                <Separator/>
+                <MenuItem Header="_Recent Files" Name="RecentFilesMenu"/>
+                <Separator/>
+                <MenuItem Header="E_xit" HotKey="Alt+F4" Click="OnExit"/>
+            </MenuItem>
+
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo" HotKey="Ctrl+Z"/>
+                <MenuItem Header="_Redo" HotKey="Ctrl+Y"/>
+                <Separator/>
+                <MenuItem Header="Cu_t" HotKey="Ctrl+X"/>
+                <MenuItem Header="_Copy" HotKey="Ctrl+C"/>
+                <MenuItem Header="_Paste" HotKey="Ctrl+V"/>
+                <Separator/>
+                <MenuItem Header="_Find..." HotKey="Ctrl+F"/>
+                <MenuItem Header="_Replace..." HotKey="Ctrl+H"/>
+            </MenuItem>
+
+            <MenuItem Header="_View">
+                <MenuItem Header="File Explorer" Click="OnToggleFileExplorer"/>
+                <MenuItem Header="Properties" Click="OnToggleProperties"/>
+                <Separator/>
+                <MenuItem Header="_Theme">
+                    <MenuItem Header="Dark" Click="OnThemeChange"/>
+                    <MenuItem Header="Light" Click="OnThemeChange"/>
+                </MenuItem>
+            </MenuItem>
+
+            <MenuItem Header="_Tools">
+                <MenuItem Header="SOX Editor" Click="OnOpenSoxViewer"/>
+                <Separator/>
+                <MenuItem Header="Validate Files" Click="OnValidateFiles"/>
+                <MenuItem Header="Batch Process..." Click="OnBatchProcess"/>
+            </MenuItem>
+
+            <MenuItem Header="_Help">
+                <MenuItem Header="Documentation" Click="OnOpenDocumentation"/>
+                <MenuItem Header="About KUFEditor" Click="OnAbout"/>
+            </MenuItem>
+        </Menu>
+
+
+        <!-- Status Bar -->
+        <Border DockPanel.Dock="Bottom"
+                Background="#007ACC"
+                Height="25">
+            <DockPanel Margin="4,0">
+                <TextBlock DockPanel.Dock="Right"
+                           Name="MemoryStatus"
+                           Text="Memory: 0 MB"
+                           VerticalAlignment="Center"
+                           Foreground="White"
+                           Margin="8,0"/>
+
+                <TextBlock DockPanel.Dock="Right"
+                           Name="CursorPosition"
+                           Text="Ln 1, Col 1"
+                           VerticalAlignment="Center"
+                           Foreground="White"
+                           Margin="8,0"/>
+
+                <TextBlock Name="StatusText"
+                           Text="Ready"
+                           VerticalAlignment="Center"
+                           Foreground="White"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Main Content Area -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250" MinWidth="150"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="300" MinWidth="150"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- File Explorer -->
+            <Border Grid.Column="0" Grid.Row="0"
+                    BorderBrush="#3E3E3E"
+                    BorderThickness="1"
+                    Name="FileExplorerContainer">
+                <views:FileExplorer Name="FileExplorer"/>
+            </Border>
+
+            <!-- Left Splitter -->
+            <GridSplitter Grid.Column="1" Grid.Row="0"
+                          Background="#3E3E3E"
+                          ResizeDirection="Columns"
+                          HorizontalAlignment="Stretch"/>
+
+            <!-- Editor Area -->
+            <Border Grid.Column="2" Grid.Row="0"
+                    BorderBrush="#3E3E3E"
+                    BorderThickness="1">
+                <views:EditorArea Name="EditorArea"/>
+            </Border>
+
+            <!-- Right Splitter -->
+            <GridSplitter Grid.Column="3" Grid.Row="0"
+                          Background="#3E3E3E"
+                          ResizeDirection="Columns"
+                          HorizontalAlignment="Stretch"/>
+
+            <!-- Properties Panel -->
+            <Border Grid.Column="4" Grid.Row="0"
+                    BorderBrush="#3E3E3E"
+                    BorderThickness="1"
+                    Name="PropertiesContainer">
+                <views:PropertiesPanel Name="PropertiesPanel"/>
+            </Border>
+
+        </Grid>
+    </DockPanel>
+</Window>

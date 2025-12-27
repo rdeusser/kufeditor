@@ -1,0 +1,91 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="150"
+             x:Class="KUFEditor.UI.Views.OutputPanel">
+    <DockPanel>
+        <TabControl>
+            <TabItem Header="Output">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource SystemBaseMediumColor}" BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal" Margin="4">
+                            <Button Content="Clear"
+                                    Click="OnClearOutput"/>
+                            <Separator/>
+                            <CheckBox Name="AutoScrollCheck"
+                                      IsChecked="True"
+                                      Content="Auto-scroll"/>
+                        </StackPanel>
+                    </Border>
+                    <ScrollViewer Name="OutputScroller"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto">
+                        <TextBox Name="OutputText"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 FontFamily="Consolas, Courier New, monospace"
+                                 Background="#1E1E1E"
+                                 Foreground="#D4D4D4"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </TabItem>
+
+            <TabItem Header="Errors">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource SystemBaseMediumColor}" BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal" Margin="4">
+                            <Button Content="Clear"
+                                    Click="OnClearErrors"/>
+                            <Separator/>
+                            <TextBlock Text="0 Errors"
+                                       Name="ErrorCount"
+                                       VerticalAlignment="Center"
+                                       Margin="8,0"/>
+                        </StackPanel>
+                    </Border>
+                    <DataGrid Name="ErrorGrid"
+                              AutoGenerateColumns="False">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Type"
+                                                Binding="{ReflectionBinding Type}"
+                                                Width="80"/>
+                            <DataGridTextColumn Header="Message"
+                                                Binding="{ReflectionBinding Message}"
+                                                Width="*"/>
+                            <DataGridTextColumn Header="File"
+                                                Binding="{ReflectionBinding File}"
+                                                Width="200"/>
+                            <DataGridTextColumn Header="Line"
+                                                Binding="{ReflectionBinding Line}"
+                                                Width="60"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <TabItem Header="Console">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Bottom"
+                               Margin="4">
+                        <Button DockPanel.Dock="Right"
+                                Content="Send"
+                                Width="60"
+                                Margin="4,0,0,0"
+                                Click="OnSendCommand"/>
+                        <TextBox Name="CommandInput"
+                                 KeyDown="OnCommandKeyDown"/>
+                    </DockPanel>
+                    <ScrollViewer Name="ConsoleScroller">
+                        <TextBox Name="ConsoleOutput"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 FontFamily="Consolas, Courier New, monospace"
+                                 Background="#0C0C0C"
+                                 Foreground="#0F0"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

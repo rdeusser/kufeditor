@@ -1,0 +1,71 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="250" d:DesignHeight="450"
+             x:Class="KUFEditor.UI.Views.FileExplorer">
+
+    <UserControl.Styles>
+        <Style Selector="TreeViewItem">
+            <Setter Property="IsExpanded" Value="False"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <Style Selector="TreeViewItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight3}"/>
+            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="Opacity" Value="0.6"/>
+        </Style>
+
+        <Style Selector="TreeViewItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight2}"/>
+            <Setter Property="CornerRadius" Value="5"/>
+        </Style>
+
+        <Style Selector="TextBox.search-box">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+        </Style>
+
+        <Style Selector="TextBox.search-box:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top"
+                Background="Transparent"
+                Padding="16,16,16,12">
+            <TextBlock Text="FILES"
+                       FontSize="11"
+                       FontWeight="Bold"
+                       Opacity="0.6"
+                       LetterSpacing="0.8"/>
+        </Border>
+
+        <!-- Search Box -->
+        <Border DockPanel.Dock="Top"
+                Margin="12,0,12,16">
+            <TextBox Watermark="Search files..."
+                     Classes="search-box"
+                     FontSize="13"
+                     Name="SearchBox"/>
+        </Border>
+
+        <!-- Tree View -->
+        <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Margin="8,0">
+            <TreeView Name="FileTree"
+                      Margin="4,0,4,8"
+                      Background="Transparent"/>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

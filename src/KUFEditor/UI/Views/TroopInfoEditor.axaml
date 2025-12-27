@@ -1,0 +1,612 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="600"
+             x:Class="KUFEditor.UI.Views.TroopInfoEditor">
+
+    <UserControl.Styles>
+        <Style Selector="Button.toolbar-button">
+            <Setter Property="Padding" Value="16,6"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Height" Value="28"/>
+        </Style>
+
+        <Style Selector="Button.toolbar-button:pointerover">
+            <Setter Property="Background" Value="#30FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#40FFFFFF"/>
+        </Style>
+
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <Style Selector="Button.primary:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight1}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColorLight1}"/>
+        </Style>
+
+        <Style Selector="DataGrid">
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style Selector="DataGridRow:pointerover /template/ Rectangle#BackgroundRectangle">
+            <Setter Property="Fill" Value="{DynamicResource SystemAccentColorLight3}"/>
+            <Setter Property="Opacity" Value="0.3"/>
+        </Style>
+
+        <Style Selector="DataGridRow:selected /template/ Rectangle#BackgroundRectangle">
+            <Setter Property="Fill" Value="{DynamicResource SystemAccentColorLight2}"/>
+            <Setter Property="Opacity" Value="0.6"/>
+        </Style>
+
+        <Style Selector="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style Selector="TabItem">
+            <Setter Property="Padding" Value="16,10"/>
+            <Setter Property="Margin" Value="0,0,2,0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="CornerRadius" Value="6,6,0,0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style Selector="TabItem:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeHighColor}"/>
+            <Setter Property="Opacity" Value="0.7"/>
+        </Style>
+
+        <Style Selector="TabItem:selected">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight2}"/>
+            <Setter Property="Opacity" Value="1"/>
+        </Style>
+
+        <Style Selector="Border.section-card">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="Padding" Value="0,0,0,16"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
+        </Style>
+
+        <Style Selector="TextBlock.section-title">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="LetterSpacing" Value="0.3"/>
+            <Setter Property="Opacity" Value="0.7"/>
+        </Style>
+
+        <Style Selector="TextBlock.field-label">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="LetterSpacing" Value="0.3"/>
+        </Style>
+
+        <Style Selector="NumericUpDown">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+        </Style>
+
+        <Style Selector="NumericUpDown:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+
+        <Style Selector="Slider">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemChromeLowColor}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="#20FFFFFF"
+                Padding="16,10"
+                Height="48">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left Actions -->
+                <StackPanel Grid.Column="0"
+                           Orientation="Horizontal"
+                           Spacing="8"
+                           VerticalAlignment="Center">
+                    <Button Name="SaveButton"
+                            Content="Save"
+                            Classes="toolbar-button primary"
+                            Click="OnSave"/>
+                    <Button Name="BackupButton"
+                            Content="Backup"
+                            Classes="toolbar-button"
+                            Click="OnBackup"/>
+                    <Button Name="RestoreButton"
+                            Content="Restore"
+                            Classes="toolbar-button"
+                            Click="OnRestore"/>
+                </StackPanel>
+
+                <!-- Center Actions -->
+                <StackPanel Grid.Column="1"
+                           Orientation="Horizontal"
+                           Spacing="8"
+                           Margin="16,0,0,0"
+                           VerticalAlignment="Center">
+                    <Button Name="ResetSelectedButton"
+                            Content="Reset Selected"
+                            Classes="toolbar-button"
+                            Click="OnResetSelected"/>
+                    <Button Name="ResetAllButton"
+                            Content="Reset All"
+                            Classes="toolbar-button"
+                            Click="OnResetAll"/>
+                </StackPanel>
+
+                <!-- Right Status -->
+                <StackPanel Grid.Column="2"
+                           Orientation="Horizontal"
+                           Spacing="8"
+                           VerticalAlignment="Center">
+                    <Ellipse Width="6" Height="6"
+                             Fill="#4CAF50"/>
+                    <TextBlock Name="StatusText"
+                               Text="Ready"
+                               FontSize="12"
+                               Opacity="0.7"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main Content -->
+        <Grid Margin="12,16,12,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="450" MinWidth="350"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Panel - Troop List -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource SystemChromeLowColor}"
+                    CornerRadius="12"
+                    Padding="16"
+                    BoxShadow="0 2 8 0 #10000000">
+                <DockPanel>
+                    <!-- Search Box -->
+                    <Border DockPanel.Dock="Top"
+                            Margin="0,0,0,16">
+                        <TextBox Name="SearchBox"
+                                 Watermark="Search troops..."
+                                 CornerRadius="4"
+                                 Padding="10,8"
+                                 BorderThickness="1"
+                                 BorderBrush="#30FFFFFF"
+                                 FontSize="13"
+                                 Background="#20FFFFFF"/>
+                    </Border>
+
+                    <!-- Data Grid -->
+                    <DataGrid Name="TroopGrid"
+                              AutoGenerateColumns="False"
+                              CanUserResizeColumns="True"
+                              CanUserSortColumns="True"
+                              GridLinesVisibility="None"
+                              SelectionMode="Single"
+                              HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="#"
+                                                Width="50"
+                                                IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Name"
+                                                Width="*"
+                                                IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Job"
+                                                Width="70"/>
+                            <DataGridTextColumn Header="Type"
+                                                Width="70"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Border>
+
+            <!-- Splitter -->
+            <GridSplitter Grid.Column="1"
+                          Background="Transparent"
+                          ResizeDirection="Columns"
+                          HorizontalAlignment="Stretch"/>
+
+            <!-- Right Panel - Property Editor -->
+            <Border Grid.Column="2"
+                    Background="{DynamicResource SystemChromeLowColor}"
+                    CornerRadius="12"
+                    Padding="16"
+                    BoxShadow="0 2 8 0 #10000000">
+                <ScrollViewer>
+                    <StackPanel>
+                        <!-- Header -->
+                        <Border Background="Transparent"
+                                BorderThickness="0,0,0,1"
+                                BorderBrush="#20FFFFFF"
+                                Padding="0,0,0,16"
+                                Margin="0,0,0,16">
+                            <TextBlock Name="TroopNameHeader"
+                                       Text="Select a troop to edit"
+                                       FontSize="16"
+                                       FontWeight="Bold"
+                                       Opacity="0.9"/>
+                        </Border>
+
+                        <!-- Tab Control -->
+                        <TabControl Name="PropertyTabs" IsVisible="False">
+                            <!-- Basic Tab -->
+                            <TabItem Header="Basic">
+                                <ScrollViewer Padding="8">
+                                    <StackPanel>
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="JOB ID" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="JobInput" Minimum="0" Maximum="999"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="TYPE ID" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="TypeIDInput" Minimum="0" Maximum="999"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="BASE WIDTH" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="BaseWidthInput" Minimum="0" Maximum="100" Increment="0.1" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="SIGHT RANGE" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="SightRangeInput" Minimum="0" Maximum="1000" Increment="0.5" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="DAMAGE DISTRIBUTION" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="DamageDistributionInput" Minimum="0" Maximum="100" Increment="0.1" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+
+                            <!-- Movement Tab -->
+                            <TabItem Header="Movement">
+                                <ScrollViewer Padding="8">
+                                    <StackPanel>
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="MOVE SPEED" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="MoveSpeedInput" Minimum="0" Maximum="100" Increment="0.5" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="ROTATE RATE" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="RotateRateInput" Minimum="0" Maximum="360" Increment="1" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="MOVE ACCELERATION" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="MoveAccelerationInput" Minimum="0" Maximum="100" Increment="0.1" FormatString="F2"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="MOVE DECELERATION" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="MoveDecelerationInput" Minimum="0" Maximum="100" Increment="0.1" FormatString="F2"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="MAX SPEED MULTIPLIER" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="MaxUnitSpeedMultiplierInput" Minimum="0" Maximum="10" Increment="0.1" FormatString="F2"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+
+                            <!-- Combat Tab -->
+                            <TabItem Header="Combat">
+                                <ScrollViewer Padding="8">
+                                    <StackPanel>
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="DIRECT ATTACK" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="DirectAttackInput" Minimum="0" Maximum="9999" Increment="1" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="INDIRECT ATTACK" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="IndirectAttackInput" Minimum="0" Maximum="9999" Increment="1" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="DEFENSE" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="DefenseInput" Minimum="0" Maximum="9999" Increment="1" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="ATTACK RANGE MAX" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="AttackRangeMaxInput" Minimum="0" Maximum="1000" Increment="0.5" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="ATTACK RANGE MIN" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="AttackRangeMinInput" Minimum="0" Maximum="1000" Increment="0.5" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="ATTACK FRONT RANGE" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="AttackFrontRangeInput" Minimum="0" Maximum="1000" Increment="0.5" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+
+                            <!-- Resistances Tab -->
+                            <TabItem Header="Resistances">
+                                <ScrollViewer Padding="8">
+                                    <StackPanel>
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistMeleeValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="MELEE" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistMeleeSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistRangedValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="RANGED" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistRangedSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistFrontalValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="FRONTAL" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistFrontalSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistExplosionValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="EXPLOSION" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistExplosionSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistFireValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="FIRE" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistFireSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistIceValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="ICE" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistIceSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistLightningValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="LIGHTNING" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistLightningSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistHolyValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="HOLY" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistHolySlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistCurseValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="CURSE" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistCurseSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistPoisonValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="POISON" Classes="field-label" Margin="0,0,0,8"/>
+                                                    <Slider Name="ResistPoisonSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+
+                            <!-- Unit Config Tab -->
+                            <TabItem Header="Unit Config">
+                                <ScrollViewer Padding="8">
+                                    <StackPanel>
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="DEFAULT UNIT HP" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="DefaultUnitHPInput" Minimum="0" Maximum="99999" Increment="10" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="UNIT HP LEVEL UP" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="UnitHPLevUpInput" Minimum="0" Maximum="1000" Increment="1" FormatString="F1"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="FORMATION RANDOM" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="FormationRandomInput" Minimum="0" Maximum="100"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="DEFAULT UNIT NUM X" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="DefaultUnitNumXInput" Minimum="1" Maximum="20"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="DEFAULT UNIT NUM Y" Classes="field-label" Margin="0,0,0,6"/>
+                                                <NumericUpDown Name="DefaultUnitNumYInput" Minimum="1" Maximum="20"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+
+                            <!-- Level Up Tab -->
+                            <TabItem Header="Level Up">
+                                <ScrollViewer Padding="8">
+                                    <StackPanel>
+                                        <!-- Skill Slot 1 -->
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="SKILL SLOT 1" Classes="section-title"/>
+                                                <Border Classes="section-card" Margin="0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="SKILL ID" Classes="field-label" Margin="0,0,0,6"/>
+                                                        <NumericUpDown Name="Skill1IDInput" Minimum="0" Maximum="9999"/>
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Classes="section-card" Margin="0,8,0,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="SKILL PER LEVEL" Classes="field-label" Margin="0,0,0,6"/>
+                                                        <NumericUpDown Name="Skill1PerLevelInput" Minimum="0" Maximum="100" Increment="0.1" FormatString="F2"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Skill Slot 2 -->
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="SKILL SLOT 2" Classes="section-title"/>
+                                                <Border Classes="section-card" Margin="0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="SKILL ID" Classes="field-label" Margin="0,0,0,6"/>
+                                                        <NumericUpDown Name="Skill2IDInput" Minimum="0" Maximum="9999"/>
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Classes="section-card" Margin="0,8,0,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="SKILL PER LEVEL" Classes="field-label" Margin="0,0,0,6"/>
+                                                        <NumericUpDown Name="Skill2PerLevelInput" Minimum="0" Maximum="100" Increment="0.1" FormatString="F2"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Skill Slot 3 -->
+                                        <Border Classes="section-card">
+                                            <StackPanel>
+                                                <TextBlock Text="SKILL SLOT 3" Classes="section-title"/>
+                                                <Border Classes="section-card" Margin="0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="SKILL ID" Classes="field-label" Margin="0,0,0,6"/>
+                                                        <NumericUpDown Name="Skill3IDInput" Minimum="0" Maximum="9999"/>
+                                                    </StackPanel>
+                                                </Border>
+                                                <Border Classes="section-card" Margin="0,8,0,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="SKILL PER LEVEL" Classes="field-label" Margin="0,0,0,6"/>
+                                                        <NumericUpDown Name="Skill3PerLevelInput" Minimum="0" Maximum="100" Increment="0.1" FormatString="F2"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+                        </TabControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

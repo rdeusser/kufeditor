@@ -1,0 +1,136 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="400"
+        x:Class="KUFEditor.UI.Dialogs.GameLocationDialog"
+        Title="Game Location Setup"
+        Width="600" Height="400"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <DockPanel Margin="20">
+        <!-- Header -->
+        <TextBlock DockPanel.Dock="Top"
+                   Text="Please select the installation directories for Kingdom Under Fire"
+                   FontSize="16"
+                   FontWeight="Bold"
+                   Margin="0,0,0,20"
+                   TextWrapping="Wrap"/>
+
+        <!-- Instructions -->
+        <TextBlock DockPanel.Dock="Top"
+                   Text="The editor needs to know where your games are installed to load SOX files."
+                   Margin="0,0,0,10"
+                   TextWrapping="Wrap"/>
+
+        <!-- Buttons -->
+        <StackPanel DockPanel.Dock="Bottom"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,20,0,0">
+            <Button Name="AutoDetectButton"
+                    Content="Auto-Detect"
+                    Width="100"
+                    Margin="0,0,10,0"
+                    Click="OnAutoDetect"/>
+            <Button Name="OkButton"
+                    Content="OK"
+                    Width="80"
+                    Margin="0,0,10,0"
+                    Click="OnOk"
+                    IsEnabled="False"/>
+            <Button Name="CancelButton"
+                    Content="Cancel"
+                    Width="80"
+                    Click="OnCancel"/>
+        </StackPanel>
+
+        <!-- Game Paths -->
+        <ScrollViewer>
+            <StackPanel>
+                <!-- Crusaders -->
+                <Border BorderBrush="{DynamicResource SystemBaseMediumColor}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10"
+                        Margin="0,0,0,15">
+                    <StackPanel>
+                        <TextBlock Text="Kingdom Under Fire: Crusaders"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,8"/>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right"
+                                    Name="BrowseCrusadersButton"
+                                    Content="Browse..."
+                                    Width="80"
+                                    Margin="10,0,0,0"
+                                    Click="OnBrowseCrusaders"/>
+                            <TextBox Name="CrusadersPathBox"
+                                     Watermark="C:\Program Files (x86)\Steam\steamapps\common\Kingdom Under Fire Crusaders"
+                                     IsReadOnly="True"/>
+                        </DockPanel>
+                        <TextBlock Name="CrusadersStatus"
+                                   Text="Not found"
+                                   Foreground="Orange"
+                                   FontSize="12"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Heroes -->
+                <Border BorderBrush="{DynamicResource SystemBaseMediumColor}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10">
+                    <StackPanel>
+                        <TextBlock Text="Kingdom Under Fire: Heroes"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,8"/>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right"
+                                    Name="BrowseHeroesButton"
+                                    Content="Browse..."
+                                    Width="80"
+                                    Margin="10,0,0,0"
+                                    Click="OnBrowseHeroes"/>
+                            <TextBox Name="HeroesPathBox"
+                                     Watermark="C:\Program Files (x86)\Steam\steamapps\common\Kingdom Under Fire Heroes"
+                                     IsReadOnly="True"/>
+                        </DockPanel>
+                        <TextBlock Name="HeroesStatus"
+                                   Text="Not found"
+                                   Foreground="Orange"
+                                   FontSize="12"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- SOX Files Found -->
+                <Border BorderBrush="{DynamicResource SystemBaseMediumColor}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10"
+                        Margin="0,15,0,0"
+                        Name="SoxFilesPanel"
+                        IsVisible="False">
+                    <StackPanel>
+                        <TextBlock Text="SOX Files Found:"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,8"/>
+                        <ScrollViewer MaxHeight="100">
+                            <ItemsControl Name="SoxFilesList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}"
+                                                   FontFamily="Consolas, Courier New, monospace"
+                                                   FontSize="11"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

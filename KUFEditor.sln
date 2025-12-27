@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor", "src\KUFEditor\KUFEditor.csproj", "{A733B766-2D6D-445D-8D7D-E2D39ABCB0EA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor.Core", "src\KUFEditor.Core\KUFEditor.Core.csproj", "{B5C3F3E1-2D6D-445D-8D7D-E2D39ABCB0EA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor.Maps", "src\KUFEditor.Maps\KUFEditor.Maps.csproj", "{C6D4F4F2-2D6D-445D-8D7D-E2D39ABCB0EA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KUFEditor.Assets", "src\KUFEditor.Assets\KUFEditor.Assets.csproj", "{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A733B766-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A733B766-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A733B766-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A733B766-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B5C3F3E1-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B5C3F3E1-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B5C3F3E1-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B5C3F3E1-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C6D4F4F2-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6D4F4F2-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6D4F4F2-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6D4F4F2-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7E5F5F3-2D6D-445D-8D7D-E2D39ABCB0EA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
