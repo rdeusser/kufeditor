@@ -54,6 +54,12 @@ public partial class EditorArea : UserControl
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
 
+        // Check if this is a save game file (in Documents/KUF2 folder, no extension)
+        if (IsSaveGameFile(path))
+        {
+            return CreateSaveGameEditor(path);
+        }
+
         // create appropriate editor based on file type
         switch (ext)
         {
@@ -70,6 +76,14 @@ public partial class EditorArea : UserControl
             default:
                 return CreateHexEditor(path);
         }
+    }
+
+    private static bool IsSaveGameFile(string path)
+    {
+        // Save games are in Documents/KUF2 Crusaders or Documents/KUF2 Heroes
+        var dir = Path.GetDirectoryName(path) ?? "";
+        return dir.Contains("KUF2 Crusaders", StringComparison.OrdinalIgnoreCase) ||
+               dir.Contains("KUF2 Heroes", StringComparison.OrdinalIgnoreCase);
     }
 
     private Control CreateMapEditor(string path)
@@ -114,6 +128,13 @@ public partial class EditorArea : UserControl
     private Control CreateMissionEditor(string path)
     {
         var editor = new MissionEditor();
+        editor.LoadFile(path);
+        return editor;
+    }
+
+    private Control CreateSaveGameEditor(string path)
+    {
+        var editor = new SaveGameEditor();
         editor.LoadFile(path);
         return editor;
     }

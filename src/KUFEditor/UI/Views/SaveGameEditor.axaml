@@ -1,0 +1,183 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:save="clr-namespace:KUFEditor.Assets.SaveGame;assembly=KUFEditor.Assets"
+             xmlns:local="clr-namespace:KUFEditor.UI.Views"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
+             x:Class="KUFEditor.UI.Views.SaveGameEditor"
+             x:DataType="local:SaveGameEditor">
+
+    <UserControl.Styles>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeMediumColor}"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Margin" Value="4"/>
+        </Style>
+
+        <Style Selector="TextBlock.header">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style Selector="TextBlock.value">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontFamily" Value="Consolas, monospace"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemChromeLowColor}"
+                Padding="12,8"
+                Margin="0,0,0,4">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Name="SaveButton" Content="💾 Save" Padding="12,6"/>
+                <Button Name="ReloadButton" Content="🔄 Reload" Padding="12,6"/>
+                <Button Name="BackupButton" Content="📦 Create Backup" Padding="12,6"/>
+                <Separator Width="1" Background="{DynamicResource SystemChromeHighColor}" Margin="8,0"/>
+                <TextBlock Name="FileNameText"
+                           Text="No file loaded"
+                           VerticalAlignment="Center"
+                           FontWeight="Medium"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Main Content -->
+        <TabControl Margin="4">
+            <!-- Info Tab -->
+            <TabItem Header="📋 Info">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="8" Margin="8">
+                        <Border Classes="card">
+                            <StackPanel>
+                                <TextBlock Classes="header" Text="File Information"/>
+                                <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="File Name"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Name="InfoFileName" Classes="value"/>
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Classes="label" Text="File Size"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Name="InfoFileSize" Classes="value"/>
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Last Modified"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Name="InfoLastModified" Classes="value"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card">
+                            <StackPanel>
+                                <TextBlock Classes="header" Text="⚠️ Warning"/>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8">
+                                    Save game editing is experimental. Always create a backup before making changes.
+                                    The save format varies between characters and game versions.
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Troops Tab -->
+            <TabItem Header="⚔️ Troops">
+                <Grid RowDefinitions="*,Auto">
+                    <DataGrid Grid.Row="0"
+                              Name="TroopsGrid"
+                              AutoGenerateColumns="False"
+                              CanUserReorderColumns="False"
+                              IsReadOnly="True"
+                              Margin="8"
+                              x:DataType="save:SaveGameTroop">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="40"/>
+                            <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="80"/>
+                            <DataGridTextColumn Header="Type" Binding="{Binding TroopTypeName}" Width="*"/>
+                            <DataGridTextColumn Header="Type ID" Binding="{Binding TroopType, StringFormat='0x{0:X2}'}" Width="80"/>
+                            <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="60"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <Border Grid.Row="1" Classes="card">
+                        <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11">
+                            Note: Troop detection is experimental. Offsets may vary by character.
+                            Use the Hex View tab for direct editing.
+                        </TextBlock>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- Hex Edit Tab -->
+            <TabItem Header="🔢 Hex Edit">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Classes="card">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Classes="label" Text="Offset (hex):"/>
+                            <TextBox Name="EditOffset" Width="100" Text="0"/>
+                            <TextBlock Classes="label" Text="Value (hex):"/>
+                            <TextBox Name="EditValue" Width="60" Text="00"/>
+                            <Button Name="SetByteButton" Content="Set Byte" Padding="12,6"/>
+                            <Button Name="GoToOffsetButton" Content="Go To Offset" Padding="12,6"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBox Name="HexView"
+                             IsReadOnly="True"
+                             FontFamily="Consolas, monospace"
+                             FontSize="11"
+                             AcceptsReturn="True"
+                             TextWrapping="NoWrap"
+                             Margin="8"/>
+                </DockPanel>
+            </TabItem>
+
+            <!-- Quick Edit Tab -->
+            <TabItem Header="⚡ Quick Edit">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="8" Margin="8">
+                        <Border Classes="card">
+                            <StackPanel>
+                                <TextBlock Classes="header" Text="Common Edits"/>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,12">
+                                    These are common save game modifications. Use with caution.
+                                </TextBlock>
+
+                                <Grid ColumnDefinitions="200,100,Auto" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Troop 1 Level (0x05D0)"/>
+                                    <NumericUpDown Grid.Row="0" Grid.Column="1" Name="Troop1Level" Minimum="1" Maximum="99"/>
+                                    <Button Grid.Row="0" Grid.Column="2" Name="ApplyTroop1Level" Content="Apply" Margin="8,0,0,0"/>
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Classes="label" Text="Troop 1 Type (0x05C0)"/>
+                                    <ComboBox Grid.Row="1" Grid.Column="1" Name="Troop1Type"/>
+                                    <Button Grid.Row="1" Grid.Column="2" Name="ApplyTroop1Type" Content="Apply" Margin="8,0,0,0"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card">
+                            <StackPanel>
+                                <TextBlock Classes="header" Text="📖 Reference: Troop Type IDs"/>
+                                <TextBox IsReadOnly="True"
+                                         FontFamily="Consolas, monospace"
+                                         FontSize="11"
+                                         Height="200"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         Name="TroopTypeReference"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>
