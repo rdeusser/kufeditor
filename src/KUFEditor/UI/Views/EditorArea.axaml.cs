@@ -61,6 +61,8 @@ public partial class EditorArea : UserControl
                 return CreateMapEditor(path);
             case ".sox":
                 return CreateSoxEditor(path);
+            case ".stg":
+                return CreateMissionEditor(path);
             case ".txt":
             case ".xml":
             case ".json":
@@ -107,6 +109,13 @@ public partial class EditorArea : UserControl
             Text = $"SOX Editor: {fileName}",
             Margin = new Avalonia.Thickness(10)
         };
+    }
+
+    private Control CreateMissionEditor(string path)
+    {
+        var editor = new MissionEditor();
+        editor.LoadFile(path);
+        return editor;
     }
 
     private Control CreateTextEditor(string path)

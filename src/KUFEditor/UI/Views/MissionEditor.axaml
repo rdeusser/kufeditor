@@ -1,0 +1,253 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:mission="clr-namespace:KUFEditor.Assets.Mission;assembly=KUFEditor.Assets"
+             xmlns:local="clr-namespace:KUFEditor.UI.Views"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
+             x:Class="KUFEditor.UI.Views.MissionEditor"
+             x:DataType="local:MissionEditor">
+
+    <UserControl.Styles>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeMediumColor}"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Margin" Value="4"/>
+        </Style>
+
+        <Style Selector="TextBlock.header">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style Selector="TextBlock.value">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontFamily" Value="Consolas, monospace"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemChromeLowColor}"
+                Padding="12,8"
+                Margin="0,0,0,4">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Name="SaveButton" Content="💾 Save" Padding="12,6"/>
+                <Button Name="ReloadButton" Content="🔄 Reload" Padding="12,6"/>
+                <Separator Width="1" Background="{DynamicResource SystemChromeHighColor}" Margin="8,0"/>
+                <TextBlock Name="FileNameText"
+                           Text="No file loaded"
+                           VerticalAlignment="Center"
+                           FontWeight="Medium"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Main Content -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="200"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Troop List -->
+            <Border Grid.Column="0" Classes="card">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Classes="header" Text="🎖️ Troops"/>
+                    <ListBox Name="TroopList"
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="mission:TroopBlock">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{Binding UniqueId, StringFormat='[{0:X2}]'}"
+                                               FontFamily="Consolas, monospace"
+                                               Opacity="0.6"/>
+                                    <TextBlock Text="{Binding InternalName}"/>
+                                    <TextBlock Text="⭐" IsVisible="{Binding IsHero}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- Splitter -->
+            <GridSplitter Grid.Column="1"
+                          ResizeDirection="Columns"
+                          Background="Transparent"/>
+
+            <!-- Troop Details -->
+            <TabControl Grid.Column="2" Margin="4">
+                <!-- Basic Info Tab -->
+                <TabItem Header="📋 Basic">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="8" Margin="8">
+                            <Border Classes="card">
+                                <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Internal Name"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" Name="InternalNameText" Margin="0,2"/>
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Classes="label" Text="Unique ID"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Name="UniqueIdText" Classes="value"/>
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Category"/>
+                                    <ComboBox Grid.Row="2" Grid.Column="1" Name="CategoryCombo" Margin="0,2"/>
+
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Classes="label" Text="Allegiance"/>
+                                    <ComboBox Grid.Row="3" Grid.Column="1" Name="AllegianceCombo" Margin="0,2"/>
+
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Classes="label" Text="Is Hero"/>
+                                    <CheckBox Grid.Row="4" Grid.Column="1" Name="IsHeroCheck" Margin="0,4"/>
+
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Classes="label" Text="Is Enabled"/>
+                                    <CheckBox Grid.Row="5" Grid.Column="1" Name="IsEnabledCheck" Margin="0,4"/>
+                                </Grid>
+                            </Border>
+
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <TextBlock Classes="header" Text="Position"/>
+                                    <Grid ColumnDefinitions="60,100,60,100,60,100">
+                                        <TextBlock Grid.Column="0" Classes="label" Text="X"/>
+                                        <NumericUpDown Grid.Column="1" Name="PositionX" Minimum="-10000" Maximum="10000"/>
+                                        <TextBlock Grid.Column="2" Classes="label" Text="Y"/>
+                                        <NumericUpDown Grid.Column="3" Name="PositionY" Minimum="-10000" Maximum="10000"/>
+                                        <TextBlock Grid.Column="4" Classes="label" Text="Facing"/>
+                                        <NumericUpDown Grid.Column="5" Name="Facing" Minimum="0" Maximum="255"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Leader Tab -->
+                <TabItem Header="👑 Leader">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="8" Margin="8">
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <TextBlock Classes="header" Text="HP Overrides"/>
+                                    <Grid ColumnDefinitions="100,*,100,*">
+                                        <TextBlock Grid.Column="0" Classes="label" Text="Leader HP"/>
+                                        <NumericUpDown Grid.Column="1" Name="LeaderHP" Minimum="-1" Maximum="99999"/>
+                                        <TextBlock Grid.Column="2" Classes="label" Text="Unit HP"/>
+                                        <NumericUpDown Grid.Column="3" Name="UnitHP" Minimum="-1" Maximum="99999"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <TextBlock Classes="header" Text="Leader Data"/>
+                                    <Grid ColumnDefinitions="100,80,100,80,100,80">
+                                        <TextBlock Grid.Column="0" Classes="label" Text="Animation"/>
+                                        <NumericUpDown Grid.Column="1" Name="LeaderAnimId" Minimum="0" Maximum="255"/>
+                                        <TextBlock Grid.Column="2" Classes="label" Text="Model"/>
+                                        <NumericUpDown Grid.Column="3" Name="LeaderModelId" Minimum="0" Maximum="255"/>
+                                        <TextBlock Grid.Column="4" Classes="label" Text="Level"/>
+                                        <NumericUpDown Grid.Column="5" Name="LeaderLevel" Minimum="1" Maximum="99"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <TextBlock Classes="header" Text="Skills"/>
+                                    <DataGrid Name="LeaderSkillsGrid"
+                                              AutoGenerateColumns="False"
+                                              CanUserReorderColumns="False"
+                                              CanUserSortColumns="False"
+                                              HeadersVisibility="Column"
+                                              Height="140"
+                                              x:DataType="local:SkillSlotViewModel">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Slot" Binding="{Binding Slot}" Width="50" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Skill ID" Binding="{Binding SkillId}" Width="80"/>
+                                            <DataGridTextColumn Header="Skill Name" Binding="{Binding SkillName}" Width="*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Level" Binding="{Binding SkillLevel}" Width="60"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Unit Tab -->
+                <TabItem Header="⚔️ Unit">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="8" Margin="8">
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <TextBlock Classes="header" Text="Troop Configuration"/>
+                                    <Grid ColumnDefinitions="100,80,100,80,100,80" RowDefinitions="Auto,Auto">
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Animation"/>
+                                        <NumericUpDown Grid.Row="0" Grid.Column="1" Name="UnitAnimId" Minimum="0" Maximum="255"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="2" Classes="label" Text="Model"/>
+                                        <NumericUpDown Grid.Row="0" Grid.Column="3" Name="UnitModelId" Minimum="0" Maximum="255"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="4" Classes="label" Text="Formation"/>
+                                        <NumericUpDown Grid.Row="0" Grid.Column="5" Name="FormationId" Minimum="0" Maximum="255"/>
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Classes="label" Text="Units X"/>
+                                        <NumericUpDown Grid.Row="1" Grid.Column="1" Name="UnitX" Minimum="1" Maximum="20"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="2" Classes="label" Text="Units Y"/>
+                                        <NumericUpDown Grid.Row="1" Grid.Column="3" Name="UnitY" Minimum="1" Maximum="20"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="4" Classes="label" Text="Total"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="5" Name="TotalUnits" Classes="value"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <TextBlock Classes="header" Text="Skill Points"/>
+                                    <NumericUpDown Name="SkillPoints" Minimum="0" Maximum="9999"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <TextBlock Classes="header" Text="Flags"/>
+                                    <Grid ColumnDefinitions="120,80,120,80">
+                                        <TextBlock Grid.Column="0" Classes="label" Text="Flag Bearer"/>
+                                        <NumericUpDown Grid.Column="1" Name="FlagBearerId" Minimum="0" Maximum="255"/>
+                                        <TextBlock Grid.Column="2" Classes="label" Text="Flag Model"/>
+                                        <NumericUpDown Grid.Column="3" Name="FlagModelId" Minimum="0" Maximum="255"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Hex View Tab -->
+                <TabItem Header="🔢 Hex">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="8">
+                            <TextBlock Text="Raw file data (first 4KB):" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBox Name="HexView"
+                                 IsReadOnly="True"
+                                 FontFamily="Consolas, monospace"
+                                 FontSize="11"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 Margin="8"/>
+                    </DockPanel>
+                </TabItem>
+            </TabControl>
+        </Grid>
+    </DockPanel>
+</UserControl>
