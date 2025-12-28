@@ -1,0 +1,191 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:textsox="clr-namespace:KUFEditor.Assets.TextSox;assembly=KUFEditor.Assets"
+             xmlns:local="clr-namespace:KUFEditor.UI.Views"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
+             x:Class="KUFEditor.UI.Views.TextSoxEditor"
+             x:DataType="local:TextSoxEditor">
+
+    <UserControl.Styles>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeMediumColor}"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Margin" Value="4"/>
+        </Style>
+
+        <Style Selector="TextBlock.header">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style Selector="DataGridRow:selected">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight3}"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemChromeLowColor}"
+                Padding="12,8"
+                Margin="0,0,0,4">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Name="SaveButton" Content="💾 Save" Padding="12,6"/>
+                <Button Name="ReloadButton" Content="🔄 Reload" Padding="12,6"/>
+                <Separator Width="1" Background="{DynamicResource SystemChromeHighColor}" Margin="8,0"/>
+                <TextBlock Name="FileNameText"
+                           Text="No file loaded"
+                           VerticalAlignment="Center"
+                           FontWeight="Medium"/>
+                <Separator Width="1" Background="{DynamicResource SystemChromeHighColor}" Margin="8,0"/>
+                <TextBlock Name="EntryCountText"
+                           Text="0 entries"
+                           VerticalAlignment="Center"
+                           Opacity="0.7"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Main Content -->
+        <TabControl Margin="4">
+            <!-- Text Editor Tab -->
+            <TabItem Header="📝 Text Editor">
+                <Grid RowDefinitions="*,Auto">
+                    <DataGrid Grid.Row="0"
+                              Name="EntriesGrid"
+                              AutoGenerateColumns="False"
+                              CanUserReorderColumns="False"
+                              HeadersVisibility="Column"
+                              Margin="8"
+                              x:DataType="textsox:TextEntry">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="50" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="80" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Max" Binding="{Binding MaxLength}" Width="50" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Text" Binding="{Binding Text}" Width="*"/>
+                            <DataGridTextColumn Header="Len" Binding="{Binding CurrentLength}" Width="50" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Left" Binding="{Binding Remaining}" Width="50" IsReadOnly="True"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <Border Grid.Row="1" Classes="card">
+                        <StackPanel>
+                            <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11">
+                                ⚠️ Important: Text length must match the Max Length exactly. Shorter strings will be padded with nulls.
+                                If text is longer, it will be truncated. The game may crash if lengths don't match.
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- Search Tab -->
+            <TabItem Header="🔍 Search">
+                <DockPanel Margin="8">
+                    <Border DockPanel.Dock="Top" Classes="card">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Classes="label" Text="Search:"/>
+                            <TextBox Name="SearchBox" Width="300"/>
+                            <Button Name="SearchButton" Content="Find" Padding="12,6"/>
+                            <Button Name="SearchNextButton" Content="Find Next" Padding="12,6"/>
+                            <CheckBox Name="CaseSensitiveCheck" Content="Case sensitive"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ListBox Name="SearchResults"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Margin="0,8,0,0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="textsox:TextEntry">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{Binding Index, StringFormat='[{0}]'}"
+                                               FontFamily="Consolas, monospace"
+                                               Opacity="0.6"
+                                               Width="50"/>
+                                    <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </TabItem>
+
+            <!-- Hex View Tab -->
+            <TabItem Header="🔢 Hex">
+                <TextBox Name="HexView"
+                         IsReadOnly="True"
+                         FontFamily="Consolas, monospace"
+                         FontSize="11"
+                         AcceptsReturn="True"
+                         TextWrapping="NoWrap"
+                         Margin="8"/>
+            </TabItem>
+
+            <!-- Info Tab -->
+            <TabItem Header="ℹ️ Info">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="8" Margin="8">
+                        <Border Classes="card">
+                            <StackPanel>
+                                <TextBlock Classes="header" Text="File Format"/>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8">
+                                    Text SOX files contain fixed-width text entries. Each entry has:
+                                </TextBlock>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8" Margin="12,4,0,0">
+                                    • 1 byte: Maximum length prefix (e.g., 0x0B = 11 characters)
+                                </TextBlock>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8" Margin="12,4,0,0">
+                                    • N bytes: Text content (padded with nulls if shorter)
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card">
+                            <StackPanel>
+                                <TextBlock Classes="header" Text="Common Length Prefixes"/>
+                                <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="0x0B (11)" FontFamily="Consolas, monospace"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Short names"/>
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="0x0C (12)" FontFamily="Consolas, monospace"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Standard names"/>
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="0x0F (15)" FontFamily="Consolas, monospace"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="Longer descriptions"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card">
+                            <StackPanel>
+                                <TextBlock Classes="header" Text="⚠️ Editing Rules"/>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8">
+                                    1. Text length must match the defined field width exactly.
+                                </TextBlock>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8">
+                                    2. Shorter strings are padded with nulls (0x00).
+                                </TextBlock>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8">
+                                    3. If length doesn't match, game enters infinite error loop.
+                                </TextBlock>
+                                <TextBlock TextWrapping="Wrap" Opacity="0.8">
+                                    4. Use a hex editor to modify length prefix if needed.
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

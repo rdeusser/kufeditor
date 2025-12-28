@@ -117,12 +117,30 @@ public partial class EditorArea : UserControl
             return editor;
         }
 
+        // Check if this is a text SOX file (in language subdirectory like ENG, FRA, etc.)
+        if (IsTextSoxFile(path))
+        {
+            var editor = new TextSoxEditor();
+            editor.LoadFile(path);
+            return editor;
+        }
+
         // Default SOX viewer for other SOX files
         return new TextBlock
         {
             Text = $"SOX Editor: {fileName}",
             Margin = new Avalonia.Thickness(10)
         };
+    }
+
+    private static bool IsTextSoxFile(string path)
+    {
+        var dir = Path.GetDirectoryName(path) ?? "";
+        var dirName = Path.GetFileName(dir);
+
+        // Text SOX files are in language subdirectories like ENG, FRA, GER, etc.
+        var languageDirs = new[] { "ENG", "FRA", "GER", "ITA", "SPA", "KOR", "JPN", "CHT", "CHS" };
+        return languageDirs.Contains(dirName, StringComparer.OrdinalIgnoreCase);
     }
 
     private Control CreateMissionEditor(string path)
