@@ -26,6 +26,7 @@ public partial class KUFEditor : Window
     private BackupManager? backupManager;
     private bool _infoPanelCollapsed;
     private double _infoPanelWidth = 300;
+    private NativeMenuItem? _infoPanelMenuItem;
 
     public KUFEditor()
     {
@@ -43,6 +44,7 @@ public partial class KUFEditor : Window
         }
         backupManager = new BackupManager(backupDir);
 
+        SetupNativeMenu();
         SetupUI();
 
         // setup memory monitoring
@@ -54,6 +56,55 @@ public partial class KUFEditor : Window
 
         // show game location dialog on startup
         Loaded += OnWindowLoaded;
+    }
+
+    private void SetupNativeMenu()
+    {
+        var menu = new NativeMenu();
+
+        // File menu
+        var fileMenu = new NativeMenuItem("File");
+        var fileSubMenu = new NativeMenu();
+
+        var newItem = new NativeMenuItem("New");
+        newItem.Click += (s, e) => OnNewFile(s, new RoutedEventArgs());
+        fileSubMenu.Add(newItem);
+
+        var openItem = new NativeMenuItem("Open...");
+        openItem.Click += (s, e) => OnOpenFile(s, new RoutedEventArgs());
+        fileSubMenu.Add(openItem);
+
+        var openFolderItem = new NativeMenuItem("Open Folder...");
+        openFolderItem.Click += (s, e) => OnOpenFolder(s, new RoutedEventArgs());
+        fileSubMenu.Add(openFolderItem);
+
+        fileSubMenu.Add(new NativeMenuItemSeparator());
+
+        var saveItem = new NativeMenuItem("Save");
+        saveItem.Click += (s, e) => OnSave(s, new RoutedEventArgs());
+        fileSubMenu.Add(saveItem);
+
+        var saveAsItem = new NativeMenuItem("Save As...");
+        saveAsItem.Click += (s, e) => OnSaveAs(s, new RoutedEventArgs());
+        fileSubMenu.Add(saveAsItem);
+
+        fileMenu.Menu = fileSubMenu;
+        menu.Add(fileMenu);
+
+        // View menu
+        var viewMenu = new NativeMenuItem("View");
+        var viewSubMenu = new NativeMenu();
+
+        _infoPanelMenuItem = new NativeMenuItem("Info Panel");
+        _infoPanelMenuItem.ToggleType = NativeMenuItemToggleType.CheckBox;
+        _infoPanelMenuItem.IsChecked = !_infoPanelCollapsed;
+        _infoPanelMenuItem.Click += (s, e) => ToggleInfoPanel();
+        viewSubMenu.Add(_infoPanelMenuItem);
+
+        viewMenu.Menu = viewSubMenu;
+        menu.Add(viewMenu);
+
+        NativeMenu.SetMenu(this, menu);
     }
 
     private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
@@ -134,7 +185,6 @@ public partial class KUFEditor : Window
 
         if (infoPanel != null)
         {
-            infoPanel.CollapseRequested += (sender, args) => ToggleInfoPanel();
             infoPanel.FileRestored += (sender, path) =>
             {
                 // reload the file in editor if it's open
@@ -150,21 +200,41 @@ public partial class KUFEditor : Window
     {
         var container = this.FindControl<Border>("InfoPanelContainer");
         var splitter = this.FindControl<GridSplitter>("InfoPanelSplitter");
+        var mainGrid = this.FindControl<Grid>("MainGrid");
 
-        if (container == null) return;
+        if (container == null || mainGrid == null) return;
 
         _infoPanelCollapsed = !_infoPanelCollapsed;
+
+        // update menu checkmark
+        if (_infoPanelMenuItem != null)
+        {
+            _infoPanelMenuItem.IsChecked = !_infoPanelCollapsed;
+        }
+
+        // Column 3 is the splitter, Column 4 is the info panel
+        var splitterColumn = mainGrid.ColumnDefinitions[3];
+        var infoPanelColumn = mainGrid.ColumnDefinitions[4];
 
         if (_infoPanelCollapsed)
         {
             container.IsVisible = false;
             if (splitter != null) splitter.IsVisible = false;
+            splitterColumn.Width = new GridLength(0);
+            infoPanelColumn.Width = new GridLength(0);
         }
         else
         {
             container.IsVisible = true;
             if (splitter != null) splitter.IsVisible = true;
+            splitterColumn.Width = new GridLength(8);
+            infoPanelColumn.Width = new GridLength(_infoPanelWidth);
         }
+    }
+
+    private void OnToggleInfoPanel(object? sender, EventArgs e)
+    {
+        ToggleInfoPanel();
     }
 
     private async void OnNewFile(object? sender, RoutedEventArgs e)
@@ -261,11 +331,6 @@ public partial class KUFEditor : Window
         {
             container.IsVisible = !container.IsVisible;
         }
-    }
-
-    private void OnToggleInfoPanel(object? sender, RoutedEventArgs e)
-    {
-        ToggleInfoPanel();
     }
 
     private void OnThemeChange(object? sender, RoutedEventArgs e)

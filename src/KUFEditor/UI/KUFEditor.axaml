@@ -69,13 +69,13 @@
 
         <!-- Main Content Area -->
         <Panel Margin="4">
-            <Grid>
+            <Grid Name="MainGrid">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="280" MinWidth="200"/>
                     <ColumnDefinition Width="8"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="300" MinWidth="200"/>
+                    <ColumnDefinition Width="300" MinWidth="0"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>

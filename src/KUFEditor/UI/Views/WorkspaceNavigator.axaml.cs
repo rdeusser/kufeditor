@@ -100,10 +100,16 @@ public partial class WorkspaceNavigator : UserControl
 
     private void OnGameSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
+        if (_settings == null) return;
+
         var combo = sender as ComboBox;
         var selected = combo?.SelectedItem as ComboBoxItem;
 
-        if (selected?.Content is string gameName)
+        if (selected == null) return;
+
+        // Get the game name from the ComboBoxItem content
+        var gameName = selected.Content?.ToString();
+        if (!string.IsNullOrEmpty(gameName))
         {
             LoadGame(gameName);
         }

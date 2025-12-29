@@ -64,7 +64,7 @@
         <Style Selector="Expander">
             <Setter Property="IsExpanded" Value="True"/>
             <Setter Property="Padding" Value="0"/>
-            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
         </Style>
 
         <Style Selector="Expander /template/ ToggleButton#PART_toggle">
@@ -95,8 +95,8 @@
         <!-- File Categories -->
         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto"
-                      Margin="8,0">
-            <StackPanel Margin="4,0,4,8">
+                      Margin="8,0,8,8">
+            <StackPanel Spacing="8">
                 <!-- SOX Files -->
                 <Expander Name="SoxExpander">
                     <Expander.Header>

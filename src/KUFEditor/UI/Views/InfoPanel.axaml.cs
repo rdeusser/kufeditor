@@ -15,7 +15,6 @@ public partial class InfoPanel : UserControl
 
     public ObservableCollection<SnapshotInfo> Snapshots { get; } = new();
 
-    public event EventHandler? CollapseRequested;
     public event EventHandler<string>? FileRestored;
 
     public InfoPanel()
@@ -150,11 +149,6 @@ public partial class InfoPanel : UserControl
         {
             restoreButton.IsEnabled = list?.SelectedItem != null;
         }
-    }
-
-    private void OnCollapseClick(object? sender, RoutedEventArgs e)
-    {
-        CollapseRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnRestorePristine(object? sender, RoutedEventArgs e)

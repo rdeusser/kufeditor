@@ -79,30 +79,16 @@
     </UserControl.Styles>
 
     <DockPanel>
-        <!-- Header with collapse button -->
+        <!-- Header -->
         <Border DockPanel.Dock="Top"
                 Background="Transparent"
                 Padding="16,16,16,12">
-            <DockPanel>
-                <Button DockPanel.Dock="Right"
-                        Name="CollapseButton"
-                        Content="›"
-                        FontSize="16"
-                        FontWeight="Bold"
-                        Width="28"
-                        Height="28"
-                        Padding="0"
-                        Background="Transparent"
-                        BorderThickness="0"
-                        ToolTip.Tip="Collapse panel"
-                        Click="OnCollapseClick"/>
-                <TextBlock Text="INFO"
-                           FontSize="11"
-                           FontWeight="Bold"
-                           Opacity="0.6"
-                           LetterSpacing="0.8"
-                           VerticalAlignment="Center"/>
-            </DockPanel>
+            <TextBlock Text="INFO"
+                       FontSize="11"
+                       FontWeight="Bold"
+                       Opacity="0.6"
+                       LetterSpacing="0.8"
+                       VerticalAlignment="Center"/>
         </Border>
 
         <!-- Content -->
