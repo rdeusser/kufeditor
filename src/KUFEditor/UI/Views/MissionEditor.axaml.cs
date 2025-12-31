@@ -227,13 +227,53 @@ public partial class MissionEditor : UserControl
 
         try
         {
-            // Save is not yet implemented
-            Console.WriteLine("Save not yet implemented");
+            // Save current troop properties before saving
+            SaveCurrentTroopProperties();
+
+            MissionFile.Save(_mission);
+            Console.WriteLine("Mission saved successfully");
+
+            // Reload hex view to show changes
+            LoadHexView(_filePath);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error saving: {ex.Message}");
         }
+    }
+
+    private void SaveCurrentTroopProperties()
+    {
+        if (_selectedTroop == null) return;
+
+        // Read values from UI controls back to the selected troop
+        _selectedTroop.InternalName = this.FindControl<TextBox>("InternalNameText")?.Text ?? _selectedTroop.InternalName;
+        _selectedTroop.IsHero = this.FindControl<CheckBox>("IsHeroCheck")?.IsChecked ?? _selectedTroop.IsHero;
+        _selectedTroop.IsEnabled = this.FindControl<CheckBox>("IsEnabledCheck")?.IsChecked ?? _selectedTroop.IsEnabled;
+
+        // Category
+        var categoryCombo = this.FindControl<ComboBox>("CategoryCombo");
+        if (categoryCombo?.SelectedItem != null)
+        {
+            dynamic item = categoryCombo.SelectedItem;
+            _selectedTroop.Category = (UnitCategory)item.Value;
+        }
+
+        // Allegiance
+        var allegianceCombo = this.FindControl<ComboBox>("AllegianceCombo");
+        if (allegianceCombo?.SelectedItem != null)
+        {
+            dynamic item = allegianceCombo.SelectedItem;
+            _selectedTroop.Allegiance = (UnitAllegiance)item.Value;
+        }
+
+        // Position and HP
+        _selectedTroop.PositionX = (float)(this.FindControl<NumericUpDown>("PositionX")?.Value ?? (decimal)_selectedTroop.PositionX);
+        _selectedTroop.PositionY = (float)(this.FindControl<NumericUpDown>("PositionY")?.Value ?? (decimal)_selectedTroop.PositionY);
+        _selectedTroop.Facing = (byte)(this.FindControl<NumericUpDown>("Facing")?.Value ?? _selectedTroop.Facing);
+        _selectedTroop.LeaderHP = (float)(this.FindControl<NumericUpDown>("LeaderHP")?.Value ?? (decimal)_selectedTroop.LeaderHP);
+        _selectedTroop.UnitHP = (float)(this.FindControl<NumericUpDown>("UnitHP")?.Value ?? (decimal)_selectedTroop.UnitHP);
+        _selectedTroop.SkillPoints = (float)(this.FindControl<NumericUpDown>("SkillPoints")?.Value ?? (decimal)_selectedTroop.SkillPoints);
     }
 
     private void OnReload(object? sender, RoutedEventArgs e)

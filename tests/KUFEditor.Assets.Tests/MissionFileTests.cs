@@ -136,11 +136,11 @@ public class MissionFileTests : IDisposable
     }
 
     [Fact]
-    public void Save_ThrowsNotImplemented()
+    public void Save_ThrowsWhenNoRawData()
     {
         var mission = new MissionData();
 
-        Assert.Throws<NotImplementedException>(() => MissionFile.Save(mission));
+        Assert.Throws<InvalidOperationException>(() => MissionFile.Save(mission));
     }
 
     // ===== Data Model Tests =====
@@ -253,8 +253,11 @@ public class MissionFileTests : IDisposable
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms, Encoding.ASCII);
 
-        // Write some padding before the troop block
-        writer.Write(new byte[10]);
+        // Write some header padding
+        writer.Write(new byte[9]);
+
+        // Troop count (1 byte) - immediately before first troop name
+        writer.Write((byte)1);
 
         // Write 32-byte internal name
         var nameBytes = new byte[32];
@@ -265,7 +268,7 @@ public class MissionFileTests : IDisposable
         // Unique ID
         writer.Write(uniqueId);
 
-        // Category (1 byte for simplicity)
+        // Category (1 byte - Heroes format)
         writer.Write((byte)category);
 
         // Allegiance
@@ -277,8 +280,39 @@ public class MissionFileTests : IDisposable
         // IsEnabled
         writer.Write((byte)(isEnabled ? 1 : 0));
 
-        // Parser needs at least 64 bytes after name start to parse
-        writer.Write(new byte[100]);
+        // HP overrides (2 floats)
+        writer.Write(-1.0f);
+        writer.Write(-1.0f);
+
+        // Leader: AnimId, ModelId, WorldmapId, Level
+        writer.Write((byte)0x20);
+        writer.Write((byte)0x01);
+        writer.Write((byte)0xFF);
+        writer.Write((byte)1);
+
+        // Leader skills (4 x 2 bytes)
+        writer.Write(new byte[8]);
+
+        // Officers (2 x 12 bytes)
+        writer.Write(new byte[24]);
+
+        // Unit troop data (6 bytes)
+        writer.Write(new byte[6]);
+
+        // Position X, Y (2 floats) + Facing (1 byte)
+        writer.Write(1000.0f);
+        writer.Write(2000.0f);
+        writer.Write((byte)0);
+
+        // Flag bearer, flag model (2 bytes)
+        writer.Write((byte)0);
+        writer.Write((byte)0);
+
+        // Skill points (float)
+        writer.Write(100.0f);
+
+        // Padding to ensure enough data
+        writer.Write(new byte[50]);
 
         File.WriteAllBytes(filePath, ms.ToArray());
         return filePath;
@@ -291,26 +325,66 @@ public class MissionFileTests : IDisposable
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms, Encoding.ASCII);
 
+        // Header padding
+        writer.Write(new byte[9]);
+
+        // Troop count
+        writer.Write((byte)names.Length);
+
+        byte uniqueId = 1;
         foreach (var name in names)
         {
-            // Some padding between troops (need >64 bytes total after name start)
-            writer.Write(new byte[100]);
-
             // Write 32-byte internal name
             var nameBytes = new byte[32];
             var srcBytes = Encoding.ASCII.GetBytes(name);
             Array.Copy(srcBytes, nameBytes, Math.Min(srcBytes.Length, 32));
             writer.Write(nameBytes);
 
-            // Basic troop data
-            writer.Write((byte)1);  // Unique ID
-            writer.Write((byte)1);  // Category
-            writer.Write((byte)0);  // Allegiance
-            writer.Write((byte)0);  // IsHero
-            writer.Write((byte)1);  // IsEnabled
+            // Unique ID
+            writer.Write(uniqueId++);
 
-            // Padding after troop data (ensure parser has enough bytes)
-            writer.Write(new byte[100]);
+            // Category (1 byte - Heroes format)
+            writer.Write((byte)1);
+
+            // Allegiance
+            writer.Write((byte)0);
+
+            // IsHero
+            writer.Write((byte)0);
+
+            // IsEnabled
+            writer.Write((byte)1);
+
+            // HP overrides (2 floats)
+            writer.Write(-1.0f);
+            writer.Write(-1.0f);
+
+            // Leader: AnimId, ModelId, WorldmapId, Level
+            writer.Write((byte)0x20);
+            writer.Write((byte)0x01);
+            writer.Write((byte)0xFF);
+            writer.Write((byte)1);
+
+            // Leader skills (4 x 2 bytes)
+            writer.Write(new byte[8]);
+
+            // Officers (2 x 12 bytes)
+            writer.Write(new byte[24]);
+
+            // Unit troop data (6 bytes)
+            writer.Write(new byte[6]);
+
+            // Position X, Y (2 floats) + Facing (1 byte)
+            writer.Write(1000.0f);
+            writer.Write(2000.0f);
+            writer.Write((byte)0);
+
+            // Flag bearer, flag model (2 bytes)
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+
+            // Skill points (float)
+            writer.Write(100.0f);
         }
 
         // Trailing padding

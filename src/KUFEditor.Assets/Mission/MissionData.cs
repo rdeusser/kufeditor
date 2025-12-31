@@ -9,6 +9,11 @@ public class MissionData
 {
     public string FilePath { get; set; } = string.Empty;
     public ObservableCollection<TroopBlock> Troops { get; set; } = new();
+
+    /// <summary>
+    /// Raw file bytes for patch-based saving.
+    /// </summary>
+    public byte[] RawData { get; set; } = Array.Empty<byte>();
 }
 
 /// <summary>
@@ -59,6 +64,31 @@ public class TroopBlock
 
     // Extra Stats (optional, 88 bytes = 22 floats)
     public ExtraStats? ExtraStats { get; set; }
+
+    /// <summary>
+    /// Byte offsets for patch-based saving.
+    /// </summary>
+    public TroopOffsets Offsets { get; set; } = new();
+}
+
+/// <summary>
+/// Tracks byte offsets for each field in a troop block.
+/// </summary>
+public class TroopOffsets
+{
+    public int InternalName { get; set; } = -1;
+    public int UniqueId { get; set; } = -1;
+    public int Category { get; set; } = -1;
+    public int CategorySize { get; set; } = 1;
+    public int Allegiance { get; set; } = -1;
+    public int IsHero { get; set; } = -1;
+    public int IsEnabled { get; set; } = -1;
+    public int LeaderHP { get; set; } = -1;
+    public int UnitHP { get; set; } = -1;
+    public int PositionX { get; set; } = -1;
+    public int PositionY { get; set; } = -1;
+    public int Facing { get; set; } = -1;
+    public int SkillPoints { get; set; } = -1;
 }
 
 /// <summary>
