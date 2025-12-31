@@ -1,0 +1,7 @@
+# Dossier Configuration
+# See https://github.com/rdeusser/dossier for documentation
+
+output:
+    format: xml
+project:
+    name: kufeditor
