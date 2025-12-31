@@ -269,17 +269,22 @@
                               CanUserSortColumns="True"
                               GridLinesVisibility="None"
                               SelectionMode="Single"
-                              HeadersVisibility="Column">
+                              HeadersVisibility="Column"
+                              x:CompileBindings="False">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="#"
+                                                Binding="{Binding Index}"
                                                 Width="50"
                                                 IsReadOnly="True"/>
                             <DataGridTextColumn Header="Name"
+                                                Binding="{Binding Name}"
                                                 Width="*"
                                                 IsReadOnly="True"/>
                             <DataGridTextColumn Header="Job"
+                                                Binding="{Binding Job}"
                                                 Width="70"/>
                             <DataGridTextColumn Header="Type"
+                                                Binding="{Binding TypeID}"
                                                 Width="70"/>
                         </DataGrid.Columns>
                     </DataGrid>

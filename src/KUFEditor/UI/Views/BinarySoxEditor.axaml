@@ -1,0 +1,165 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+             x:Class="KUFEditor.UI.Views.BinarySoxEditor">
+
+    <UserControl.Resources>
+        <Color x:Key="PanelBackground">#252526</Color>
+        <Color x:Key="SurfaceBackground">#333337</Color>
+        <Color x:Key="ThemeControlBorderColor">#505050</Color>
+        <Color x:Key="SecondaryTextColor">#A0FFFFFF</Color>
+        <Color x:Key="TertiaryTextColor">#60FFFFFF</Color>
+
+        <SolidColorBrush x:Key="PanelBackgroundBrush" Color="{StaticResource PanelBackground}"/>
+        <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource SurfaceBackground}"/>
+        <SolidColorBrush x:Key="ThemeControlBorderBrush" Color="{StaticResource ThemeControlBorderColor}"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}"/>
+        <SolidColorBrush x:Key="TertiaryTextBrush" Color="{StaticResource TertiaryTextColor}"/>
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <Style Selector="Button.toolbar-button">
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="MinWidth" Value="80"/>
+        </Style>
+
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top"
+                Background="{StaticResource PanelBackgroundBrush}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                Padding="12,8"
+                Height="44">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                    <Button Name="SaveButton" Classes="toolbar-button primary" Content="Save"/>
+                    <Button Name="ReloadButton" Classes="toolbar-button" Content="Reload"/>
+                    <Button Name="BackupButton" Classes="toolbar-button" Content="Backup"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Name="FileNameText" Text="No file loaded"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Foreground="{StaticResource SecondaryTextBrush}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main Content -->
+        <Grid Margin="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: File Info & Byte Editor -->
+            <Border Grid.Column="0"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                    Padding="12">
+                <StackPanel Spacing="16">
+                    <!-- File Info -->
+                    <StackPanel>
+                        <TextBlock Text="FILE INFO" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TertiaryTextBrush}" Margin="0,0,0,8"/>
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Version:" FontSize="12" Margin="0,0,8,4"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Name="InfoVersion" Text="-" FontSize="12" FontWeight="Bold"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Count:" FontSize="12" Margin="0,0,8,4"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Name="InfoCount" Text="-" FontSize="12" FontWeight="Bold"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Record Size:" FontSize="12" Margin="0,0,8,4"/>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Name="InfoRecordSize" Text="-" FontSize="12" FontWeight="Bold"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="File Size:" FontSize="12" Margin="0,0,8,4"/>
+                            <TextBlock Grid.Row="3" Grid.Column="1" Name="InfoFileSize" Text="-" FontSize="12" FontWeight="Bold"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- Byte Editor -->
+                    <StackPanel>
+                        <TextBlock Text="BYTE EDITOR" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TertiaryTextBrush}" Margin="0,0,0,8"/>
+
+                        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Offset:" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" Name="EditOffset" Text="0x0000" FontSize="12" Margin="0,0,8,8"/>
+                            <Button Grid.Row="0" Grid.Column="2" Name="GoToOffsetButton" Content="Go" Classes="toolbar-button" Margin="0,0,0,8"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Value:" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Name="EditValue" Text="0x00" FontSize="12" Margin="0,0,8,8"/>
+                            <Button Grid.Row="1" Grid.Column="2" Name="SetByteButton" Content="Set" Classes="toolbar-button" Margin="0,0,0,8"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Current:" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Name="CurrentValue" Text="-" FontSize="12" FontWeight="Bold"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- Record Navigator -->
+                    <StackPanel>
+                        <TextBlock Text="RECORD NAVIGATOR" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TertiaryTextBrush}" Margin="0,0,0,8"/>
+
+                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Record #:" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <NumericUpDown Grid.Row="0" Grid.Column="1" Name="RecordNumber" Minimum="0" Value="0" FontSize="12" Margin="0,0,8,8"/>
+                            <Button Grid.Row="0" Grid.Column="2" Name="GoToRecordButton" Content="Go" Classes="toolbar-button" Margin="0,0,0,8"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Offset:" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Name="RecordOffset" Text="-" FontSize="12" FontWeight="Bold"/>
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Splitter -->
+            <GridSplitter Grid.Column="1" Background="Transparent" ResizeDirection="Columns"/>
+
+            <!-- Right: Hex View -->
+            <Border Grid.Column="2"
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                    Padding="12">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="HEX VIEW" FontSize="11" FontWeight="SemiBold"
+                               Foreground="{StaticResource TertiaryTextBrush}" Margin="0,0,0,8"/>
+
+                    <TextBox Name="HexView"
+                             AcceptsReturn="True"
+                             IsReadOnly="True"
+                             FontFamily="Consolas, Menlo, monospace"
+                             FontSize="11"
+                             Background="Transparent"
+                             BorderThickness="0"/>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

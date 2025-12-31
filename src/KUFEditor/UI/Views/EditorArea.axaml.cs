@@ -125,12 +125,10 @@ public partial class EditorArea : UserControl
             return editor;
         }
 
-        // Default SOX viewer for other SOX files
-        return new TextBlock
-        {
-            Text = $"SOX Editor: {fileName}",
-            Margin = new Avalonia.Thickness(10)
-        };
+        // Default binary SOX editor for other SOX files
+        var binaryEditor = new BinarySoxEditor();
+        binaryEditor.LoadFile(path);
+        return binaryEditor;
     }
 
     private static bool IsTextSoxFile(string path)
