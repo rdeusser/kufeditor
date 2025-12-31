@@ -232,7 +232,7 @@ public partial class KUFEditor : Window
         }
     }
 
-    private void OnToggleInfoPanel(object? sender, EventArgs e)
+    private void OnToggleInfoPanel(object? sender, RoutedEventArgs e)
     {
         ToggleInfoPanel();
     }

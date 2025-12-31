@@ -5,54 +5,80 @@
              mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="500"
              x:Class="KUFEditor.UI.Views.InfoPanel">
 
+    <UserControl.Resources>
+        <!-- Ryujinx Dark Theme Colors -->
+        <Color x:Key="ThemeContentBackgroundColor">#2D2D2D</Color>
+        <Color x:Key="ThemeControlBorderColor">#505050</Color>
+        <Color x:Key="SecondaryTextColor">#A0FFFFFF</Color>
+        <Color x:Key="TertiaryTextColor">#60FFFFFF</Color>
+        <Color x:Key="SurfaceBackground">#333337</Color>
+        <Color x:Key="AppListBackgroundColor">#0FFFFFFF</Color>
+        <Color x:Key="AppListHoverBackgroundColor">#1EFFFFFF</Color>
+
+        <SolidColorBrush x:Key="ThemeControlBorderBrush" Color="{StaticResource ThemeControlBorderColor}"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}"/>
+        <SolidColorBrush x:Key="TertiaryTextBrush" Color="{StaticResource TertiaryTextColor}"/>
+        <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource SurfaceBackground}"/>
+        <SolidColorBrush x:Key="AppListBackgroundBrush" Color="{StaticResource AppListBackgroundColor}"/>
+        <SolidColorBrush x:Key="AppListHoverBackgroundBrush" Color="{StaticResource AppListHoverBackgroundColor}"/>
+    </UserControl.Resources>
+
     <UserControl.Styles>
+        <!-- Section header -->
         <Style Selector="TextBlock.section-header">
             <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Opacity" Value="0.6"/>
-            <Setter Property="LetterSpacing" Value="0.8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+            <Setter Property="LetterSpacing" Value="0.5"/>
             <Setter Property="Margin" Value="0,0,0,12"/>
         </Style>
 
+        <!-- Field label -->
         <Style Selector="TextBlock.field-label">
             <Setter Property="FontSize" Value="11"/>
-            <Setter Property="Opacity" Value="0.6"/>
-            <Setter Property="Margin" Value="0,0,0,2"/>
+            <Setter Property="Foreground" Value="{StaticResource TertiaryTextBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
         </Style>
 
+        <!-- Field value -->
         <Style Selector="TextBlock.field-value">
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="Margin" Value="0,0,0,12"/>
         </Style>
 
+        <!-- Snapshot item card -->
         <Style Selector="Border.snapshot-item">
-            <Setter Property="Background" Value="#15FFFFFF"/>
-            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="{StaticResource AppListBackgroundBrush}"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="12,10"/>
             <Setter Property="Margin" Value="0,0,0,6"/>
         </Style>
 
         <Style Selector="Border.snapshot-item:pointerover">
-            <Setter Property="Background" Value="#25FFFFFF"/>
+            <Setter Property="Background" Value="{StaticResource AppListHoverBackgroundBrush}"/>
         </Style>
 
+        <!-- Action button -->
         <Style Selector="Button.action-button">
-            <Setter Property="Padding" Value="16,8"/>
-            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="FontWeight" Value="Medium"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="MinWidth" Value="80"/>
         </Style>
 
         <Style Selector="Button.action-button:pointerover">
-            <Setter Property="Background" Value="#30FFFFFF"/>
+            <Setter Property="Background" Value="#3D3D3D"/>
         </Style>
 
+        <!-- Primary button -->
         <Style Selector="Button.primary">
             <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
@@ -63,6 +89,7 @@
             <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight1}"/>
         </Style>
 
+        <!-- ListBox -->
         <Style Selector="ListBox">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -71,9 +98,14 @@
         <Style Selector="ListBoxItem">
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0"/>
+            <Setter Property="CornerRadius" Value="4"/>
         </Style>
 
         <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent"/>
         </Style>
     </UserControl.Styles>
@@ -82,13 +114,13 @@
         <!-- Header -->
         <Border DockPanel.Dock="Top"
                 Background="Transparent"
-                Padding="16,16,16,12">
-            <TextBlock Text="INFO"
-                       FontSize="11"
-                       FontWeight="Bold"
-                       Opacity="0.6"
-                       LetterSpacing="0.8"
-                       VerticalAlignment="Center"/>
+                Padding="16,12,16,8">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="ℹ" FontSize="12" Margin="0,0,8,0" Foreground="{StaticResource SecondaryTextBrush}"/>
+                <TextBlock Text="INFO"
+                           Classes="section-header"
+                           Margin="0"/>
+            </StackPanel>
         </Border>
 
         <!-- Content -->
@@ -99,14 +131,18 @@
                 <!-- No file selected message -->
                 <TextBlock Name="NoFileMessage"
                            Text="Select a file to view details"
-                           Opacity="0.5"
+                           Foreground="{StaticResource TertiaryTextBrush}"
                            FontStyle="Italic"
+                           FontSize="12"
                            TextAlignment="Center"
-                           Margin="0,20"/>
+                           Margin="0,24"/>
 
                 <!-- File Info Section -->
                 <StackPanel Name="FileInfoSection" IsVisible="False">
-                    <TextBlock Text="FILE" Classes="section-header"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="📄" FontSize="11" Margin="0,0,8,0" Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Text="FILE" Classes="section-header" Margin="0"/>
+                    </StackPanel>
 
                     <TextBlock Text="Name" Classes="field-label"/>
                     <TextBlock Name="FileName" Text="-" Classes="field-value"/>
@@ -125,8 +161,11 @@
                 </StackPanel>
 
                 <!-- Snapshots Section -->
-                <StackPanel Name="SnapshotsSection" IsVisible="False" Margin="0,16,0,0">
-                    <TextBlock Text="SNAPSHOTS" Classes="section-header"/>
+                <StackPanel Name="SnapshotsSection" IsVisible="False" Margin="0,8,0,0">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="🕒" FontSize="11" Margin="0,0,8,0" Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Text="SNAPSHOTS" Classes="section-header" Margin="0"/>
+                    </StackPanel>
 
                     <!-- Snapshot List -->
                     <ListBox Name="SnapshotList"
@@ -135,31 +174,30 @@
                     <!-- No snapshots message -->
                     <TextBlock Name="NoSnapshotsMessage"
                                Text="No snapshots for this file"
-                               Opacity="0.5"
+                               Foreground="{StaticResource TertiaryTextBrush}"
                                FontStyle="Italic"
+                               FontSize="12"
                                Margin="0,0,0,12"/>
 
-                    <!-- Restore from pristine -->
-                    <Button Name="RestorePristineButton"
-                            Content="Restore Original"
-                            Classes="action-button"
-                            ToolTip.Tip="Restore from pristine backup"
-                            Click="OnRestorePristine"
-                            Margin="0,0,0,8"/>
+                    <!-- Action buttons -->
+                    <StackPanel Spacing="8">
+                        <Button Name="RestorePristineButton"
+                                Classes="action-button"
+                                ToolTip.Tip="Restore from pristine backup"
+                                Click="OnRestorePristine"
+                                Content="↻ Restore Original"/>
 
-                    <!-- Restore selected snapshot -->
-                    <Button Name="RestoreSnapshotButton"
-                            Content="Restore Selected"
-                            Classes="action-button"
-                            IsEnabled="False"
-                            Click="OnRestoreSnapshot"
-                            Margin="0,0,0,8"/>
+                        <Button Name="RestoreSnapshotButton"
+                                Classes="action-button"
+                                IsEnabled="False"
+                                Click="OnRestoreSnapshot"
+                                Content="↩ Restore Selected"/>
 
-                    <!-- Create new snapshot -->
-                    <Button Name="NewSnapshotButton"
-                            Content="New Snapshot"
-                            Classes="action-button primary"
-                            Click="OnNewSnapshot"/>
+                        <Button Name="NewSnapshotButton"
+                                Classes="action-button primary"
+                                Click="OnNewSnapshot"
+                                Content="+ New Snapshot"/>
+                    </StackPanel>
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>

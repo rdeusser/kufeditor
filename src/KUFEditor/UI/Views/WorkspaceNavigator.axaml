@@ -5,80 +5,135 @@
              mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
              x:Class="KUFEditor.UI.Views.WorkspaceNavigator">
 
+    <UserControl.Resources>
+        <!-- Ryujinx Dark Theme Colors -->
+        <Color x:Key="ThemeContentBackgroundColor">#2D2D2D</Color>
+        <Color x:Key="ThemeControlBorderColor">#505050</Color>
+        <Color x:Key="SecondaryTextColor">#A0FFFFFF</Color>
+        <Color x:Key="AppListBackgroundColor">#0FFFFFFF</Color>
+        <Color x:Key="AppListHoverBackgroundColor">#1EFFFFFF</Color>
+        <Color x:Key="SurfaceBackground">#333337</Color>
+
+        <SolidColorBrush x:Key="ThemeControlBorderBrush" Color="{StaticResource ThemeControlBorderColor}"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}"/>
+        <SolidColorBrush x:Key="AppListBackgroundBrush" Color="{StaticResource AppListBackgroundColor}"/>
+        <SolidColorBrush x:Key="AppListHoverBackgroundBrush" Color="{StaticResource AppListHoverBackgroundColor}"/>
+        <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource SurfaceBackground}"/>
+    </UserControl.Resources>
+
     <UserControl.Styles>
+        <!-- Game selector dropdown -->
         <Style Selector="ComboBox.game-selector">
-            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="12,8"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
-            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
         </Style>
 
         <Style Selector="ComboBox.game-selector:pointerover /template/ Border#Background">
-            <Setter Property="Background" Value="#30FFFFFF"/>
+            <Setter Property="Background" Value="#3D3D3D"/>
         </Style>
 
+        <!-- TreeView items -->
         <Style Selector="TreeViewItem">
             <Setter Property="IsExpanded" Value="False"/>
             <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,1"/>
+        </Style>
+
+        <Style Selector="TreeViewItem /template/ Border#PART_LayoutRoot">
+            <Setter Property="CornerRadius" Value="4"/>
         </Style>
 
         <Style Selector="TreeViewItem:pointerover /template/ Border#PART_LayoutRoot">
-            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight3}"/>
-            <Setter Property="CornerRadius" Value="5"/>
-            <Setter Property="Opacity" Value="0.6"/>
+            <Setter Property="Background" Value="{StaticResource AppListHoverBackgroundBrush}"/>
         </Style>
 
         <Style Selector="TreeViewItem:selected /template/ Border#PART_LayoutRoot">
-            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight2}"/>
-            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
         </Style>
 
+        <!-- Category header text -->
         <Style Selector="TextBlock.category-header">
             <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Opacity" Value="0.6"/>
-            <Setter Property="LetterSpacing" Value="0.8"/>
-            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+            <Setter Property="LetterSpacing" Value="0.5"/>
         </Style>
 
+        <!-- Search box -->
         <Style Selector="TextBox.search-box">
             <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="10,8"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
-            <Setter Property="Background" Value="#20FFFFFF"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
         </Style>
 
         <Style Selector="TextBox.search-box:focus /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Background" Value="#20FFFFFF"/>
         </Style>
 
+        <!-- Expander styling -->
         <Style Selector="Expander">
             <Setter Property="IsExpanded" Value="True"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="Background" Value="Transparent"/>
         </Style>
 
-        <Style Selector="Expander /template/ ToggleButton#PART_toggle">
-            <Setter Property="Padding" Value="8,6"/>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Background" Value="{StaticResource AppListBackgroundBrush}"/>
+            <Setter Property="CornerRadius" Value="4"/>
+        </Style>
+
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover">
+            <Setter Property="Background" Value="{StaticResource AppListHoverBackgroundBrush}"/>
+        </Style>
+
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader /template/ Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="CornerRadius" Value="4"/>
+        </Style>
+
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style Selector="Expander /template/ Border">
+            <Setter Property="Background" Value="Transparent"/>
         </Style>
     </UserControl.Styles>
 
     <DockPanel>
+        <!-- Header with title -->
+        <Border DockPanel.Dock="Top"
+                Padding="12,10,12,8">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="📁" FontSize="12" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}"/>
+                <TextBlock Text="WORKSPACE"
+                           Classes="category-header"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
         <!-- Game Selector -->
         <Border DockPanel.Dock="Top"
-                Padding="12,12,12,8">
+                Padding="12,4,12,8">
             <ComboBox Name="GameSelector"
-                      Classes="game-selector"
-                      SelectedIndex="0">
+                      Classes="game-selector">
                 <ComboBoxItem Content="Crusaders"/>
                 <ComboBoxItem Content="Heroes"/>
             </ComboBox>
@@ -100,31 +155,40 @@
                 <!-- SOX Files -->
                 <Expander Name="SoxExpander">
                     <Expander.Header>
-                        <TextBlock Text="SOX FILES" Classes="category-header"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="📄" FontSize="11" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="SOX FILES" Classes="category-header" VerticalAlignment="Center"/>
+                        </StackPanel>
                     </Expander.Header>
                     <TreeView Name="SoxTree"
                               Background="Transparent"
-                              Margin="0,4,0,0"/>
+                              Margin="0,6,0,0"/>
                 </Expander>
 
                 <!-- Missions -->
                 <Expander Name="MissionsExpander">
                     <Expander.Header>
-                        <TextBlock Text="MISSIONS" Classes="category-header"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="🗺" FontSize="11" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="MISSIONS" Classes="category-header" VerticalAlignment="Center"/>
+                        </StackPanel>
                     </Expander.Header>
                     <TreeView Name="MissionsTree"
                               Background="Transparent"
-                              Margin="0,4,0,0"/>
+                              Margin="0,6,0,0"/>
                 </Expander>
 
                 <!-- Save Games -->
                 <Expander Name="SavesExpander">
                     <Expander.Header>
-                        <TextBlock Text="SAVE GAMES" Classes="category-header"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="💾" FontSize="11" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="SAVE GAMES" Classes="category-header" VerticalAlignment="Center"/>
+                        </StackPanel>
                     </Expander.Header>
                     <TreeView Name="SavesTree"
                               Background="Transparent"
-                              Margin="0,4,0,0"/>
+                              Margin="0,6,0,0"/>
                 </Expander>
             </StackPanel>
         </ScrollViewer>

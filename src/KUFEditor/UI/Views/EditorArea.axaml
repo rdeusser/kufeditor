@@ -5,6 +5,59 @@
              mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="450"
              xmlns:local="clr-namespace:KUFEditor.UI.Views"
              x:Class="KUFEditor.UI.Views.EditorArea">
+
+    <UserControl.Resources>
+        <!-- Ryujinx Dark Theme Colors -->
+        <Color x:Key="ThemeControlBorderColor">#505050</Color>
+        <Color x:Key="SecondaryTextColor">#A0FFFFFF</Color>
+        <Color x:Key="SurfaceBackground">#333337</Color>
+        <Color x:Key="AppListHoverBackgroundColor">#1EFFFFFF</Color>
+
+        <SolidColorBrush x:Key="ThemeControlBorderBrush" Color="{StaticResource ThemeControlBorderColor}"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}"/>
+        <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource SurfaceBackground}"/>
+        <SolidColorBrush x:Key="AppListHoverBackgroundBrush" Color="{StaticResource AppListHoverBackgroundColor}"/>
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <!-- Tab styling -->
+        <Style Selector="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style Selector="TabItem">
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="Margin" Value="0,0,2,0"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="CornerRadius" Value="4,4,0,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <Style Selector="TabItem:pointerover">
+            <Setter Property="Background" Value="{StaticResource AppListHoverBackgroundBrush}"/>
+        </Style>
+
+        <Style Selector="TabItem:selected">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <!-- Close button -->
+        <Style Selector="Button.close-button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style Selector="Button.close-button:pointerover">
+            <Setter Property="Background" Value="#40FF0000"/>
+        </Style>
+    </UserControl.Styles>
+
     <DockPanel>
         <TabControl Name="EditorTabs">
             <TabControl.ItemTemplate>
@@ -15,10 +68,13 @@
                                 Classes="close-button"
                                 Width="20"
                                 Height="20"
-                                Margin="4,0,0,0"
+                                Margin="6,0,0,0"
                                 Click="OnCloseTab"/>
-                        <TextBlock Text="{Binding Name}"
-                                   Margin="4,2"/>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="📄" FontSize="11" Margin="0,0,6,0"/>
+                            <TextBlock Text="{Binding Name}"
+                                       Margin="0,2"/>
+                        </StackPanel>
                     </DockPanel>
                 </DataTemplate>
             </TabControl.ItemTemplate>

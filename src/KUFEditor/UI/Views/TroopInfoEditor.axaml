@@ -5,23 +5,47 @@
              mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="600"
              x:Class="KUFEditor.UI.Views.TroopInfoEditor">
 
+    <UserControl.Resources>
+        <!-- Ryujinx Dark Theme Colors -->
+        <Color x:Key="ThemeContentBackgroundColor">#2D2D2D</Color>
+        <Color x:Key="ThemeControlBorderColor">#505050</Color>
+        <Color x:Key="SecondaryTextColor">#A0FFFFFF</Color>
+        <Color x:Key="TertiaryTextColor">#60FFFFFF</Color>
+        <Color x:Key="PanelBackground">#252526</Color>
+        <Color x:Key="SurfaceBackground">#333337</Color>
+        <Color x:Key="ElevatedBackground">#3D3D3D</Color>
+        <Color x:Key="AppListHoverBackgroundColor">#1EFFFFFF</Color>
+        <Color x:Key="DataGridSelectionColor">#00FABB</Color>
+
+        <SolidColorBrush x:Key="ThemeControlBorderBrush" Color="{StaticResource ThemeControlBorderColor}"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}"/>
+        <SolidColorBrush x:Key="TertiaryTextBrush" Color="{StaticResource TertiaryTextColor}"/>
+        <SolidColorBrush x:Key="PanelBackgroundBrush" Color="{StaticResource PanelBackground}"/>
+        <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource SurfaceBackground}"/>
+        <SolidColorBrush x:Key="ElevatedBackgroundBrush" Color="{StaticResource ElevatedBackground}"/>
+        <SolidColorBrush x:Key="AppListHoverBackgroundBrush" Color="{StaticResource AppListHoverBackgroundColor}"/>
+    </UserControl.Resources>
+
     <UserControl.Styles>
+        <!-- Toolbar button -->
         <Style Selector="Button.toolbar-button">
-            <Setter Property="Padding" Value="16,6"/>
+            <Setter Property="Padding" Value="12,6"/>
             <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
-            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}"/>
             <Setter Property="FontWeight" Value="Medium"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="Height" Value="28"/>
+            <Setter Property="MinWidth" Value="80"/>
         </Style>
 
         <Style Selector="Button.toolbar-button:pointerover">
-            <Setter Property="Background" Value="#30FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#40FFFFFF"/>
+            <Setter Property="Background" Value="{StaticResource ElevatedBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColorLight3}"/>
         </Style>
 
+        <!-- Primary button -->
         <Style Selector="Button.primary">
             <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
@@ -33,73 +57,95 @@
             <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColorLight1}"/>
         </Style>
 
+        <!-- DataGrid -->
         <Style Selector="DataGrid">
-            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
         </Style>
 
+        <Style Selector="DataGridRow /template/ Rectangle#BackgroundRectangle">
+            <Setter Property="RadiusX" Value="4"/>
+            <Setter Property="RadiusY" Value="4"/>
+        </Style>
+
         <Style Selector="DataGridRow:pointerover /template/ Rectangle#BackgroundRectangle">
-            <Setter Property="Fill" Value="{DynamicResource SystemAccentColorLight3}"/>
-            <Setter Property="Opacity" Value="0.3"/>
+            <Setter Property="Fill" Value="{StaticResource AppListHoverBackgroundBrush}"/>
         </Style>
 
         <Style Selector="DataGridRow:selected /template/ Rectangle#BackgroundRectangle">
-            <Setter Property="Fill" Value="{DynamicResource SystemAccentColorLight2}"/>
-            <Setter Property="Opacity" Value="0.6"/>
+            <Setter Property="Fill" Value="{DynamicResource SystemAccentColor}"/>
         </Style>
 
+        <Style Selector="DataGridColumnHeader">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+        </Style>
+
+        <Style Selector="DataGridCell">
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <!-- TabControl -->
         <Style Selector="TabControl">
             <Setter Property="Background" Value="Transparent"/>
         </Style>
 
         <Style Selector="TabItem">
-            <Setter Property="Padding" Value="16,10"/>
+            <Setter Property="Padding" Value="16,8"/>
             <Setter Property="Margin" Value="0,0,2,0"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="CornerRadius" Value="6,6,0,0"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="CornerRadius" Value="4,4,0,0"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
         </Style>
 
         <Style Selector="TabItem:pointerover">
-            <Setter Property="Background" Value="{DynamicResource SystemChromeHighColor}"/>
-            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="Background" Value="{StaticResource AppListHoverBackgroundBrush}"/>
         </Style>
 
         <Style Selector="TabItem:selected">
-            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight2}"/>
-            <Setter Property="Opacity" Value="1"/>
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
         </Style>
 
+        <!-- Section card -->
         <Style Selector="Border.section-card">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="CornerRadius" Value="0"/>
-            <Setter Property="Padding" Value="0,0,0,16"/>
-            <Setter Property="Margin" Value="0,0,0,16"/>
+            <Setter Property="Padding" Value="0,0,0,8"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
         </Style>
 
+        <!-- Section title -->
         <Style Selector="TextBlock.section-title">
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
             <Setter Property="Margin" Value="0,0,0,12"/>
-            <Setter Property="LetterSpacing" Value="0.3"/>
-            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="LetterSpacing" Value="0.5"/>
         </Style>
 
+        <!-- Field label -->
         <Style Selector="TextBlock.field-label">
             <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TertiaryTextBrush}"/>
             <Setter Property="LetterSpacing" Value="0.3"/>
         </Style>
 
+        <!-- NumericUpDown -->
         <Style Selector="NumericUpDown">
             <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
-            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
         </Style>
 
         <Style Selector="NumericUpDown:focus /template/ Border#PART_BorderElement">
@@ -107,19 +153,34 @@
             <Setter Property="BorderThickness" Value="1"/>
         </Style>
 
+        <!-- Slider -->
         <Style Selector="Slider">
             <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Search box -->
+        <Style Selector="TextBox.search-box">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style Selector="TextBox.search-box:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}"/>
         </Style>
     </UserControl.Styles>
 
     <DockPanel>
         <!-- Toolbar -->
         <Border DockPanel.Dock="Top"
-                Background="{DynamicResource SystemChromeLowColor}"
+                Background="{StaticResource PanelBackgroundBrush}"
                 BorderThickness="0,0,0,1"
-                BorderBrush="#20FFFFFF"
-                Padding="16,10"
-                Height="48">
+                BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                Padding="12,8"
+                Height="44">
             <Grid VerticalAlignment="Center">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -130,36 +191,36 @@
                 <!-- Left Actions -->
                 <StackPanel Grid.Column="0"
                            Orientation="Horizontal"
-                           Spacing="8"
+                           Spacing="6"
                            VerticalAlignment="Center">
                     <Button Name="SaveButton"
-                            Content="Save"
                             Classes="toolbar-button primary"
-                            Click="OnSave"/>
+                            Click="OnSave"
+                            Content="💾 Save"/>
                     <Button Name="BackupButton"
-                            Content="Backup"
                             Classes="toolbar-button"
-                            Click="OnBackup"/>
+                            Click="OnBackup"
+                            Content="📋 Backup"/>
                     <Button Name="RestoreButton"
-                            Content="Restore"
                             Classes="toolbar-button"
-                            Click="OnRestore"/>
+                            Click="OnRestore"
+                            Content="↩ Restore"/>
                 </StackPanel>
 
                 <!-- Center Actions -->
                 <StackPanel Grid.Column="1"
                            Orientation="Horizontal"
-                           Spacing="8"
+                           Spacing="6"
                            Margin="16,0,0,0"
                            VerticalAlignment="Center">
                     <Button Name="ResetSelectedButton"
-                            Content="Reset Selected"
                             Classes="toolbar-button"
-                            Click="OnResetSelected"/>
+                            Click="OnResetSelected"
+                            Content="↻ Reset Selected"/>
                     <Button Name="ResetAllButton"
-                            Content="Reset All"
                             Classes="toolbar-button"
-                            Click="OnResetAll"/>
+                            Click="OnResetAll"
+                            Content="⟳ Reset All"/>
                 </StackPanel>
 
                 <!-- Right Status -->
@@ -167,18 +228,18 @@
                            Orientation="Horizontal"
                            Spacing="8"
                            VerticalAlignment="Center">
-                    <Ellipse Width="6" Height="6"
+                    <Ellipse Width="8" Height="8"
                              Fill="#4CAF50"/>
                     <TextBlock Name="StatusText"
                                Text="Ready"
-                               FontSize="12"
-                               Opacity="0.7"/>
+                               FontSize="11"
+                               Foreground="{StaticResource SecondaryTextBrush}"/>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- Main Content -->
-        <Grid Margin="12,16,12,12">
+        <Grid Margin="12,12,12,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="450" MinWidth="350"/>
                 <ColumnDefinition Width="12"/>
@@ -187,22 +248,18 @@
 
             <!-- Left Panel - Troop List -->
             <Border Grid.Column="0"
-                    Background="{DynamicResource SystemChromeLowColor}"
-                    CornerRadius="12"
-                    Padding="16"
-                    BoxShadow="0 2 8 0 #10000000">
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                    Padding="12">
                 <DockPanel>
                     <!-- Search Box -->
                     <Border DockPanel.Dock="Top"
-                            Margin="0,0,0,16">
+                            Margin="0,0,0,12">
                         <TextBox Name="SearchBox"
                                  Watermark="Search troops..."
-                                 CornerRadius="4"
-                                 Padding="10,8"
-                                 BorderThickness="1"
-                                 BorderBrush="#30FFFFFF"
-                                 FontSize="13"
-                                 Background="#20FFFFFF"/>
+                                 Classes="search-box"/>
                     </Border>
 
                     <!-- Data Grid -->
@@ -237,31 +294,32 @@
 
             <!-- Right Panel - Property Editor -->
             <Border Grid.Column="2"
-                    Background="{DynamicResource SystemChromeLowColor}"
-                    CornerRadius="12"
-                    Padding="16"
-                    BoxShadow="0 2 8 0 #10000000">
+                    Background="{StaticResource PanelBackgroundBrush}"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                    Padding="12">
                 <ScrollViewer>
                     <StackPanel>
                         <!-- Header -->
                         <Border Background="Transparent"
                                 BorderThickness="0,0,0,1"
-                                BorderBrush="#20FFFFFF"
-                                Padding="0,0,0,16"
-                                Margin="0,0,0,16">
+                                BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                                Padding="0,0,0,12"
+                                Margin="0,0,0,12">
                             <TextBlock Name="TroopNameHeader"
                                        Text="Select a troop to edit"
-                                       FontSize="16"
-                                       FontWeight="Bold"
-                                       Opacity="0.9"/>
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Foreground="#FFFFFF"/>
                         </Border>
 
                         <!-- Tab Control -->
                         <TabControl Name="PropertyTabs" IsVisible="False">
                             <!-- Basic Tab -->
                             <TabItem Header="Basic">
-                                <ScrollViewer Padding="8">
-                                    <StackPanel>
+                                <ScrollViewer Padding="8,12">
+                                    <StackPanel Spacing="4">
                                         <Border Classes="section-card">
                                             <StackPanel>
                                                 <TextBlock Text="JOB ID" Classes="field-label" Margin="0,0,0,6"/>
@@ -302,8 +360,8 @@
 
                             <!-- Movement Tab -->
                             <TabItem Header="Movement">
-                                <ScrollViewer Padding="8">
-                                    <StackPanel>
+                                <ScrollViewer Padding="8,12">
+                                    <StackPanel Spacing="4">
                                         <Border Classes="section-card">
                                             <StackPanel>
                                                 <TextBlock Text="MOVE SPEED" Classes="field-label" Margin="0,0,0,6"/>
@@ -344,8 +402,8 @@
 
                             <!-- Combat Tab -->
                             <TabItem Header="Combat">
-                                <ScrollViewer Padding="8">
-                                    <StackPanel>
+                                <ScrollViewer Padding="8,12">
+                                    <StackPanel Spacing="4">
                                         <Border Classes="section-card">
                                             <StackPanel>
                                                 <TextBlock Text="DIRECT ATTACK" Classes="field-label" Margin="0,0,0,6"/>
@@ -393,11 +451,11 @@
 
                             <!-- Resistances Tab -->
                             <TabItem Header="Resistances">
-                                <ScrollViewer Padding="8">
-                                    <StackPanel>
+                                <ScrollViewer Padding="8,12">
+                                    <StackPanel Spacing="4">
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistMeleeValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistMeleeValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="MELEE" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistMeleeSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -407,7 +465,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistRangedValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistRangedValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="RANGED" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistRangedSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -417,7 +475,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistFrontalValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistFrontalValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="FRONTAL" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistFrontalSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -427,7 +485,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistExplosionValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistExplosionValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="EXPLOSION" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistExplosionSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -437,7 +495,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistFireValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistFireValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="FIRE" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistFireSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -447,7 +505,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistIceValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistIceValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="ICE" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistIceSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -457,7 +515,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistLightningValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistLightningValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="LIGHTNING" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistLightningSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -467,7 +525,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistHolyValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistHolyValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="HOLY" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistHolySlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -477,7 +535,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistCurseValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistCurseValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="CURSE" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistCurseSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -487,7 +545,7 @@
 
                                         <Border Classes="section-card">
                                             <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Name="ResistPoisonValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="14"/>
+                                                <TextBlock DockPanel.Dock="Right" Name="ResistPoisonValue" Text="0%" Width="50" TextAlignment="Right" FontWeight="Bold" FontSize="13"/>
                                                 <StackPanel>
                                                     <TextBlock Text="POISON" Classes="field-label" Margin="0,0,0,8"/>
                                                     <Slider Name="ResistPoisonSlider" Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"/>
@@ -500,8 +558,8 @@
 
                             <!-- Unit Config Tab -->
                             <TabItem Header="Unit Config">
-                                <ScrollViewer Padding="8">
-                                    <StackPanel>
+                                <ScrollViewer Padding="8,12">
+                                    <StackPanel Spacing="4">
                                         <Border Classes="section-card">
                                             <StackPanel>
                                                 <TextBlock Text="DEFAULT UNIT HP" Classes="field-label" Margin="0,0,0,6"/>
@@ -542,8 +600,8 @@
 
                             <!-- Level Up Tab -->
                             <TabItem Header="Level Up">
-                                <ScrollViewer Padding="8">
-                                    <StackPanel>
+                                <ScrollViewer Padding="8,12">
+                                    <StackPanel Spacing="4">
                                         <!-- Skill Slot 1 -->
                                         <Border Classes="section-card">
                                             <StackPanel>

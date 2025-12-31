@@ -7,63 +7,174 @@
         x:Class="KUFEditor.UI.KUFEditor"
         Title="KUFEditor - Kingdom Under Fire Editor"
         Width="1280" Height="720"
+        MinWidth="800" MinHeight="500"
         WindowStartupLocation="CenterScreen"
-        TransparencyLevelHint="AcrylicBlur"
-        Background="{DynamicResource SystemChromeMediumColor}">
+        Background="{DynamicResource ThemeContentBackgroundColor}">
+
+    <Window.Resources>
+        <!-- Ryujinx Dark Theme Colors -->
+        <Color x:Key="ThemeContentBackgroundColor">#2D2D2D</Color>
+        <Color x:Key="ThemeControlBorderColor">#505050</Color>
+        <Color x:Key="ThemeForegroundColor">#FFFFFF</Color>
+        <Color x:Key="MenuFlyoutPresenterBorderColor">#3D3D3D</Color>
+        <Color x:Key="AppListBackgroundColor">#0FFFFFFF</Color>
+        <Color x:Key="AppListHoverBackgroundColor">#1EFFFFFF</Color>
+        <Color x:Key="SecondaryTextColor">#A0FFFFFF</Color>
+        <Color x:Key="PanelBackground">#252526</Color>
+        <Color x:Key="SurfaceBackground">#333337</Color>
+        <Color x:Key="ElevatedBackground">#3D3D3D</Color>
+
+        <!-- Brushes -->
+        <SolidColorBrush x:Key="ThemeContentBackgroundBrush" Color="{StaticResource ThemeContentBackgroundColor}"/>
+        <SolidColorBrush x:Key="ThemeControlBorderBrush" Color="{StaticResource ThemeControlBorderColor}"/>
+        <SolidColorBrush x:Key="ThemeForegroundBrush" Color="{StaticResource ThemeForegroundColor}"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}"/>
+        <SolidColorBrush x:Key="PanelBackgroundBrush" Color="{StaticResource PanelBackground}"/>
+        <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource SurfaceBackground}"/>
+        <SolidColorBrush x:Key="ElevatedBackgroundBrush" Color="{StaticResource ElevatedBackground}"/>
+    </Window.Resources>
 
     <Window.Styles>
+        <!-- Panel container style -->
         <Style Selector="Border.panel-container">
-            <Setter Property="Background" Value="{DynamicResource SystemChromeLowColor}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Margin" Value="6"/>
+            <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Margin" Value="4"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="ClipToBounds" Value="False"/>
-            <Setter Property="BoxShadow" Value="0 2 8 0 #10000000"/>
         </Style>
 
+        <!-- Grid splitter styles -->
         <Style Selector="GridSplitter">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Width" Value="12"/>
+            <Setter Property="Width" Value="8"/>
         </Style>
 
         <Style Selector="GridSplitter:pointerover">
             <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight3}"/>
-            <Setter Property="Opacity" Value="0.3"/>
+            <Setter Property="Opacity" Value="0.5"/>
+        </Style>
+
+        <!-- Menu styling -->
+        <Style Selector="Menu">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Height" Value="35"/>
+        </Style>
+
+        <Style Selector="MenuItem">
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <!-- Status bar separator -->
+        <Style Selector="Border.status-separator">
+            <Setter Property="Width" Value="1"/>
+            <Setter Property="Background" Value="{StaticResource ThemeControlBorderBrush}"/>
+            <Setter Property="Margin" Value="8,4"/>
         </Style>
     </Window.Styles>
 
     <DockPanel>
+        <!-- Menu Bar -->
+        <Border DockPanel.Dock="Top"
+                Background="{StaticResource PanelBackgroundBrush}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                Height="35">
+            <DockPanel Margin="8,0">
+                <!-- Logo/Title Area -->
+                <TextBlock DockPanel.Dock="Left"
+                           Text="KUFEditor"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0"/>
+
+                <!-- Menu -->
+                <Menu VerticalAlignment="Center">
+                    <MenuItem Header="_File">
+                        <MenuItem Header="_Open Workspace..." Name="OpenWorkspaceMenuItem"/>
+                        <MenuItem Header="Open _Recent" Name="RecentMenuItem"/>
+                        <Separator/>
+                        <MenuItem Header="_Save" Name="SaveMenuItem" InputGesture="Ctrl+S"/>
+                        <MenuItem Header="Save _All" Name="SaveAllMenuItem" InputGesture="Ctrl+Shift+S"/>
+                        <Separator/>
+                        <MenuItem Header="_Settings..." Name="SettingsMenuItem"/>
+                        <Separator/>
+                        <MenuItem Header="E_xit" Name="ExitMenuItem"/>
+                    </MenuItem>
+                    <MenuItem Header="_Edit">
+                        <MenuItem Header="_Undo" Name="UndoMenuItem" InputGesture="Ctrl+Z"/>
+                        <MenuItem Header="_Redo" Name="RedoMenuItem" InputGesture="Ctrl+Y"/>
+                        <Separator/>
+                        <MenuItem Header="Cu_t" Name="CutMenuItem" InputGesture="Ctrl+X"/>
+                        <MenuItem Header="_Copy" Name="CopyMenuItem" InputGesture="Ctrl+C"/>
+                        <MenuItem Header="_Paste" Name="PasteMenuItem" InputGesture="Ctrl+V"/>
+                    </MenuItem>
+                    <MenuItem Header="_View">
+                        <MenuItem Header="_Workspace Navigator" Name="ToggleNavigatorMenuItem" Click="OnToggleWorkspace"/>
+                        <MenuItem Header="_Info Panel" Name="ToggleInfoPanelMenuItem" Click="OnToggleInfoPanel"/>
+                        <Separator/>
+                        <MenuItem Header="_Refresh" Name="RefreshMenuItem" InputGesture="F5"/>
+                    </MenuItem>
+                    <MenuItem Header="_Tools">
+                        <MenuItem Header="_Backup All Files" Name="BackupAllMenuItem"/>
+                        <MenuItem Header="_Restore from Backup..." Name="RestoreBackupMenuItem"/>
+                        <Separator/>
+                        <MenuItem Header="Validate _SOX Files" Name="ValidateSoxMenuItem"/>
+                    </MenuItem>
+                    <MenuItem Header="_Help">
+                        <MenuItem Header="_About KUFEditor" Name="AboutMenuItem"/>
+                        <MenuItem Header="_Documentation" Name="DocsMenuItem"/>
+                        <Separator/>
+                        <MenuItem Header="_GitHub Repository" Name="GitHubMenuItem"/>
+                    </MenuItem>
+                </Menu>
+            </DockPanel>
+        </Border>
+
         <!-- Status Bar -->
         <Border DockPanel.Dock="Bottom"
-                Background="{DynamicResource SystemChromeLowColor}"
-                BorderThickness="0"
-                Height="32"
-                Padding="16,0"
-                BoxShadow="0 -1 3 0 #08000000">
+                Background="{StaticResource PanelBackgroundBrush}"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{StaticResource ThemeControlBorderBrush}"
+                Height="22"
+                Padding="12,0">
             <DockPanel>
+                <!-- Right side status items -->
                 <StackPanel DockPanel.Dock="Right"
-                           Orientation="Horizontal"
-                           Spacing="16">
+                           Orientation="Horizontal">
                     <TextBlock Name="MemoryStatus"
                                Text="Memory: 0 MB"
                                VerticalAlignment="Center"
                                FontSize="11"
-                               Opacity="0.7"/>
+                               Foreground="{StaticResource SecondaryTextBrush}"/>
+
+                    <Border Classes="status-separator"/>
 
                     <TextBlock Name="CursorPosition"
                                Text="Ln 1, Col 1"
                                VerticalAlignment="Center"
                                FontSize="11"
-                               Opacity="0.7"/>
+                               Foreground="{StaticResource SecondaryTextBrush}"/>
                 </StackPanel>
 
-                <TextBlock Name="StatusText"
-                           Text="Ready"
-                           VerticalAlignment="Center"
-                           FontSize="12"
-                           FontWeight="Medium"
-                           Opacity="0.8"/>
+                <!-- Left side status -->
+                <StackPanel Orientation="Horizontal"
+                           VerticalAlignment="Center">
+                    <TextBlock Text="●"
+                               Name="RefreshIcon"
+                               FontSize="10"
+                               Margin="0,0,6,0"
+                               Foreground="#4CAF50"/>
+                    <TextBlock Name="StatusText"
+                               Text="Ready"
+                               VerticalAlignment="Center"
+                               FontSize="11"
+                               Foreground="{StaticResource SecondaryTextBrush}"/>
+                </StackPanel>
             </DockPanel>
         </Border>
 
@@ -81,7 +192,7 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <!-- Workspace Navigator (replaces File Explorer) -->
+                <!-- Workspace Navigator -->
                 <Border Grid.Column="0" Grid.Row="0"
                         Classes="panel-container"
                         Name="WorkspaceContainer">
@@ -105,7 +216,7 @@
                               ResizeDirection="Columns"
                               HorizontalAlignment="Stretch"/>
 
-                <!-- Info Panel (replaces Properties Panel, collapsible) -->
+                <!-- Info Panel -->
                 <Border Grid.Column="4" Grid.Row="0"
                         Classes="panel-container"
                         Name="InfoPanelContainer">

@@ -87,9 +87,15 @@ public partial class WorkspaceNavigator : UserControl
 
             // select first available game
             if (hasCrusaders)
+            {
                 gameSelector.SelectedIndex = 0;
+                LoadGame("Crusaders");
+            }
             else if (hasHeroes)
+            {
                 gameSelector.SelectedIndex = 1;
+                LoadGame("Heroes");
+            }
         }
     }
 
