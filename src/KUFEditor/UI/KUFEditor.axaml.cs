@@ -14,6 +14,7 @@ using Avalonia.Styling;
 using KUFEditor.UI.Views;
 using KUFEditor.UI.Dialogs;
 using KUFEditor.Core;
+using KUFEditor.Core.Mods;
 
 namespace KUFEditor.UI;
 
@@ -169,10 +170,12 @@ public partial class KUFEditor : Window
         if (redoMenuItem != null) redoMenuItem.Click += OnRedo;
 
         // Tools menu
+        var modManagerMenuItem = this.FindControl<MenuItem>("ModManagerMenuItem");
         var backupAllMenuItem = this.FindControl<MenuItem>("BackupAllMenuItem");
         var restoreBackupMenuItem = this.FindControl<MenuItem>("RestoreBackupMenuItem");
         var validateSoxMenuItem = this.FindControl<MenuItem>("ValidateSoxMenuItem");
 
+        if (modManagerMenuItem != null) modManagerMenuItem.Click += OnOpenModManager;
         if (backupAllMenuItem != null) backupAllMenuItem.Click += OnCreateBackup;
         if (restoreBackupMenuItem != null) restoreBackupMenuItem.Click += OnRestoreBackup;
         if (validateSoxMenuItem != null) validateSoxMenuItem.Click += OnValidateFiles;
@@ -195,6 +198,16 @@ public partial class KUFEditor : Window
     private void OnRedo(object? sender, RoutedEventArgs e)
     {
         UpdateStatus("Redo");
+    }
+
+    private async void OnOpenModManager(object? sender, RoutedEventArgs e)
+    {
+        var modsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "KUFEditor", "mods");
+        var modManager = new ModManager(modsDir);
+        var window = new ModManagerWindow(modManager, backupManager!, settings);
+        await window.ShowDialog(this);
     }
 
     private async void OnSettings(object? sender, RoutedEventArgs e)

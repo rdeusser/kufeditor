@@ -120,6 +120,8 @@
                         <MenuItem Header="_Refresh" Name="RefreshMenuItem" InputGesture="F5"/>
                     </MenuItem>
                     <MenuItem Header="_Tools">
+                        <MenuItem Header="_Mod Manager..." Name="ModManagerMenuItem"/>
+                        <Separator/>
                         <MenuItem Header="_Backup All Files" Name="BackupAllMenuItem"/>
                         <MenuItem Header="_Restore from Backup..." Name="RestoreBackupMenuItem"/>
                         <Separator/>
