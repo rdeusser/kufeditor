@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
 
     steps:
@@ -41,149 +41,13 @@ jobs:
           $version = "${{ github.ref_name }}".TrimStart('v')
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=$version installer\windows\setup.iss
 
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: KUFEditor-win-x64-installer
-          path: publish/KUFEditor-*-win-x64-setup.exe
-
       - name: Archive portable
         run: Compress-Archive -Path publish/KUFEditor-win-x64 -DestinationPath publish/KUFEditor-win-x64-portable.zip
-
-      - name: Upload portable
-        uses: actions/upload-artifact@v4
-        with:
-          name: KUFEditor-win-x64-portable
-          path: publish/KUFEditor-win-x64-portable.zip
-
-  build-linux:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Test
-        run: dotnet test -c Release --verbosity normal
-
-      - name: Publish
-        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r linux-x64 --self-contained -o publish/KUFEditor-linux-x64
-
-      - name: Archive
-        run: |
-          cd publish
-          tar -czvf KUFEditor-linux-x64.tar.gz KUFEditor-linux-x64
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: KUFEditor-linux-x64
-          path: publish/KUFEditor-linux-x64.tar.gz
-
-  build-macos:
-    strategy:
-      matrix:
-        include:
-          - rid: osx-x64
-            arch: x64
-          - rid: osx-arm64
-            arch: arm64
-
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Test
-        run: dotnet test -c Release --verbosity normal
-
-      - name: Publish
-        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/app
-
-      - name: Create app bundle
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          APP_NAME="KUFEditor.app"
-          APP_DIR="publish/$APP_NAME"
-
-          mkdir -p "$APP_DIR/Contents/MacOS"
-          mkdir -p "$APP_DIR/Contents/Resources"
-
-          cp -R publish/app/* "$APP_DIR/Contents/MacOS/"
-          cp src/KUFEditor/macOS/KUFEditor.icns "$APP_DIR/Contents/Resources/"
-
-          sed "s/VERSION/$VERSION/g" src/KUFEditor/macOS/Info.plist > "$APP_DIR/Contents/Info.plist"
-
-          chmod +x "$APP_DIR/Contents/MacOS/KUFEditor"
-
-          # Ad-hoc sign to avoid "damaged" error on macOS
-          codesign --force --deep --sign - "$APP_DIR"
-
-      - name: Install create-dmg
-        run: brew install create-dmg
-
-      - name: Create DMG
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          create-dmg \
-            --volname "KUFEditor" \
-            --volicon "src/KUFEditor/macOS/KUFEditor.icns" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "KUFEditor.app" 150 190 \
-            --hide-extension "KUFEditor.app" \
-            --app-drop-link 450 190 \
-            "publish/KUFEditor-${{ matrix.rid }}.dmg" \
-            "publish/KUFEditor.app" || true
-
-          # Fallback if create-dmg fails
-          if [ ! -f "publish/KUFEditor-${{ matrix.rid }}.dmg" ]; then
-            hdiutil create -volname "KUFEditor" -srcfolder "publish/KUFEditor.app" -ov -format UDZO "publish/KUFEditor-${{ matrix.rid }}.dmg"
-          fi
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: KUFEditor-${{ matrix.rid }}
-          path: publish/KUFEditor-${{ matrix.rid }}.dmg
-
-  release:
-    needs: [build-windows, build-linux, build-macos]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: List artifacts
-        run: find artifacts -type f
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            artifacts/**/*.exe
-            artifacts/**/*.zip
-            artifacts/**/*.tar.gz
-            artifacts/**/*.dmg
+            publish/KUFEditor-*-win-x64-setup.exe
+            publish/KUFEditor-win-x64-portable.zip
