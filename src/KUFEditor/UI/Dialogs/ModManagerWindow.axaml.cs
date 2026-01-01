@@ -6,6 +6,7 @@ using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using KUFEditor.Assets.Patching;
 using KUFEditor.Core;
 using KUFEditor.Core.Mods;
 
@@ -134,7 +135,7 @@ public partial class ModManagerWindow : Window
 
     private async void OnCreate(object? sender, RoutedEventArgs e)
     {
-        var dialog = new ExportModDialog(SelectedGame);
+        var dialog = new ExportModDialog(SelectedGame, _backupManager, _settings);
         var result = await dialog.ShowDialog<bool>(this);
 
         if (result && dialog.ExportedMod != null)
@@ -159,7 +160,8 @@ public partial class ModManagerWindow : Window
             return;
         }
 
-        var applier = new ModApplier(gameDir, _backupManager);
+        var patcher = new SoxPatcherRegistry();
+        var applier = new ModApplier(gameDir, _backupManager, patcher);
         applier.Apply(enabledMods, SelectedGame);
 
         _lastConflicts = applier.Conflicts;

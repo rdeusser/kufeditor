@@ -7,14 +7,16 @@ public class ModApplier
 {
     private readonly string _gameDirectory;
     private readonly BackupManager? _backupManager;
+    private readonly ISoxPatcher? _patcher;
     private readonly Dictionary<string, (string modId, object? value)> _touchedFields = new();
 
     public List<ModConflict> Conflicts { get; } = new();
 
-    public ModApplier(string gameDirectory, BackupManager? backupManager = null)
+    public ModApplier(string gameDirectory, BackupManager? backupManager = null, ISoxPatcher? patcher = null)
     {
         _gameDirectory = gameDirectory;
         _backupManager = backupManager;
+        _patcher = patcher;
     }
 
     /// <summary>
@@ -113,20 +115,35 @@ public class ModApplier
 
     private void ApplyPatch(ModPatch patch)
     {
-        // Actual file patching will be implemented when we integrate with SOX parsers.
-        // For now, conflict detection is the primary function.
+        if (_patcher == null) return;
+
         var filePath = Path.Combine(_gameDirectory, patch.File);
+
+        if (!_patcher.CanHandle(Path.GetFileName(patch.File)))
+        {
+            // Skip files we don't have a patcher for.
+            return;
+        }
 
         switch (patch.Action)
         {
             case PatchAction.Modify:
-                // TODO: Load SOX file, find record by name, modify fields, save.
+                if (patch.Record != null && patch.Fields != null)
+                {
+                    _patcher.Modify(filePath, patch.Record, patch.Fields);
+                }
                 break;
             case PatchAction.Add:
-                // TODO: Load SOX file, add new record with data, save.
+                if (patch.Data != null)
+                {
+                    _patcher.Add(filePath, patch.Data);
+                }
                 break;
             case PatchAction.Delete:
-                // TODO: Load SOX file, remove record by name, save.
+                if (patch.Record != null)
+                {
+                    _patcher.Delete(filePath, patch.Record);
+                }
                 break;
         }
     }

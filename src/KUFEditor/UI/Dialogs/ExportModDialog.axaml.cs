@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using KUFEditor.Assets.Patching;
+using KUFEditor.Core;
 using KUFEditor.Core.Mods;
 
 namespace KUFEditor.UI.Dialogs;
@@ -12,15 +15,21 @@ namespace KUFEditor.UI.Dialogs;
 public partial class ExportModDialog : Window
 {
     private readonly string _game;
+    private readonly BackupManager? _backupManager;
+    private readonly Settings? _settings;
 
     public Mod? ExportedMod { get; private set; }
 
     public ExportModDialog() : this("Crusaders") { }
 
-    public ExportModDialog(string game)
+    public ExportModDialog(string game) : this(game, null, null) { }
+
+    public ExportModDialog(string game, BackupManager? backupManager, Settings? settings)
     {
         InitializeComponent();
         _game = game;
+        _backupManager = backupManager;
+        _settings = settings;
 
         CancelButton.Click += (s, e) => Close(false);
         ExportButton.Click += OnExport;
@@ -46,6 +55,15 @@ public partial class ExportModDialog : Window
             return;
         }
 
+        // Generate patches by comparing pristine vs current files.
+        var patches = GeneratePatches();
+
+        if (patches.Count == 0)
+        {
+            await ShowError("No changes detected. Make some edits before exporting a mod.");
+            return;
+        }
+
         // Create the mod object.
         ExportedMod = new Mod
         {
@@ -55,7 +73,7 @@ public partial class ExportModDialog : Window
             Author = author,
             Description = description,
             Game = _game,
-            Patches = new() // TODO: Generate patches from editor changes.
+            Patches = patches
         };
 
         // Ask user where to save.
@@ -93,6 +111,46 @@ public partial class ExportModDialog : Window
         {
             await ShowError($"Failed to export mod: {ex.Message}");
         }
+    }
+
+    private List<ModPatch> GeneratePatches()
+    {
+        var patches = new List<ModPatch>();
+
+        if (_backupManager == null || _settings == null)
+            return patches;
+
+        var gameDir = _game == "Crusaders" ? _settings.CrusadersPath : _settings.HeroesPath;
+        if (string.IsNullOrEmpty(gameDir))
+            return patches;
+
+        var generator = new DiffGeneratorRegistry();
+
+        // Compare SOX files.
+        var soxDir = Path.Combine(gameDir, "Data", "SOX");
+        if (!Directory.Exists(soxDir))
+            soxDir = Path.Combine(gameDir, "Data", "Sox");
+
+        if (Directory.Exists(soxDir))
+        {
+            foreach (var currentFile in Directory.GetFiles(soxDir, "*.sox"))
+            {
+                var fileName = Path.GetFileName(currentFile);
+
+                if (!generator.CanHandle(fileName))
+                    continue;
+
+                var pristinePath = _backupManager.GetPristinePath(_game, fileName);
+                if (pristinePath == null || !File.Exists(pristinePath))
+                    continue;
+
+                var relativePath = Path.Combine("Data", "SOX", fileName);
+                var filePatches = generator.GenerateDiff(pristinePath, currentFile, relativePath);
+                patches.AddRange(filePatches);
+            }
+        }
+
+        return patches;
     }
 
     private async System.Threading.Tasks.Task ShowError(string message)
