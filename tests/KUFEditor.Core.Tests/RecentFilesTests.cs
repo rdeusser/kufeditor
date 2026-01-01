@@ -347,16 +347,18 @@ public class RecentFileTests
     public void Constructor_SetsProperties()
     {
         var time = DateTime.UtcNow;
-        var file = new RecentFile("/path/to/file.sox", time);
+        var testPath = Path.Combine("path", "to", "file.sox");
+        var file = new RecentFile(testPath, time);
 
-        Assert.Equal("/path/to/file.sox", file.Path);
+        Assert.Equal(testPath, file.Path);
         Assert.Equal(time, file.LastOpened);
     }
 
     [Fact]
     public void FileName_ReturnsFileNameOnly()
     {
-        var file = new RecentFile("/path/to/file.sox", DateTime.UtcNow);
+        var testPath = Path.Combine("path", "to", "file.sox");
+        var file = new RecentFile(testPath, DateTime.UtcNow);
 
         Assert.Equal("file.sox", file.FileName);
     }
@@ -364,9 +366,11 @@ public class RecentFileTests
     [Fact]
     public void Directory_ReturnsDirectoryPath()
     {
-        var file = new RecentFile("/path/to/file.sox", DateTime.UtcNow);
+        var testPath = Path.Combine("path", "to", "file.sox");
+        var expectedDir = Path.Combine("path", "to");
+        var file = new RecentFile(testPath, DateTime.UtcNow);
 
-        Assert.Equal("/path/to", file.Directory);
+        Assert.Equal(expectedDir, file.Directory);
     }
 
     [Fact]
