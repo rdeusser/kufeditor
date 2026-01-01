@@ -43,7 +43,7 @@
 
                 <StackPanel Spacing="4">
                     <TextBlock Text="Game:" FontWeight="SemiBold"/>
-                    <ComboBox x:Name="GameSelector" SelectedIndex="0" VerticalContentAlignment="Center">
+                    <ComboBox x:Name="GameSelector" SelectedIndex="0" Padding="12,8">
                         <ComboBoxItem Content="Crusaders"/>
                         <ComboBoxItem Content="Heroes"/>
                     </ComboBox>
