@@ -39,6 +39,7 @@ public partial class ModManagerWindow : Window
 
         GameSelector.SelectionChanged += (s, e) => RefreshModList();
         ImportButton.Click += OnImport;
+        CreateButton.Click += OnCreate;
         ApplyButton.Click += OnApply;
         DeleteButton.Click += OnDelete;
         MoveUpButton.Click += OnMoveUp;
@@ -113,6 +114,19 @@ public partial class ModManagerWindow : Window
         if (files.Count > 0)
         {
             _modManager.ImportMod(files[0].Path.LocalPath);
+            RefreshModList();
+        }
+    }
+
+    private async void OnCreate(object? sender, RoutedEventArgs e)
+    {
+        var dialog = new ExportModDialog();
+        var result = await dialog.ShowDialog<bool>(this);
+
+        if (result && dialog.ExportedMod != null)
+        {
+            // Import the newly created mod.
+            _modManager.ImportMod(dialog.ExportedMod.SourcePath);
             RefreshModList();
         }
     }
