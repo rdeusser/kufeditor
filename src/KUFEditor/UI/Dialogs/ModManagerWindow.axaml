@@ -1,0 +1,75 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:dialogs="clr-namespace:KUFEditor.UI.Dialogs"
+        x:Class="KUFEditor.UI.Dialogs.ModManagerWindow"
+        Title="Mod Manager"
+        Width="700" Height="500"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        <!-- Header -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="12">
+            <ComboBox x:Name="GameSelector" Width="150">
+                <ComboBoxItem Content="Crusaders" IsSelected="True"/>
+                <ComboBoxItem Content="Heroes"/>
+            </ComboBox>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button x:Name="ImportButton" Content="Import"/>
+                <Button x:Name="CreateButton" Content="Create"/>
+                <Button x:Name="ApplyButton" Content="Apply" Classes="accent"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Content -->
+        <Grid Grid.Row="1" ColumnDefinitions="250,*" Margin="12,0">
+            <!-- Mod List -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="8">
+                <Grid RowDefinitions="*,Auto">
+                    <ListBox x:Name="ModList" SelectionMode="Single">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="dialogs:ModViewModel">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <CheckBox IsChecked="{Binding IsEnabled, Mode=TwoWay}"/>
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4" Margin="0,8,0,0">
+                        <Button x:Name="MoveUpButton" Content="Up" Padding="12,4"/>
+                        <Button x:Name="MoveDownButton" Content="Down" Padding="12,4"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Details Panel -->
+            <Border Grid.Column="1" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="16" Margin="12,0,0,0">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" x:Name="DetailsPanel" IsVisible="False">
+                    <StackPanel>
+                        <TextBlock x:Name="ModName" FontSize="18" FontWeight="Bold"/>
+                        <TextBlock x:Name="ModVersion" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                        <TextBlock x:Name="ModAuthor" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,12"/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="1" x:Name="ModDescription" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                    <StackPanel Grid.Row="2" x:Name="FilesModified">
+                        <TextBlock Text="Files modified:" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <ItemsControl x:Name="FilesList"/>
+                    </StackPanel>
+                    <Button Grid.Row="3" x:Name="DeleteButton" Content="Delete Mod"
+                            HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Conflict Bar -->
+        <Border Grid.Row="2" x:Name="ConflictBar" Background="#FFF3CD"
+                IsVisible="False" Padding="12" Margin="12">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock x:Name="ConflictText" VerticalAlignment="Center" Foreground="#856404"/>
+                <Button Grid.Column="1" x:Name="ViewConflictsButton" Content="View"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
