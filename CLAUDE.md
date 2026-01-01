@@ -62,3 +62,6 @@ See [docs/FILE_FORMATS.md](docs/FILE_FORMATS.md) for detailed specifications of:
 - Rounded corners (12px panels, 8px cards)
 - Opacity-based visual hierarchy
 - `ClipToBounds="False"` on containers to prevent clipping
+- No emojis or unicode symbols in UI - use Avalonia/Fluent icons
+- Use `StorageProvider` API for file dialogs (not deprecated `SaveFileDialog` etc.)
+- Avoid control names that conflict with inherited properties (e.g., don't use `NameProperty`)
