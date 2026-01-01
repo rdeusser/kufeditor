@@ -9,11 +9,10 @@ KUFEditor is a Kingdom Under Fire editor for Crusaders and Heroes. Modifies map 
 ## Build Commands
 
 ```bash
-# All dotnet commands use the wrapper script
-./dotnet.sh build                           # Build solution
-./dotnet.sh build -c Release                # Release build
-./dotnet.sh run --project src/KUFEditor     # Run application
-./dotnet.sh clean                           # Clean artifacts
+dotnet build                           # Build solution
+dotnet build -c Release                # Release build
+dotnet run --project src/KUFEditor     # Run application
+dotnet clean                           # Clean artifacts
 ```
 
 ## Solution Structure
@@ -37,7 +36,7 @@ src/
 - **No MVVM**: Logic lives in code-behind files, not ViewModels.
 - **Ryujinx naming**: `KUFEditorApp` (not App), `UI/KUFEditor` (not MainWindow).
 - **Namespace**: Views use `KUFEditor.UI.Views`.
-- **Cross-platform paths**: Settings and backups use platform-appropriate locations.
+- **Windows-only**: The game is Windows-only, so the editor targets Windows.
 
 ## File Format Documentation
 
