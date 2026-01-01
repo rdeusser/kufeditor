@@ -133,6 +133,9 @@ jobs:
 
           chmod +x "$APP_DIR/Contents/MacOS/KUFEditor"
 
+          # Ad-hoc sign to avoid "damaged" error on macOS
+          codesign --force --deep --sign - "$APP_DIR"
+
       - name: Install create-dmg
         run: brew install create-dmg
 
