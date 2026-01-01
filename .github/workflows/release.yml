@@ -9,24 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            rid: win-x64
-            artifact: KUFEditor-win-x64
-          - os: ubuntu-latest
-            rid: linux-x64
-            artifact: KUFEditor-linux-x64
-          - os: macos-latest
-            rid: osx-x64
-            artifact: KUFEditor-osx-x64
-          - os: macos-latest
-            rid: osx-arm64
-            artifact: KUFEditor-osx-arm64
-
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -44,28 +28,106 @@ jobs:
         run: dotnet test -c Release --verbosity normal
 
       - name: Publish
-        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/${{ matrix.artifact }}
+        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r win-x64 --self-contained -o publish/KUFEditor-win-x64
 
-      - name: Archive (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          cd publish
-          tar -czvf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
-
-      - name: Archive (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd publish
-          Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.zip
+      - name: Archive
+        run: Compress-Archive -Path publish/KUFEditor-win-x64 -DestinationPath publish/KUFEditor-win-x64.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: publish/${{ matrix.artifact }}.*
+          name: KUFEditor-win-x64
+          path: publish/KUFEditor-win-x64.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Test
+        run: dotnet test -c Release --verbosity normal
+
+      - name: Publish
+        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r linux-x64 --self-contained -o publish/KUFEditor-linux-x64
+
+      - name: Archive
+        run: |
+          cd publish
+          tar -czvf KUFEditor-linux-x64.tar.gz KUFEditor-linux-x64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUFEditor-linux-x64
+          path: publish/KUFEditor-linux-x64.tar.gz
+
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - rid: osx-x64
+            arch: x64
+          - rid: osx-arm64
+            arch: arm64
+
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Test
+        run: dotnet test -c Release --verbosity normal
+
+      - name: Publish
+        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/app
+
+      - name: Create app bundle
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          APP_NAME="KUFEditor.app"
+          APP_DIR="publish/$APP_NAME"
+
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Resources"
+
+          cp -R publish/app/* "$APP_DIR/Contents/MacOS/"
+
+          sed "s/VERSION/$VERSION/g" src/KUFEditor/macOS/Info.plist > "$APP_DIR/Contents/Info.plist"
+
+          chmod +x "$APP_DIR/Contents/MacOS/KUFEditor"
+
+      - name: Archive
+        run: |
+          cd publish
+          zip -r KUFEditor-${{ matrix.rid }}.zip KUFEditor.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUFEditor-${{ matrix.rid }}
+          path: publish/KUFEditor-${{ matrix.rid }}.zip
 
   release:
-    needs: build
+    needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
 
     steps:
