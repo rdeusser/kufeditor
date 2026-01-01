@@ -410,26 +410,28 @@ public partial class KUFEditor : Window
     private void OnToggleWorkspace(object? sender, RoutedEventArgs e)
     {
         var container = this.FindControl<Border>("WorkspaceContainer");
+        var splitter = this.FindControl<GridSplitter>("WorkspaceSplitter");
         var mainGrid = this.FindControl<Grid>("MainGrid");
 
         if (container == null || mainGrid == null) return;
 
-        var isCollapsed = container.IsVisible;
-        container.IsVisible = !isCollapsed;
+        // Toggle visibility
+        container.IsVisible = !container.IsVisible;
+        if (splitter != null) splitter.IsVisible = container.IsVisible;
 
         // Column 0 is workspace, Column 1 is the splitter
         var workspaceColumn = mainGrid.ColumnDefinitions[0];
         var splitterColumn = mainGrid.ColumnDefinitions[1];
 
-        if (isCollapsed)
-        {
-            workspaceColumn.Width = new GridLength(0);
-            splitterColumn.Width = new GridLength(0);
-        }
-        else
+        if (container.IsVisible)
         {
             workspaceColumn.Width = new GridLength(280);
             splitterColumn.Width = new GridLength(8);
+        }
+        else
+        {
+            workspaceColumn.Width = new GridLength(0);
+            splitterColumn.Width = new GridLength(0);
         }
     }
 

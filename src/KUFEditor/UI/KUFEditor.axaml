@@ -182,7 +182,7 @@
         <Panel Margin="4">
             <Grid Name="MainGrid">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="280" MinWidth="200"/>
+                    <ColumnDefinition Width="280" MinWidth="0"/>
                     <ColumnDefinition Width="8"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="8"/>
@@ -201,6 +201,7 @@
 
                 <!-- Left Splitter -->
                 <GridSplitter Grid.Column="1" Grid.Row="0"
+                              Name="WorkspaceSplitter"
                               ResizeDirection="Columns"
                               HorizontalAlignment="Stretch"/>
 
