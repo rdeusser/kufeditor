@@ -44,7 +44,6 @@ public partial class KUFEditor : Window
         backupManager = new BackupManager(backupDir);
 
         SetupUI();
-        SetupNativeMenu();
 
         // setup memory monitoring
         memoryTimer = new Timer(5000);
@@ -186,36 +185,6 @@ public partial class KUFEditor : Window
         if (aboutMenuItem != null) aboutMenuItem.Click += OnAbout;
         if (docsMenuItem != null) docsMenuItem.Click += OnOpenDocumentation;
         if (gitHubMenuItem != null) gitHubMenuItem.Click += OnOpenGitHub;
-    }
-
-    private void SetupNativeMenu()
-    {
-        if (!OperatingSystem.IsMacOS()) return;
-
-        var menu = new NativeMenu();
-
-        // App menu with correct name.
-        var appMenu = new NativeMenuItem("KUFEditor") { Menu = new NativeMenu() };
-
-        var aboutItem = new NativeMenuItem("About KUFEditor");
-        aboutItem.Click += (s, e) => OnAbout(s, new RoutedEventArgs());
-        appMenu.Menu.Add(aboutItem);
-
-        appMenu.Menu.Add(new NativeMenuItemSeparator());
-
-        var settingsItem = new NativeMenuItem("Settings...");
-        settingsItem.Click += (s, e) => OnSettings(s, new RoutedEventArgs());
-        appMenu.Menu.Add(settingsItem);
-
-        appMenu.Menu.Add(new NativeMenuItemSeparator());
-
-        var quitItem = new NativeMenuItem("Quit KUFEditor");
-        quitItem.Click += (s, e) => OnExit(s, new RoutedEventArgs());
-        appMenu.Menu.Add(quitItem);
-
-        menu.Add(appMenu);
-
-        NativeMenu.SetMenu(this, menu);
     }
 
     private void OnUndo(object? sender, RoutedEventArgs e)
