@@ -62,6 +62,32 @@ public partial class KUFEditor : Window
     {
         var menu = new NativeMenu();
 
+        // macOS app menu
+        if (OperatingSystem.IsMacOS())
+        {
+            var appMenu = new NativeMenuItem("KUFEditor");
+            var appSubMenu = new NativeMenu();
+
+            var aboutItem = new NativeMenuItem("About KUFEditor");
+            aboutItem.Click += (s, e) => OnAbout(s, new RoutedEventArgs());
+            appSubMenu.Add(aboutItem);
+
+            appSubMenu.Add(new NativeMenuItemSeparator());
+
+            var settingsItem = new NativeMenuItem("Settings...");
+            settingsItem.Click += (s, e) => OnSettings(s, new RoutedEventArgs());
+            appSubMenu.Add(settingsItem);
+
+            appSubMenu.Add(new NativeMenuItemSeparator());
+
+            var quitItem = new NativeMenuItem("Quit KUFEditor");
+            quitItem.Click += (s, e) => OnExit(s, new RoutedEventArgs());
+            appSubMenu.Add(quitItem);
+
+            appMenu.Menu = appSubMenu;
+            menu.Add(appMenu);
+        }
+
         // File menu
         var fileMenu = new NativeMenuItem("File");
         var fileSubMenu = new NativeMenu();
