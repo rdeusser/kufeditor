@@ -196,15 +196,15 @@
                     <Button Name="SaveButton"
                             Classes="toolbar-button primary"
                             Click="OnSave"
-                            Content="💾 Save"/>
+                            Content="Save"/>
                     <Button Name="BackupButton"
                             Classes="toolbar-button"
                             Click="OnBackup"
-                            Content="📋 Backup"/>
+                            Content="Backup"/>
                     <Button Name="RestoreButton"
                             Classes="toolbar-button"
                             Click="OnRestore"
-                            Content="↩ Restore"/>
+                            Content="Restore"/>
                 </StackPanel>
 
                 <!-- Center Actions -->
@@ -216,11 +216,11 @@
                     <Button Name="ResetSelectedButton"
                             Classes="toolbar-button"
                             Click="OnResetSelected"
-                            Content="↻ Reset Selected"/>
+                            Content="Reset Selected"/>
                     <Button Name="ResetAllButton"
                             Classes="toolbar-button"
                             Click="OnResetAll"
-                            Content="⟳ Reset All"/>
+                            Content="Reset All"/>
                 </StackPanel>
 
                 <!-- Right Status -->

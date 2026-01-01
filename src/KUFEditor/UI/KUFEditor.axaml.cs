@@ -320,21 +320,22 @@ public partial class KUFEditor : Window
 
     private async void OnNewFile(object? sender, RoutedEventArgs e)
     {
-        var dialog = new SaveFileDialog
+        var storage = StorageProvider;
+        var result = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "New File",
             DefaultExtension = "txt"
-        };
+        });
 
-        var result = await dialog.ShowAsync(this);
         if (result != null)
         {
             try
             {
-                File.WriteAllText(result, string.Empty);
+                var path = result.Path.LocalPath;
+                File.WriteAllText(path, string.Empty);
                 var editorArea = this.FindControl<EditorArea>("EditorArea");
-                editorArea?.OpenFile(result);
-                UpdateStatus($"Created new file: {result}");
+                editorArea?.OpenFile(path);
+                UpdateStatus($"Created new file: {path}");
             }
             catch (Exception ex)
             {
@@ -345,31 +346,32 @@ public partial class KUFEditor : Window
 
     private async void OnOpenFile(object? sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog
+        var storage = StorageProvider;
+        var result = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open File",
             AllowMultiple = false
-        };
+        });
 
-        var result = await dialog.ShowAsync(this);
-        if (result != null && result.Length > 0)
+        if (result.Count > 0)
         {
-            OpenFile(result[0]);
+            OpenFile(result[0].Path.LocalPath);
         }
     }
 
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog
+        var storage = StorageProvider;
+        var result = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Open Folder"
-        };
+            Title = "Open Folder",
+            AllowMultiple = false
+        });
 
-        var result = await dialog.ShowAsync(this);
-        if (result != null)
+        if (result.Count > 0)
         {
-            currentFolder = result;
-            UpdateStatus($"Opened folder: {result}");
+            currentFolder = result[0].Path.LocalPath;
+            UpdateStatus($"Opened folder: {currentFolder}");
         }
     }
 
@@ -380,15 +382,15 @@ public partial class KUFEditor : Window
 
     private async void OnSaveAs(object? sender, RoutedEventArgs e)
     {
-        var dialog = new SaveFileDialog
+        var storage = StorageProvider;
+        var result = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save As"
-        };
+        });
 
-        var result = await dialog.ShowAsync(this);
         if (result != null)
         {
-            UpdateStatus($"Saved as: {result}");
+            UpdateStatus($"Saved as: {result.Path.LocalPath}");
         }
     }
 
@@ -408,9 +410,26 @@ public partial class KUFEditor : Window
     private void OnToggleWorkspace(object? sender, RoutedEventArgs e)
     {
         var container = this.FindControl<Border>("WorkspaceContainer");
-        if (container != null)
+        var mainGrid = this.FindControl<Grid>("MainGrid");
+
+        if (container == null || mainGrid == null) return;
+
+        var isCollapsed = container.IsVisible;
+        container.IsVisible = !isCollapsed;
+
+        // Column 0 is workspace, Column 1 is the splitter
+        var workspaceColumn = mainGrid.ColumnDefinitions[0];
+        var splitterColumn = mainGrid.ColumnDefinitions[1];
+
+        if (isCollapsed)
         {
-            container.IsVisible = !container.IsVisible;
+            workspaceColumn.Width = new GridLength(0);
+            splitterColumn.Width = new GridLength(0);
+        }
+        else
+        {
+            workspaceColumn.Width = new GridLength(280);
+            splitterColumn.Width = new GridLength(8);
         }
     }
 
@@ -514,7 +533,7 @@ public partial class KUFEditor : Window
             Padding = new Thickness(20, 8)
         };
 
-        createButton.Click += async (s, args) =>
+        createButton.Click += (s, args) =>
         {
             try
             {
@@ -573,7 +592,7 @@ public partial class KUFEditor : Window
         UpdateStatus("Use the Info Panel to restore files from snapshots.");
     }
 
-    private async void OnBatchProcess(object? sender, RoutedEventArgs e)
+    private void OnBatchProcess(object? sender, RoutedEventArgs e)
     {
         UpdateStatus("Batch processing started...");
     }

@@ -13,7 +13,7 @@ public partial class PropertiesPanel : UserControl
 
     public void ShowFileProperties(string path)
     {
-        var nameBox = this.FindControl<TextBox>("NameProperty");
+        var nameBox = this.FindControl<TextBox>("FileNameInput");
         var typeText = this.FindControl<TextBlock>("TypeProperty");
         var sizeText = this.FindControl<TextBlock>("SizeProperty");
         var pathText = this.FindControl<TextBlock>("PathProperty");
@@ -104,7 +104,7 @@ public partial class PropertiesPanel : UserControl
 
     private void ClearProperties()
     {
-        var nameBox = this.FindControl<TextBox>("NameProperty");
+        var nameBox = this.FindControl<TextBox>("FileNameInput");
         var typeText = this.FindControl<TextBlock>("TypeProperty");
         var sizeText = this.FindControl<TextBlock>("SizeProperty");
         var pathText = this.FindControl<TextBlock>("PathProperty");

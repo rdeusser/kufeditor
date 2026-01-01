@@ -121,12 +121,9 @@
         <!-- Header with title -->
         <Border DockPanel.Dock="Top"
                 Padding="12,10,12,8">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="📁" FontSize="12" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}"/>
-                <TextBlock Text="WORKSPACE"
-                           Classes="category-header"
-                           VerticalAlignment="Center"/>
-            </StackPanel>
+            <TextBlock Text="WORKSPACE"
+                       Classes="category-header"
+                       VerticalAlignment="Center"/>
         </Border>
 
         <!-- Game Selector -->
@@ -155,10 +152,7 @@
                 <!-- SOX Files -->
                 <Expander Name="SoxExpander">
                     <Expander.Header>
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="📄" FontSize="11" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="SOX FILES" Classes="category-header" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Text="SOX FILES" Classes="category-header" VerticalAlignment="Center"/>
                     </Expander.Header>
                     <TreeView Name="SoxTree"
                               Background="Transparent"
@@ -168,10 +162,7 @@
                 <!-- Missions -->
                 <Expander Name="MissionsExpander">
                     <Expander.Header>
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="🗺" FontSize="11" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="MISSIONS" Classes="category-header" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Text="MISSIONS" Classes="category-header" VerticalAlignment="Center"/>
                     </Expander.Header>
                     <TreeView Name="MissionsTree"
                               Background="Transparent"
@@ -181,10 +172,7 @@
                 <!-- Save Games -->
                 <Expander Name="SavesExpander">
                     <Expander.Header>
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="💾" FontSize="11" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="SAVE GAMES" Classes="category-header" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Text="SAVE GAMES" Classes="category-header" VerticalAlignment="Center"/>
                     </Expander.Header>
                     <TreeView Name="SavesTree"
                               Background="Transparent"

@@ -40,8 +40,8 @@
                 Padding="12,8"
                 Margin="0,0,0,4">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Name="SaveButton" Content="💾 Save" Padding="12,6"/>
-                <Button Name="ReloadButton" Content="🔄 Reload" Padding="12,6"/>
+                <Button Name="SaveButton" Content="Save" Padding="12,6"/>
+                <Button Name="ReloadButton" Content="Reload" Padding="12,6"/>
                 <Separator Width="1" Background="{DynamicResource SystemChromeHighColor}" Margin="8,0"/>
                 <TextBlock Name="FileNameText"
                            Text="No file loaded"

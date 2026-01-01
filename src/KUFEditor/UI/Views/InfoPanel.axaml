@@ -184,18 +184,18 @@
                                 Classes="action-button"
                                 ToolTip.Tip="Restore from pristine backup"
                                 Click="OnRestorePristine"
-                                Content="↻ Restore Original"/>
+                                Content="Restore Original"/>
 
                         <Button Name="RestoreSnapshotButton"
                                 Classes="action-button"
                                 IsEnabled="False"
                                 Click="OnRestoreSnapshot"
-                                Content="↩ Restore Selected"/>
+                                Content="Restore Selected"/>
 
                         <Button Name="NewSnapshotButton"
                                 Classes="action-button primary"
                                 Click="OnNewSnapshot"
-                                Content="+ New Snapshot"/>
+                                Content="New Snapshot"/>
                     </StackPanel>
                 </StackPanel>
             </StackPanel>

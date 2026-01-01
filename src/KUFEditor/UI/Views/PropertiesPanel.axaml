@@ -76,7 +76,7 @@
                     <StackPanel>
                         <TextBlock Text="NAME"
                                    Classes="property-label"/>
-                        <TextBox Name="NameProperty"
+                        <TextBox Name="FileNameInput"
                                  Classes="property-input"/>
 
                         <TextBlock Text="TYPE"

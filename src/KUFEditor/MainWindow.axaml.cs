@@ -104,21 +104,22 @@ public partial class MainWindow : Window
 
     private async void OnNewFile(object? sender, RoutedEventArgs e)
     {
-        var dialog = new SaveFileDialog
+        var storage = StorageProvider;
+        var result = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "New File",
             DefaultExtension = "txt"
-        };
+        });
 
-        var result = await dialog.ShowAsync(this);
         if (result != null)
         {
             try
             {
-                File.WriteAllText(result, string.Empty);
+                var path = result.Path.LocalPath;
+                File.WriteAllText(path, string.Empty);
                 var editorArea = this.FindControl<EditorArea>("EditorArea");
-                editorArea?.OpenFile(result);
-                UpdateStatus($"Created new file: {result}");
+                editorArea?.OpenFile(path);
+                UpdateStatus($"Created new file: {path}");
             }
             catch (Exception ex)
             {
@@ -129,54 +130,53 @@ public partial class MainWindow : Window
 
     private async void OnOpenFile(object? sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog
+        var storage = StorageProvider;
+        var result = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open File",
             AllowMultiple = false
-        };
+        });
 
-        var result = await dialog.ShowAsync(this);
-        if (result != null && result.Length > 0)
+        if (result.Count > 0)
         {
-            OpenFile(result[0]);
+            OpenFile(result[0].Path.LocalPath);
         }
     }
 
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog
+        var storage = StorageProvider;
+        var result = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Open Folder"
-        };
+            Title = "Open Folder",
+            AllowMultiple = false
+        });
 
-        var result = await dialog.ShowAsync(this);
-        if (result != null)
+        if (result.Count > 0)
         {
-            currentFolder = result;
+            currentFolder = result[0].Path.LocalPath;
             var fileExplorer = this.FindControl<FileExplorer>("FileExplorer");
-            fileExplorer?.LoadDirectory(result);
-            UpdateStatus($"Opened folder: {result}");
+            fileExplorer?.LoadDirectory(currentFolder);
+            UpdateStatus($"Opened folder: {currentFolder}");
         }
     }
 
     private void OnSave(object? sender, RoutedEventArgs e)
     {
-        // implement save logic
         UpdateStatus("File saved");
     }
 
     private async void OnSaveAs(object? sender, RoutedEventArgs e)
     {
-        var dialog = new SaveFileDialog
+        var storage = StorageProvider;
+        var result = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save As"
-        };
+        });
 
-        var result = await dialog.ShowAsync(this);
         if (result != null)
         {
-            // implement save as logic
-            UpdateStatus($"Saved as: {result}");
+            UpdateStatus($"Saved as: {result.Path.LocalPath}");
         }
     }
 
@@ -247,9 +247,8 @@ public partial class MainWindow : Window
         UpdateStatus("Validation complete.");
     }
 
-    private async void OnBatchProcess(object? sender, RoutedEventArgs e)
+    private void OnBatchProcess(object? sender, RoutedEventArgs e)
     {
-        // implement batch processing dialog
         UpdateStatus("Batch processing started...");
     }
 
