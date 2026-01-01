@@ -27,16 +27,20 @@ jobs:
       - name: Test
         run: dotnet test -c Release --verbosity normal
 
-      - name: Publish
-        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r win-x64 --self-contained -o publish/KUFEditor-win-x64
-
-      - name: Install Inno Setup and ImageMagick
-        run: |
-          choco install innosetup -y
-          choco install imagemagick -y
+      - name: Install ImageMagick
+        run: choco install imagemagick -y
 
       - name: Create icon
-        run: magick src/KUFEditor/Assets/kufeditor.png -define icon:auto-resize=256,128,64,48,32,16 installer/windows/KUFEditor.ico
+        run: magick src/KUFEditor/Assets/kufeditor.png -define icon:auto-resize=256,128,64,48,32,16 src/KUFEditor/Assets/KUFEditor.ico
+
+      - name: Publish
+        run: dotnet publish src/KUFEditor/KUFEditor.csproj -c Release -r win-x64 --self-contained -p:ApplicationIcon=Assets/KUFEditor.ico -o publish/KUFEditor-win-x64
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Copy icon for installer
+        run: Copy-Item src/KUFEditor/Assets/KUFEditor.ico installer/windows/
 
       - name: Create installer
         run: |
