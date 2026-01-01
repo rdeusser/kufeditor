@@ -26,7 +26,6 @@ public partial class KUFEditor : Window
     private BackupManager? backupManager;
     private bool _infoPanelCollapsed;
     private double _infoPanelWidth = 300;
-    private NativeMenuItem? _infoPanelMenuItem;
 
     public KUFEditor()
     {
@@ -44,8 +43,8 @@ public partial class KUFEditor : Window
         }
         backupManager = new BackupManager(backupDir);
 
-        SetupNativeMenu();
         SetupUI();
+        SetupNativeMenu();
 
         // setup memory monitoring
         memoryTimer = new Timer(5000);
@@ -56,81 +55,6 @@ public partial class KUFEditor : Window
 
         // show game location dialog on startup
         Loaded += OnWindowLoaded;
-    }
-
-    private void SetupNativeMenu()
-    {
-        var menu = new NativeMenu();
-
-        // macOS app menu
-        if (OperatingSystem.IsMacOS())
-        {
-            var appMenu = new NativeMenuItem("KUFEditor");
-            var appSubMenu = new NativeMenu();
-
-            var aboutItem = new NativeMenuItem("About KUFEditor");
-            aboutItem.Click += (s, e) => OnAbout(s, new RoutedEventArgs());
-            appSubMenu.Add(aboutItem);
-
-            appSubMenu.Add(new NativeMenuItemSeparator());
-
-            var settingsItem = new NativeMenuItem("Settings...");
-            settingsItem.Click += (s, e) => OnSettings(s, new RoutedEventArgs());
-            appSubMenu.Add(settingsItem);
-
-            appSubMenu.Add(new NativeMenuItemSeparator());
-
-            var quitItem = new NativeMenuItem("Quit KUFEditor");
-            quitItem.Click += (s, e) => OnExit(s, new RoutedEventArgs());
-            appSubMenu.Add(quitItem);
-
-            appMenu.Menu = appSubMenu;
-            menu.Add(appMenu);
-        }
-
-        // File menu
-        var fileMenu = new NativeMenuItem("File");
-        var fileSubMenu = new NativeMenu();
-
-        var newItem = new NativeMenuItem("New");
-        newItem.Click += (s, e) => OnNewFile(s, new RoutedEventArgs());
-        fileSubMenu.Add(newItem);
-
-        var openItem = new NativeMenuItem("Open...");
-        openItem.Click += (s, e) => OnOpenFile(s, new RoutedEventArgs());
-        fileSubMenu.Add(openItem);
-
-        var openFolderItem = new NativeMenuItem("Open Folder...");
-        openFolderItem.Click += (s, e) => OnOpenFolder(s, new RoutedEventArgs());
-        fileSubMenu.Add(openFolderItem);
-
-        fileSubMenu.Add(new NativeMenuItemSeparator());
-
-        var saveItem = new NativeMenuItem("Save");
-        saveItem.Click += (s, e) => OnSave(s, new RoutedEventArgs());
-        fileSubMenu.Add(saveItem);
-
-        var saveAsItem = new NativeMenuItem("Save As...");
-        saveAsItem.Click += (s, e) => OnSaveAs(s, new RoutedEventArgs());
-        fileSubMenu.Add(saveAsItem);
-
-        fileMenu.Menu = fileSubMenu;
-        menu.Add(fileMenu);
-
-        // View menu
-        var viewMenu = new NativeMenuItem("View");
-        var viewSubMenu = new NativeMenu();
-
-        _infoPanelMenuItem = new NativeMenuItem("Info Panel");
-        _infoPanelMenuItem.ToggleType = NativeMenuItemToggleType.CheckBox;
-        _infoPanelMenuItem.IsChecked = !_infoPanelCollapsed;
-        _infoPanelMenuItem.Click += (s, e) => ToggleInfoPanel();
-        viewSubMenu.Add(_infoPanelMenuItem);
-
-        viewMenu.Menu = viewSubMenu;
-        menu.Add(viewMenu);
-
-        NativeMenu.SetMenu(this, menu);
     }
 
     private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
@@ -264,6 +188,36 @@ public partial class KUFEditor : Window
         if (gitHubMenuItem != null) gitHubMenuItem.Click += OnOpenGitHub;
     }
 
+    private void SetupNativeMenu()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+
+        var menu = new NativeMenu();
+
+        // App menu with correct name.
+        var appMenu = new NativeMenuItem("KUFEditor") { Menu = new NativeMenu() };
+
+        var aboutItem = new NativeMenuItem("About KUFEditor");
+        aboutItem.Click += (s, e) => OnAbout(s, new RoutedEventArgs());
+        appMenu.Menu.Add(aboutItem);
+
+        appMenu.Menu.Add(new NativeMenuItemSeparator());
+
+        var settingsItem = new NativeMenuItem("Settings...");
+        settingsItem.Click += (s, e) => OnSettings(s, new RoutedEventArgs());
+        appMenu.Menu.Add(settingsItem);
+
+        appMenu.Menu.Add(new NativeMenuItemSeparator());
+
+        var quitItem = new NativeMenuItem("Quit KUFEditor");
+        quitItem.Click += (s, e) => OnExit(s, new RoutedEventArgs());
+        appMenu.Menu.Add(quitItem);
+
+        menu.Add(appMenu);
+
+        NativeMenu.SetMenu(this, menu);
+    }
+
     private void OnUndo(object? sender, RoutedEventArgs e)
     {
         UpdateStatus("Undo");
@@ -312,12 +266,6 @@ public partial class KUFEditor : Window
         if (container == null || mainGrid == null) return;
 
         _infoPanelCollapsed = !_infoPanelCollapsed;
-
-        // update menu checkmark
-        if (_infoPanelMenuItem != null)
-        {
-            _infoPanelMenuItem.IsChecked = !_infoPanelCollapsed;
-        }
 
         // Column 3 is the splitter, Column 4 is the info panel
         var splitterColumn = mainGrid.ColumnDefinitions[3];
