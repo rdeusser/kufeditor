@@ -134,7 +134,7 @@ public partial class ModManagerWindow : Window
 
     private async void OnCreate(object? sender, RoutedEventArgs e)
     {
-        var dialog = new ExportModDialog();
+        var dialog = new ExportModDialog(SelectedGame);
         var result = await dialog.ShowDialog<bool>(this);
 
         if (result && dialog.ExportedMod != null)

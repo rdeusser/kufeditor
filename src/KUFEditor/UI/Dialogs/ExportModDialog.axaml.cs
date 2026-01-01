@@ -11,11 +11,16 @@ namespace KUFEditor.UI.Dialogs;
 
 public partial class ExportModDialog : Window
 {
+    private readonly string _game;
+
     public Mod? ExportedMod { get; private set; }
 
-    public ExportModDialog()
+    public ExportModDialog() : this("Crusaders") { }
+
+    public ExportModDialog(string game)
     {
         InitializeComponent();
+        _game = game;
 
         CancelButton.Click += (s, e) => Close(false);
         ExportButton.Click += OnExport;
@@ -28,7 +33,6 @@ public partial class ExportModDialog : Window
         var version = ModVersionTextBox.Text?.Trim() ?? "1.0.0";
         var author = ModAuthorTextBox.Text?.Trim() ?? "";
         var description = ModDescriptionTextBox.Text?.Trim() ?? "";
-        var game = (GameSelector.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Crusaders";
 
         if (string.IsNullOrEmpty(id))
         {
@@ -50,7 +54,7 @@ public partial class ExportModDialog : Window
             Version = version,
             Author = author,
             Description = description,
-            Game = game,
+            Game = _game,
             Patches = new() // TODO: Generate patches from editor changes.
         };
 
