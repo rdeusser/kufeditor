@@ -8,15 +8,17 @@ public class OpenFileTests
     [Fact]
     public void Constructor_SetsPath()
     {
-        var file = new OpenFile("/path/to/file.sox");
+        var testPath = Path.Combine("path", "to", "file.sox");
+        var file = new OpenFile(testPath);
 
-        Assert.Equal("/path/to/file.sox", file.Path);
+        Assert.Equal(testPath, file.Path);
     }
 
     [Fact]
     public void Name_ReturnsFileNameOnly()
     {
-        var file = new OpenFile("/path/to/file.sox");
+        var testPath = Path.Combine("path", "to", "file.sox");
+        var file = new OpenFile(testPath);
 
         Assert.Equal("file.sox", file.Name);
     }
@@ -24,7 +26,8 @@ public class OpenFileTests
     [Fact]
     public void Extension_ReturnsExtension()
     {
-        var file = new OpenFile("/path/to/file.sox");
+        var testPath = Path.Combine("path", "to", "file.sox");
+        var file = new OpenFile(testPath);
 
         Assert.Equal(".sox", file.Extension);
     }
@@ -32,9 +35,11 @@ public class OpenFileTests
     [Fact]
     public void Directory_ReturnsDirectoryPath()
     {
-        var file = new OpenFile("/path/to/file.sox");
+        var testPath = Path.Combine("path", "to", "file.sox");
+        var expectedDir = Path.Combine("path", "to");
+        var file = new OpenFile(testPath);
 
-        Assert.Equal("/path/to", file.Directory);
+        Assert.Equal(expectedDir, file.Directory);
     }
 
     [Fact]
