@@ -193,7 +193,88 @@ public partial class KUFEditor : Window
             };
         }
 
+        // wire up menu items
+        SetupMenuItems();
+
         UpdateStatus("KUFEditor initialized. Ready to edit Kingdom Under Fire game files.");
+    }
+
+    private void SetupMenuItems()
+    {
+        // File menu
+        var saveMenuItem = this.FindControl<MenuItem>("SaveMenuItem");
+        var saveAllMenuItem = this.FindControl<MenuItem>("SaveAllMenuItem");
+        var settingsMenuItem = this.FindControl<MenuItem>("SettingsMenuItem");
+        var exitMenuItem = this.FindControl<MenuItem>("ExitMenuItem");
+
+        if (saveMenuItem != null) saveMenuItem.Click += OnSave;
+        if (saveAllMenuItem != null) saveAllMenuItem.Click += OnSaveAll;
+        if (settingsMenuItem != null) settingsMenuItem.Click += OnSettings;
+        if (exitMenuItem != null) exitMenuItem.Click += OnExit;
+
+        // Edit menu
+        var undoMenuItem = this.FindControl<MenuItem>("UndoMenuItem");
+        var redoMenuItem = this.FindControl<MenuItem>("RedoMenuItem");
+
+        if (undoMenuItem != null) undoMenuItem.Click += OnUndo;
+        if (redoMenuItem != null) redoMenuItem.Click += OnRedo;
+
+        // Tools menu
+        var backupAllMenuItem = this.FindControl<MenuItem>("BackupAllMenuItem");
+        var restoreBackupMenuItem = this.FindControl<MenuItem>("RestoreBackupMenuItem");
+        var validateSoxMenuItem = this.FindControl<MenuItem>("ValidateSoxMenuItem");
+
+        if (backupAllMenuItem != null) backupAllMenuItem.Click += OnCreateBackup;
+        if (restoreBackupMenuItem != null) restoreBackupMenuItem.Click += OnRestoreBackup;
+        if (validateSoxMenuItem != null) validateSoxMenuItem.Click += OnValidateFiles;
+
+        // Help menu
+        var aboutMenuItem = this.FindControl<MenuItem>("AboutMenuItem");
+        var docsMenuItem = this.FindControl<MenuItem>("DocsMenuItem");
+        var gitHubMenuItem = this.FindControl<MenuItem>("GitHubMenuItem");
+
+        if (aboutMenuItem != null) aboutMenuItem.Click += OnAbout;
+        if (docsMenuItem != null) docsMenuItem.Click += OnOpenDocumentation;
+        if (gitHubMenuItem != null) gitHubMenuItem.Click += OnOpenGitHub;
+    }
+
+    private void OnUndo(object? sender, RoutedEventArgs e)
+    {
+        UpdateStatus("Undo");
+    }
+
+    private void OnRedo(object? sender, RoutedEventArgs e)
+    {
+        UpdateStatus("Redo");
+    }
+
+    private async void OnSettings(object? sender, RoutedEventArgs e)
+    {
+        var dialog = new SettingsDialog(settings);
+        var result = await dialog.ShowDialog<bool>(this);
+
+        if (result)
+        {
+            settings = dialog.Settings;
+            settings.Save(Settings.GetDefaultSettingsPath());
+            UpdateStatus("Settings saved");
+        }
+    }
+
+    private async void OnOpenGitHub(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://github.com/rdeusser/kufeditor",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            await ShowError($"Failed to open GitHub: {ex.Message}");
+        }
     }
 
     private void ToggleInfoPanel()
@@ -497,65 +578,25 @@ public partial class KUFEditor : Window
         UpdateStatus("Batch processing started...");
     }
 
-    private void OnOpenDocumentation(object? sender, RoutedEventArgs e)
+    private async void OnOpenDocumentation(object? sender, RoutedEventArgs e)
     {
         try
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = "https://github.com/yourusername/kufeditor/wiki",
+                FileName = "https://github.com/rdeusser/kufeditor/wiki",
                 UseShellExecute = true
             });
         }
-        catch
+        catch (Exception ex)
         {
-            // handle error
+            await ShowError($"Failed to open documentation: {ex.Message}");
         }
     }
 
     private async void OnAbout(object? sender, RoutedEventArgs e)
     {
-        var dialog = new Window
-        {
-            Title = "About KUFEditor",
-            Width = 400,
-            Height = 200,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Margin = new Thickness(20),
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = "KUFEditor",
-                        FontSize = 24,
-                        FontWeight = Avalonia.Media.FontWeight.Bold,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
-                    },
-                    new TextBlock
-                    {
-                        Text = "Kingdom Under Fire Editor",
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-                        Margin = new Thickness(0, 10)
-                    },
-                    new TextBlock
-                    {
-                        Text = "Version 1.0.0",
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-                        Margin = new Thickness(0, 5)
-                    },
-                    new TextBlock
-                    {
-                        Text = "Edit map files, SOX files, and other game resources",
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                        Margin = new Thickness(0, 10)
-                    }
-                }
-            }
-        };
-
+        var dialog = new AboutDialog();
         await dialog.ShowDialog(this);
     }
 

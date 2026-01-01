@@ -115,12 +115,9 @@
         <Border DockPanel.Dock="Top"
                 Background="Transparent"
                 Padding="16,12,16,8">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="ℹ" FontSize="12" Margin="0,0,8,0" Foreground="{StaticResource SecondaryTextBrush}"/>
-                <TextBlock Text="INFO"
-                           Classes="section-header"
-                           Margin="0"/>
-            </StackPanel>
+            <TextBlock Text="INFO"
+                       Classes="section-header"
+                       Margin="0"/>
         </Border>
 
         <!-- Content -->
@@ -139,10 +136,7 @@
 
                 <!-- File Info Section -->
                 <StackPanel Name="FileInfoSection" IsVisible="False">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <TextBlock Text="📄" FontSize="11" Margin="0,0,8,0" Foreground="{StaticResource SecondaryTextBrush}"/>
-                        <TextBlock Text="FILE" Classes="section-header" Margin="0"/>
-                    </StackPanel>
+                    <TextBlock Text="FILE" Classes="section-header" Margin="0,0,0,12"/>
 
                     <TextBlock Text="Name" Classes="field-label"/>
                     <TextBlock Name="FileName" Text="-" Classes="field-value"/>
@@ -160,12 +154,17 @@
                     <TextBlock Name="FileType" Text="-" Classes="field-value"/>
                 </StackPanel>
 
+                <!-- Dynamic Content Section (file-type specific) -->
+                <StackPanel Name="DynamicContentSection" IsVisible="False" Margin="0,8,0,0">
+                    <TextBlock Name="DynamicSectionHeader" Text="DETAILS" Classes="section-header" Margin="0,0,0,12"/>
+
+                    <!-- Dynamic fields container -->
+                    <StackPanel Name="DynamicFieldsContainer" Spacing="0"/>
+                </StackPanel>
+
                 <!-- Snapshots Section -->
                 <StackPanel Name="SnapshotsSection" IsVisible="False" Margin="0,8,0,0">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <TextBlock Text="🕒" FontSize="11" Margin="0,0,8,0" Foreground="{StaticResource SecondaryTextBrush}"/>
-                        <TextBlock Text="SNAPSHOTS" Classes="section-header" Margin="0"/>
-                    </StackPanel>
+                    <TextBlock Text="SNAPSHOTS" Classes="section-header" Margin="0,0,0,12"/>
 
                     <!-- Snapshot List -->
                     <ListBox Name="SnapshotList"

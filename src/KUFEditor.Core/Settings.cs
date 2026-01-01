@@ -10,6 +10,27 @@ public class Settings
     public string? CrusadersPath { get; set; }
     public string? HeroesPath { get; set; }
     public string? BackupDirectory { get; set; }
+    public bool AutoBackup { get; set; } = true;
+    public int MaxBackups { get; set; } = 10;
+    public bool ConfirmOnExit { get; set; } = true;
+    public bool RestoreLastSession { get; set; } = false;
+
+    /// <summary>
+    /// Creates a copy of this settings instance.
+    /// </summary>
+    public Settings Clone()
+    {
+        return new Settings
+        {
+            CrusadersPath = CrusadersPath,
+            HeroesPath = HeroesPath,
+            BackupDirectory = BackupDirectory,
+            AutoBackup = AutoBackup,
+            MaxBackups = MaxBackups,
+            ConfirmOnExit = ConfirmOnExit,
+            RestoreLastSession = RestoreLastSession
+        };
+    }
 
     /// <summary>
     /// Gets the default backup directory path based on the current platform.

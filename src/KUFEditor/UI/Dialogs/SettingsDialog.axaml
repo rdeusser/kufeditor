@@ -1,0 +1,159 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="KUFEditor.UI.Dialogs.SettingsDialog"
+        Title="Settings"
+        Width="500" Height="450"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        Background="#1E1E1E">
+
+    <Border Background="#252526" CornerRadius="8" Margin="1"
+            BorderBrush="#3C3C3C" BorderThickness="1">
+        <DockPanel>
+            <!-- Title Bar -->
+            <Border DockPanel.Dock="Top" Background="#333337" Height="32">
+                <Grid>
+                    <TextBlock Text="Settings"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Center"
+                               FontSize="12" FontWeight="Medium"/>
+                    <Button Name="CloseButton"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Width="32" Height="32"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Content="&#xE8BB;"
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="10"/>
+                </Grid>
+            </Border>
+
+            <!-- Footer with buttons -->
+            <Border DockPanel.Dock="Bottom" Background="#333337" Padding="16,12">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Name="CancelButton"
+                            Content="Cancel"
+                            Width="80"
+                            Padding="12,6"/>
+                    <Button Name="SaveButton"
+                            Content="Save"
+                            Width="80"
+                            Padding="12,6"
+                            Classes="primary"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Content -->
+            <ScrollViewer Margin="24" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="24">
+                    <!-- Game Paths Section -->
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="GAME PATHS"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   Foreground="#A0FFFFFF"
+                                   LetterSpacing="0.5"/>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Kingdom Under Fire: Crusaders"
+                                       FontSize="12" Opacity="0.7"/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Name="CrusadersPathText"
+                                         Watermark="Select game directory..."
+                                         Grid.Column="0"/>
+                                <Button Name="BrowseCrusadersButton"
+                                        Content="..."
+                                        Width="32"
+                                        Margin="4,0,0,0"
+                                        Grid.Column="1"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Kingdom Under Fire: Heroes"
+                                       FontSize="12" Opacity="0.7"/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Name="HeroesPathText"
+                                         Watermark="Select game directory..."
+                                         Grid.Column="0"/>
+                                <Button Name="BrowseHeroesButton"
+                                        Content="..."
+                                        Width="32"
+                                        Margin="4,0,0,0"
+                                        Grid.Column="1"/>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Backup Section -->
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="BACKUPS"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   Foreground="#A0FFFFFF"
+                                   LetterSpacing="0.5"/>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Backup Directory"
+                                       FontSize="12" Opacity="0.7"/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Name="BackupDirText"
+                                         Watermark="Select backup directory..."
+                                         Grid.Column="0"/>
+                                <Button Name="BrowseBackupButton"
+                                        Content="..."
+                                        Width="32"
+                                        Margin="4,0,0,0"
+                                        Grid.Column="1"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <CheckBox Name="AutoBackupCheck"
+                                  Content="Create backup before saving files"/>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Keep backups:"
+                                       FontSize="12"
+                                       VerticalAlignment="Center"/>
+                            <NumericUpDown Name="MaxBackupsUpDown"
+                                           Value="10"
+                                           Minimum="1"
+                                           Maximum="100"
+                                           Width="80"/>
+                            <TextBlock Text="per file"
+                                       FontSize="12"
+                                       VerticalAlignment="Center"
+                                       Opacity="0.7"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Editor Section -->
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="EDITOR"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   Foreground="#A0FFFFFF"
+                                   LetterSpacing="0.5"/>
+
+                        <CheckBox Name="ConfirmOnExitCheck"
+                                  Content="Confirm before exiting with unsaved changes"/>
+
+                        <CheckBox Name="RestoreLastSessionCheck"
+                                  Content="Restore last session on startup"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+
+    <Window.Styles>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <Style Selector="Button.primary:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColorLight1}"/>
+        </Style>
+    </Window.Styles>
+</Window>
