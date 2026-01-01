@@ -2,52 +2,54 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="KUFEditor.UI.Dialogs.ExportModDialog"
         Title="Export as Mod"
-        Width="450" Height="400"
+        Width="450" Height="480"
         WindowStartupLocation="CenterOwner">
 
     <Grid RowDefinitions="*,Auto" Margin="16">
-        <StackPanel Spacing="12">
-            <TextBlock Text="Create a mod from your current changes."
-                       TextWrapping="Wrap"
-                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+        <ScrollViewer>
+            <StackPanel Spacing="12">
+                <TextBlock Text="Create a mod from your current changes."
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
 
-            <StackPanel Spacing="4">
-                <TextBlock Text="Mod ID:" FontWeight="SemiBold"/>
-                <TextBox x:Name="ModIdTextBox" Watermark="my-awesome-mod"/>
-            </StackPanel>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Mod ID:" FontWeight="SemiBold"/>
+                    <TextBox x:Name="ModIdTextBox" Watermark="my-awesome-mod"/>
+                </StackPanel>
 
-            <StackPanel Spacing="4">
-                <TextBlock Text="Name:" FontWeight="SemiBold"/>
-                <TextBox x:Name="ModNameTextBox" Watermark="My Awesome Mod"/>
-            </StackPanel>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Name:" FontWeight="SemiBold"/>
+                    <TextBox x:Name="ModNameTextBox" Watermark="My Awesome Mod"/>
+                </StackPanel>
 
-            <StackPanel Spacing="4">
-                <TextBlock Text="Version:" FontWeight="SemiBold"/>
-                <TextBox x:Name="ModVersionTextBox" Text="1.0.0"/>
-            </StackPanel>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Version:" FontWeight="SemiBold"/>
+                    <TextBox x:Name="ModVersionTextBox" Text="1.0.0"/>
+                </StackPanel>
 
-            <StackPanel Spacing="4">
-                <TextBlock Text="Author:" FontWeight="SemiBold"/>
-                <TextBox x:Name="ModAuthorTextBox" Watermark="Your Name"/>
-            </StackPanel>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Author:" FontWeight="SemiBold"/>
+                    <TextBox x:Name="ModAuthorTextBox" Watermark="Your Name"/>
+                </StackPanel>
 
-            <StackPanel Spacing="4">
-                <TextBlock Text="Description:" FontWeight="SemiBold"/>
-                <TextBox x:Name="ModDescriptionTextBox"
-                         Watermark="Describe what your mod does..."
-                         AcceptsReturn="True"
-                         Height="80"
-                         TextWrapping="Wrap"/>
-            </StackPanel>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Description:" FontWeight="SemiBold"/>
+                    <TextBox x:Name="ModDescriptionTextBox"
+                             Watermark="Describe what your mod does..."
+                             AcceptsReturn="True"
+                             Height="80"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
 
-            <StackPanel Spacing="4">
-                <TextBlock Text="Game:" FontWeight="SemiBold"/>
-                <ComboBox x:Name="GameSelector" SelectedIndex="0">
-                    <ComboBoxItem Content="Crusaders"/>
-                    <ComboBoxItem Content="Heroes"/>
-                </ComboBox>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Game:" FontWeight="SemiBold"/>
+                    <ComboBox x:Name="GameSelector" SelectedIndex="0" VerticalContentAlignment="Center">
+                        <ComboBoxItem Content="Crusaders"/>
+                        <ComboBoxItem Content="Heroes"/>
+                    </ComboBox>
+                </StackPanel>
             </StackPanel>
-        </StackPanel>
+        </ScrollViewer>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal"
                     HorizontalAlignment="Right" Spacing="8" Margin="0,16,0,0">

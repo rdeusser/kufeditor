@@ -9,7 +9,7 @@
     <Grid RowDefinitions="Auto,*,Auto">
         <!-- Header -->
         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="12">
-            <ComboBox x:Name="GameSelector" Width="150">
+            <ComboBox x:Name="GameSelector" Width="150" VerticalContentAlignment="Center">
                 <ComboBoxItem Content="Crusaders" IsSelected="True"/>
                 <ComboBoxItem Content="Heroes"/>
             </ComboBox>

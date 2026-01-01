@@ -20,16 +20,20 @@ public class ModViewModel
 
 public partial class ModManagerWindow : Window
 {
-    private readonly ModManager _modManager;
-    private readonly BackupManager _backupManager;
-    private readonly Settings _settings;
+    private readonly ModManager _modManager = null!;
+    private readonly BackupManager _backupManager = null!;
+    private readonly Settings _settings = null!;
     private readonly ObservableCollection<ModViewModel> _mods = new();
     private List<ModConflict> _lastConflicts = new();
 
-    public ModManagerWindow(ModManager modManager, BackupManager backupManager, Settings settings)
+    public ModManagerWindow()
     {
         InitializeComponent();
+    }
 
+    public ModManagerWindow(ModManager modManager, BackupManager backupManager, Settings settings)
+        : this()
+    {
         _modManager = modManager;
         _backupManager = backupManager;
         _settings = settings;
