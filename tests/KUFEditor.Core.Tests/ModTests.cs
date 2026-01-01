@@ -111,6 +111,134 @@ public class ModManagerTests
     }
 }
 
+public class ModApplierTests
+{
+    [Fact]
+    public void Apply_DetectsFieldConflicts()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"applier_{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var applier = new ModApplier(tempDir);
+
+            var mod1 = new Mod
+            {
+                Id = "mod-a",
+                Patches = new List<ModPatch>
+                {
+                    new() { File = "TroopInfo.sox", Action = PatchAction.Modify, Record = "Gerald",
+                            Fields = new() { { "HP", 500 } } }
+                }
+            };
+
+            var mod2 = new Mod
+            {
+                Id = "mod-b",
+                Patches = new List<ModPatch>
+                {
+                    new() { File = "TroopInfo.sox", Action = PatchAction.Modify, Record = "Gerald",
+                            Fields = new() { { "HP", 600 } } }
+                }
+            };
+
+            applier.DetectConflicts(new List<Mod> { mod1, mod2 });
+
+            Assert.Single(applier.Conflicts);
+            Assert.Equal("TroopInfo.sox", applier.Conflicts[0].File);
+            Assert.Equal("Gerald", applier.Conflicts[0].Record);
+            Assert.Equal("HP", applier.Conflicts[0].Field);
+            Assert.Equal("mod-a", applier.Conflicts[0].FirstModId);
+            Assert.Equal("mod-b", applier.Conflicts[0].SecondModId);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Apply_NoConflictForDifferentFields()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"applier_{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var applier = new ModApplier(tempDir);
+
+            var mod1 = new Mod
+            {
+                Id = "mod-a",
+                Patches = new List<ModPatch>
+                {
+                    new() { File = "TroopInfo.sox", Action = PatchAction.Modify, Record = "Gerald",
+                            Fields = new() { { "HP", 500 } } }
+                }
+            };
+
+            var mod2 = new Mod
+            {
+                Id = "mod-b",
+                Patches = new List<ModPatch>
+                {
+                    new() { File = "TroopInfo.sox", Action = PatchAction.Modify, Record = "Gerald",
+                            Fields = new() { { "Attack", 75 } } }
+                }
+            };
+
+            applier.DetectConflicts(new List<Mod> { mod1, mod2 });
+
+            Assert.Empty(applier.Conflicts);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Apply_NoConflictForDifferentRecords()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"applier_{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var applier = new ModApplier(tempDir);
+
+            var mod1 = new Mod
+            {
+                Id = "mod-a",
+                Patches = new List<ModPatch>
+                {
+                    new() { File = "TroopInfo.sox", Action = PatchAction.Modify, Record = "Gerald",
+                            Fields = new() { { "HP", 500 } } }
+                }
+            };
+
+            var mod2 = new Mod
+            {
+                Id = "mod-b",
+                Patches = new List<ModPatch>
+                {
+                    new() { File = "TroopInfo.sox", Action = PatchAction.Modify, Record = "Lucretia",
+                            Fields = new() { { "HP", 600 } } }
+                }
+            };
+
+            applier.DetectConflicts(new List<Mod> { mod1, mod2 });
+
+            Assert.Empty(applier.Conflicts);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+}
+
 public class ModTests
 {
     [Fact]
