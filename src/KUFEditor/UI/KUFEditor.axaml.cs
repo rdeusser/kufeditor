@@ -206,7 +206,11 @@ public partial class KUFEditor : Window
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "KUFEditor", "mods");
         var modManager = new ModManager(modsDir);
-        var window = new ModManagerWindow(modManager, backupManager!, settings);
+
+        var navigator = this.FindControl<WorkspaceNavigator>("WorkspaceNavigator");
+        var currentGame = navigator?.CurrentGame ?? "Crusaders";
+
+        var window = new ModManagerWindow(modManager, backupManager!, settings, currentGame);
         await window.ShowDialog(this);
     }
 

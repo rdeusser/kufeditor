@@ -31,7 +31,7 @@ public partial class ModManagerWindow : Window
         InitializeComponent();
     }
 
-    public ModManagerWindow(ModManager modManager, BackupManager backupManager, Settings settings)
+    public ModManagerWindow(ModManager modManager, BackupManager backupManager, Settings settings, string initialGame = "Crusaders")
         : this()
     {
         _modManager = modManager;
@@ -40,6 +40,16 @@ public partial class ModManagerWindow : Window
 
         ModList.ItemsSource = _mods;
         ModList.SelectionChanged += OnModSelected;
+
+        // Set initial game selection.
+        for (int i = 0; i < GameSelector.Items.Count; i++)
+        {
+            if (GameSelector.Items[i] is ComboBoxItem item && item.Content?.ToString() == initialGame)
+            {
+                GameSelector.SelectedIndex = i;
+                break;
+            }
+        }
 
         GameSelector.SelectionChanged += (s, e) => RefreshModList();
         ImportButton.Click += OnImport;
