@@ -4,6 +4,113 @@ using KUFEditor.Core.Mods;
 
 namespace KUFEditor.Core.Tests;
 
+public class ModManagerTests
+{
+    private string GetTempDir() => Path.Combine(Path.GetTempPath(), $"modtest_{Guid.NewGuid()}");
+
+    [Fact]
+    public void GetEnabledMods_ReturnsEmptyForNewGame()
+    {
+        var dir = GetTempDir();
+        try
+        {
+            var manager = new ModManager(dir);
+            var enabled = manager.GetEnabledMods("Crusaders");
+            Assert.Empty(enabled);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void EnableMod_AddToList()
+    {
+        var dir = GetTempDir();
+        try
+        {
+            var manager = new ModManager(dir);
+            manager.EnableMod("Crusaders", "test-mod");
+
+            Assert.True(manager.IsEnabled("Crusaders", "test-mod"));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void SaveAndLoad_PersistsState()
+    {
+        var dir = GetTempDir();
+        try
+        {
+            var manager1 = new ModManager(dir);
+            manager1.EnableMod("Crusaders", "mod-a");
+            manager1.EnableMod("Crusaders", "mod-b");
+
+            var manager2 = new ModManager(dir);
+            var enabled = manager2.GetEnabledMods("Crusaders");
+
+            Assert.Equal(2, enabled.Count);
+            Assert.Equal("mod-a", enabled[0]);
+            Assert.Equal("mod-b", enabled[1]);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void ReorderMod_ChangesPosition()
+    {
+        var dir = GetTempDir();
+        try
+        {
+            var manager = new ModManager(dir);
+            manager.EnableMod("Crusaders", "mod-a");
+            manager.EnableMod("Crusaders", "mod-b");
+            manager.EnableMod("Crusaders", "mod-c");
+
+            manager.ReorderMod("Crusaders", "mod-c", 0);
+
+            var enabled = manager.GetEnabledMods("Crusaders");
+            Assert.Equal("mod-c", enabled[0]);
+            Assert.Equal("mod-a", enabled[1]);
+            Assert.Equal("mod-b", enabled[2]);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void DisableMod_RemovesFromList()
+    {
+        var dir = GetTempDir();
+        try
+        {
+            var manager = new ModManager(dir);
+            manager.EnableMod("Crusaders", "mod-a");
+            manager.EnableMod("Crusaders", "mod-b");
+
+            manager.DisableMod("Crusaders", "mod-a");
+
+            var enabled = manager.GetEnabledMods("Crusaders");
+            Assert.Single(enabled);
+            Assert.Equal("mod-b", enabled[0]);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+}
+
 public class ModTests
 {
     [Fact]
