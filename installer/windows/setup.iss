@@ -21,6 +21,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
+SetupIconFile=KUFEditor.ico
+UninstallDisplayIcon={app}\KUFEditor.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
