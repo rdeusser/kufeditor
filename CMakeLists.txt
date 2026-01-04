@@ -75,6 +75,7 @@ add_executable(kufeditor
     src/main.cpp
     src/core/window.cpp
     src/core/imgui_context.cpp
+    src/core/application.cpp
 )
 target_link_libraries(kufeditor PRIVATE
     imgui
