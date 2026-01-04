@@ -73,6 +73,7 @@ endif()
 # Main executable
 add_executable(kufeditor
     src/main.cpp
+    src/core/window.cpp
 )
 target_link_libraries(kufeditor PRIVATE
     imgui
