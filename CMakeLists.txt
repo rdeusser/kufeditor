@@ -76,6 +76,7 @@ add_executable(kufeditor
     src/core/window.cpp
     src/core/imgui_context.cpp
     src/core/application.cpp
+    src/formats/sox_binary.cpp
 )
 target_link_libraries(kufeditor PRIVATE
     imgui
@@ -100,6 +101,8 @@ endif()
 enable_testing()
 add_executable(kufeditor_tests
     test/main_test.cpp
+    test/sox_binary_test.cpp
+    src/formats/sox_binary.cpp
 )
 target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain)
 target_include_directories(kufeditor_tests PRIVATE src)
