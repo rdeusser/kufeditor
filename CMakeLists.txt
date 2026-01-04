@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(kufeditor VERSION 1.0.0 LANGUAGES CXX)
+project(kufeditor VERSION 1.0.0 LANGUAGES CXX OBJCXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -70,6 +70,17 @@ else()
     target_link_libraries(imgui PUBLIC OpenGL::GL)
 endif()
 
+# Platform-specific source files.
+set(PLATFORM_SOURCES)
+if(WIN32)
+    list(APPEND PLATFORM_SOURCES src/ui/dialogs/file_dialog.cpp)
+elseif(APPLE)
+    list(APPEND PLATFORM_SOURCES
+        src/ui/dialogs/file_dialog.cpp
+        src/ui/dialogs/file_dialog_macos.mm
+    )
+endif()
+
 # Main executable
 add_executable(kufeditor
     src/main.cpp
@@ -78,6 +89,7 @@ add_executable(kufeditor
     src/core/application.cpp
     src/formats/sox_binary.cpp
     src/ui/views/troop_editor.cpp
+    ${PLATFORM_SOURCES}
 )
 target_link_libraries(kufeditor PRIVATE
     imgui

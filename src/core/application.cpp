@@ -2,6 +2,7 @@
 #include "core/window.h"
 #include "core/imgui_context.h"
 #include "ui/views/troop_editor.h"
+#include "ui/dialogs/file_dialog.h"
 #include "formats/sox_binary.h"
 
 #include <imgui.h>
@@ -62,7 +63,9 @@ void Application::drawMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open...", "Ctrl+O")) {
-                // TODO: Native file dialog.
+                if (auto path = FileDialog::openFile("*.sox")) {
+                    openFile(*path);
+                }
             }
             if (ImGui::MenuItem("Save", "Ctrl+S", false, currentFile_ != nullptr)) {
                 if (currentFile_ && !currentPath_.empty()) {
