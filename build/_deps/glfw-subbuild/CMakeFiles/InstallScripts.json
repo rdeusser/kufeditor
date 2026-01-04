@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/rdeusser/src/personal/kufeditor/build/_deps/glfw-subbuild/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
