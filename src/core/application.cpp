@@ -4,6 +4,7 @@
 #include "ui/views/troop_editor.h"
 #include "ui/dialogs/file_dialog.h"
 #include "formats/sox_binary.h"
+#include "undo/undo_stack.h"
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
@@ -18,6 +19,11 @@ Application::Application() {
     window_ = std::make_unique<Window>("KUF Editor", 1280, 720);
     imgui_ = std::make_unique<ImGuiContext>(window_->handle());
     troopEditor_ = std::make_unique<TroopEditorView>();
+    undoStack_ = std::make_unique<UndoStack>();
+
+    undoStack_->setOnChange([this]() {
+        dirty_ = true;
+    });
 }
 
 Application::~Application() = default;
@@ -28,6 +34,7 @@ void Application::run() {
 
         imgui_->beginFrame();
 
+        handleKeyboardShortcuts();
         drawDockspace();
         troopEditor_->draw();
 
@@ -56,6 +63,42 @@ void Application::openFile(const std::string& path) {
         currentFile_ = sox;
         currentPath_ = path;
         troopEditor_->setData(sox);
+        undoStack_->clear();
+        dirty_ = false;
+    }
+}
+
+void Application::handleKeyboardShortcuts() {
+    ImGuiIO& io = ImGui::GetIO();
+
+    // Check for Ctrl/Cmd modifier.
+    bool cmdOrCtrl = io.KeyCtrl;
+#ifdef __APPLE__
+    cmdOrCtrl = io.KeySuper;
+#endif
+
+    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+        if (io.KeyShift) {
+            undoStack_->redo();
+        } else {
+            undoStack_->undo();
+        }
+    }
+    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) {
+        undoStack_->redo();
+    }
+    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) {
+        if (auto path = FileDialog::openFile("*.sox")) {
+            openFile(*path);
+        }
+    }
+    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
+        if (currentFile_ && !currentPath_.empty()) {
+            auto data = currentFile_->save();
+            std::ofstream file(currentPath_, std::ios::binary);
+            file.write(reinterpret_cast<const char*>(data.data()), data.size());
+            dirty_ = false;
+        }
     }
 }
 
@@ -72,6 +115,7 @@ void Application::drawMenuBar() {
                     auto data = currentFile_->save();
                     std::ofstream file(currentPath_, std::ios::binary);
                     file.write(reinterpret_cast<const char*>(data.data()), data.size());
+                    dirty_ = false;
                 }
             }
             ImGui::Separator();
@@ -81,8 +125,21 @@ void Application::drawMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
-            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, false)) {}
-            if (ImGui::MenuItem("Redo", "Ctrl+Y", false, false)) {}
+            std::string undoLabel = "Undo";
+            std::string redoLabel = "Redo";
+            if (undoStack_->canUndo()) {
+                undoLabel += " " + undoStack_->undoDescription();
+            }
+            if (undoStack_->canRedo()) {
+                redoLabel += " " + undoStack_->redoDescription();
+            }
+
+            if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, undoStack_->canUndo())) {
+                undoStack_->undo();
+            }
+            if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, undoStack_->canRedo())) {
+                undoStack_->redo();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
@@ -130,8 +187,9 @@ void Application::drawDockspace() {
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 24);
     ImGui::BeginChild("StatusBar", ImVec2(0, 24), false);
     if (currentFile_) {
-        ImGui::Text("%s | %s | %zu troops",
+        ImGui::Text("%s%s | %s | %zu troops",
             currentPath_.c_str(),
+            dirty_ ? "*" : "",
             currentFile_->detectedVersion() == GameVersion::Crusaders ? "Crusaders" : "Heroes",
             currentFile_->recordCount());
     } else {

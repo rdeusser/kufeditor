@@ -89,6 +89,7 @@ add_executable(kufeditor
     src/core/application.cpp
     src/formats/sox_binary.cpp
     src/ui/views/troop_editor.cpp
+    src/undo/undo_stack.cpp
     ${PLATFORM_SOURCES}
 )
 target_link_libraries(kufeditor PRIVATE
