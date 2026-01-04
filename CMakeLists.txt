@@ -89,6 +89,7 @@ add_executable(kufeditor
     src/core/application.cpp
     src/formats/sox_binary.cpp
     src/ui/views/troop_editor.cpp
+    src/ui/views/validation_log.cpp
     src/undo/undo_stack.cpp
     ${PLATFORM_SOURCES}
 )

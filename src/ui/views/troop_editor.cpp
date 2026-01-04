@@ -11,6 +11,12 @@ void TroopEditorView::setData(std::shared_ptr<SoxBinary> data) {
     selectedTroop_ = -1;
 }
 
+void TroopEditorView::selectTroop(size_t index) {
+    if (data_ && index < data_->troops().size()) {
+        selectedTroop_ = static_cast<int>(index);
+    }
+}
+
 void TroopEditorView::drawContent() {
     if (!data_) {
         ImGui::TextDisabled("No file loaded. Use File > Open to load TroopInfo.sox");

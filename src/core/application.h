@@ -8,6 +8,7 @@ namespace kuf {
 class Window;
 class ImGuiContext;
 class TroopEditorView;
+class ValidationLogView;
 class SoxBinary;
 class UndoStack;
 
@@ -29,6 +30,7 @@ private:
     std::unique_ptr<Window> window_;
     std::unique_ptr<ImGuiContext> imgui_;
     std::unique_ptr<TroopEditorView> troopEditor_;
+    std::unique_ptr<ValidationLogView> validationLog_;
     std::unique_ptr<UndoStack> undoStack_;
     std::shared_ptr<SoxBinary> currentFile_;
     std::string currentPath_;

@@ -2,6 +2,7 @@
 #include "core/window.h"
 #include "core/imgui_context.h"
 #include "ui/views/troop_editor.h"
+#include "ui/views/validation_log.h"
 #include "ui/dialogs/file_dialog.h"
 #include "formats/sox_binary.h"
 #include "undo/undo_stack.h"
@@ -19,10 +20,16 @@ Application::Application() {
     window_ = std::make_unique<Window>("KUF Editor", 1280, 720);
     imgui_ = std::make_unique<ImGuiContext>(window_->handle());
     troopEditor_ = std::make_unique<TroopEditorView>();
+    validationLog_ = std::make_unique<ValidationLogView>();
     undoStack_ = std::make_unique<UndoStack>();
 
     undoStack_->setOnChange([this]() {
         dirty_ = true;
+    });
+
+    validationLog_->setOnNavigate([this](size_t recordIndex) {
+        troopEditor_->selectTroop(recordIndex);
+        troopEditor_->isOpen() = true;
     });
 }
 
@@ -37,6 +44,7 @@ void Application::run() {
         handleKeyboardShortcuts();
         drawDockspace();
         troopEditor_->draw();
+        validationLog_->draw();
 
         imgui_->endFrame();
 
@@ -63,6 +71,7 @@ void Application::openFile(const std::string& path) {
         currentFile_ = sox;
         currentPath_ = path;
         troopEditor_->setData(sox);
+        validationLog_->setIssues(sox->validate());
         undoStack_->clear();
         dirty_ = false;
     }
@@ -144,6 +153,7 @@ void Application::drawMenuBar() {
         }
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Troop Editor", nullptr, &troopEditor_->isOpen());
+            ImGui::MenuItem("Validation Log", nullptr, &validationLog_->isOpen());
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {

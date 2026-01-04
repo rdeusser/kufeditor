@@ -15,6 +15,7 @@ public:
 
     void setData(std::shared_ptr<SoxBinary> data);
     bool hasData() const { return data_ != nullptr; }
+    void selectTroop(size_t index);
 
 private:
     void drawTroopTable();
