@@ -77,6 +77,7 @@ add_executable(kufeditor
     src/core/imgui_context.cpp
     src/core/application.cpp
     src/formats/sox_binary.cpp
+    src/ui/views/troop_editor.cpp
 )
 target_link_libraries(kufeditor PRIVATE
     imgui

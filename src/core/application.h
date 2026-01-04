@@ -7,6 +7,8 @@ namespace kuf {
 
 class Window;
 class ImGuiContext;
+class TroopEditorView;
+class SoxBinary;
 
 class Application {
 public:
@@ -18,9 +20,13 @@ public:
 private:
     void drawMenuBar();
     void drawDockspace();
+    void openFile(const std::string& path);
 
     std::unique_ptr<Window> window_;
     std::unique_ptr<ImGuiContext> imgui_;
+    std::unique_ptr<TroopEditorView> troopEditor_;
+    std::shared_ptr<SoxBinary> currentFile_;
+    std::string currentPath_;
     bool running_ = true;
 };
 

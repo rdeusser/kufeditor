@@ -1,16 +1,22 @@
 #include "core/application.h"
 #include "core/window.h"
 #include "core/imgui_context.h"
+#include "ui/views/troop_editor.h"
+#include "formats/sox_binary.h"
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <GLFW/glfw3.h>
+
+#include <fstream>
+#include <vector>
 
 namespace kuf {
 
 Application::Application() {
     window_ = std::make_unique<Window>("KUF Editor", 1280, 720);
     imgui_ = std::make_unique<ImGuiContext>(window_->handle());
+    troopEditor_ = std::make_unique<TroopEditorView>();
 }
 
 Application::~Application() = default;
@@ -22,6 +28,7 @@ void Application::run() {
         imgui_->beginFrame();
 
         drawDockspace();
+        troopEditor_->draw();
 
         imgui_->endFrame();
 
@@ -33,11 +40,36 @@ void Application::run() {
     }
 }
 
+void Application::openFile(const std::string& path) {
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) return;
+
+    auto size = file.tellg();
+    file.seekg(0);
+
+    std::vector<std::byte> data(size);
+    file.read(reinterpret_cast<char*>(data.data()), size);
+
+    auto sox = std::make_shared<SoxBinary>();
+    if (sox->load(data)) {
+        currentFile_ = sox;
+        currentPath_ = path;
+        troopEditor_->setData(sox);
+    }
+}
+
 void Application::drawMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open...", "Ctrl+O")) {
-                // TODO: Open file dialog.
+                // TODO: Native file dialog.
+            }
+            if (ImGui::MenuItem("Save", "Ctrl+S", false, currentFile_ != nullptr)) {
+                if (currentFile_ && !currentPath_.empty()) {
+                    auto data = currentFile_->save();
+                    std::ofstream file(currentPath_, std::ios::binary);
+                    file.write(reinterpret_cast<const char*>(data.data()), data.size());
+                }
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
@@ -51,14 +83,11 @@ void Application::drawMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
-            ImGui::MenuItem("File Browser", nullptr, nullptr);
-            ImGui::MenuItem("Validation Log", nullptr, nullptr);
+            ImGui::MenuItem("Troop Editor", nullptr, &troopEditor_->isOpen());
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
-            if (ImGui::MenuItem("About")) {
-                // TODO: About dialog.
-            }
+            if (ImGui::MenuItem("About")) {}
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
@@ -97,7 +126,14 @@ void Application::drawDockspace() {
     // Status bar.
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 24);
     ImGui::BeginChild("StatusBar", ImVec2(0, 24), false);
-    ImGui::Text("Ready");
+    if (currentFile_) {
+        ImGui::Text("%s | %s | %zu troops",
+            currentPath_.c_str(),
+            currentFile_->detectedVersion() == GameVersion::Crusaders ? "Crusaders" : "Heroes",
+            currentFile_->recordCount());
+    } else {
+        ImGui::Text("Ready");
+    }
     ImGui::EndChild();
 
     ImGui::End();
