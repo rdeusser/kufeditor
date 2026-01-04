@@ -181,11 +181,12 @@ void Application::drawDockspace() {
     drawMenuBar();
 
     ImGuiID dockspaceId = ImGui::GetID("MainDockspace");
-    ImGui::DockSpace(dockspaceId, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockSpace(dockspaceId, ImVec2(0, 0), ImGuiDockNodeFlags_None);
 
     // Status bar.
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 24);
     ImGui::BeginChild("StatusBar", ImVec2(0, 24), false);
+    ImGui::SetCursorPosX(8.0f);  // left padding
     if (currentFile_) {
         ImGui::Text("%s%s | %s | %zu troops",
             currentPath_.c_str(),
