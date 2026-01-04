@@ -74,6 +74,7 @@ endif()
 add_executable(kufeditor
     src/main.cpp
     src/core/window.cpp
+    src/core/imgui_context.cpp
 )
 target_link_libraries(kufeditor PRIVATE
     imgui
@@ -81,6 +82,11 @@ target_link_libraries(kufeditor PRIVATE
     nlohmann_json::nlohmann_json
 )
 target_include_directories(kufeditor PRIVATE src)
+
+# Silence OpenGL deprecation warnings on macOS.
+if(APPLE)
+    target_compile_definitions(kufeditor PRIVATE GL_SILENCE_DEPRECATION)
+endif()
 
 # Platform-specific libraries for file dialogs
 if(WIN32)
