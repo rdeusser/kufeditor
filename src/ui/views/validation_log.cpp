@@ -35,6 +35,7 @@ void ValidationLogView::drawContent() {
         for (size_t i = 0; i < issues_.size(); ++i) {
             const auto& issue = issues_[i];
             ImGui::TableNextRow();
+            ImGui::PushID(static_cast<int>(i));
 
             // Severity icon.
             ImGui::TableNextColumn();
@@ -49,6 +50,7 @@ void ValidationLogView::drawContent() {
                     onNavigate_(issue.recordIndex);
                 }
             }
+            ImGui::PopID();
 
             // Field name.
             ImGui::TableNextColumn();

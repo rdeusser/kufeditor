@@ -27,13 +27,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
-# nlohmann/json
-FetchContent_Declare(
-    json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-)
-FetchContent_MakeAvailable(json)
+# libconfig (must be installed on the system, e.g., `brew install libconfig`)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBCONFIG REQUIRED IMPORTED_TARGET libconfig++)
 
 # Catch2 for testing
 FetchContent_Declare(
@@ -87,16 +83,22 @@ add_executable(kufeditor
     src/core/window.cpp
     src/core/imgui_context.cpp
     src/core/application.cpp
+    src/core/config.cpp
+    src/core/recent_files.cpp
     src/formats/sox_binary.cpp
+    src/formats/sox_text.cpp
+    src/formats/sox_encoding.cpp
     src/ui/views/troop_editor.cpp
+    src/ui/views/text_editor.cpp
     src/ui/views/validation_log.cpp
+    src/ui/dialogs/settings_dialog.cpp
     src/undo/undo_stack.cpp
     ${PLATFORM_SOURCES}
 )
 target_link_libraries(kufeditor PRIVATE
     imgui
     glfw
-    nlohmann_json::nlohmann_json
+    PkgConfig::LIBCONFIG
 )
 target_include_directories(kufeditor PRIVATE src)
 
@@ -117,7 +119,9 @@ enable_testing()
 add_executable(kufeditor_tests
     test/main_test.cpp
     test/sox_binary_test.cpp
+    test/sox_encoding_test.cpp
     src/formats/sox_binary.cpp
+    src/formats/sox_encoding.cpp
 )
 target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain)
 target_include_directories(kufeditor_tests PRIVATE src)

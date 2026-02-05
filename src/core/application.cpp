@@ -1,10 +1,15 @@
 #include "core/application.h"
 #include "core/window.h"
 #include "core/imgui_context.h"
+#include "core/recent_files.h"
 #include "ui/views/troop_editor.h"
+#include "ui/views/text_editor.h"
 #include "ui/views/validation_log.h"
 #include "ui/dialogs/file_dialog.h"
+#include "ui/dialogs/settings_dialog.h"
 #include "formats/sox_binary.h"
+#include "formats/sox_text.h"
+#include "formats/sox_encoding.h"
 #include "undo/undo_stack.h"
 
 #include <imgui.h>
@@ -12,17 +17,45 @@
 #include <GLFW/glfw3.h>
 
 #include <fstream>
-#include <vector>
+#include <filesystem>
 
 namespace kuf {
+
+namespace {
+
+std::string getFileName(const std::string& path) {
+    auto pos = path.find_last_of("/\\");
+    if (pos != std::string::npos) {
+        return path.substr(pos + 1);
+    }
+    return path;
+}
+
+} // namespace
 
 Application::Application() {
     window_ = std::make_unique<Window>("KUF Editor", 1280, 720);
     imgui_ = std::make_unique<ImGuiContext>(window_->handle());
-    troopEditor_ = std::make_unique<TroopEditorView>();
-    validationLog_ = std::make_unique<ValidationLogView>();
-    undoStack_ = std::make_unique<UndoStack>();
 
+    // Create all views.
+    troopEditor_ = std::make_unique<TroopEditorView>();
+    textEditor_ = std::make_unique<TextEditorView>();
+    validationLog_ = std::make_unique<ValidationLogView>();
+
+    // Create dialogs.
+    settingsDialog_ = std::make_unique<SettingsDialog>();
+
+    // Create core services.
+    undoStack_ = std::make_unique<UndoStack>();
+    recentFiles_ = std::make_unique<RecentFiles>(10);
+
+    // Load config.
+    settingsDialog_->load();
+    settingsDialog_->apply();
+    recentFiles_->files() = settingsDialog_->config().recentFiles;
+    recentFiles_->setMaxFiles(settingsDialog_->config().maxRecentFiles);
+
+    // Set up callbacks.
     undoStack_->setOnChange([this]() {
         dirty_ = true;
     });
@@ -33,7 +66,11 @@ Application::Application() {
     });
 }
 
-Application::~Application() = default;
+Application::~Application() {
+    // Save config.
+    settingsDialog_->config().recentFiles = recentFiles_->files();
+    settingsDialog_->save();
+}
 
 void Application::run() {
     while (running_ && !window_->shouldClose()) {
@@ -43,8 +80,14 @@ void Application::run() {
 
         handleKeyboardShortcuts();
         drawDockspace();
+
+        // Draw all views.
         troopEditor_->draw();
+        textEditor_->draw();
         validationLog_->draw();
+
+        // Draw dialogs.
+        settingsDialog_->draw();
 
         imgui_->endFrame();
 
@@ -63,16 +106,84 @@ void Application::openFile(const std::string& path) {
     auto size = file.tellg();
     file.seekg(0);
 
-    std::vector<std::byte> data(size);
-    file.read(reinterpret_cast<char*>(data.data()), size);
+    rawFileData_.resize(size);
+    file.read(reinterpret_cast<char*>(rawFileData_.data()), size);
 
-    auto sox = std::make_shared<SoxBinary>();
-    if (sox->load(data)) {
-        currentFile_ = sox;
+    std::string filename = getFileName(path);
+
+    // SOX files use ASCII hex encoding. Decode if detected.
+    std::span<const std::byte> parseData = rawFileData_;
+    std::vector<std::byte> decodedData;
+    isSoxEncoded_ = isSoxEncoded(rawFileData_);
+
+    if (isSoxEncoded_) {
+        auto decoded = soxDecode(rawFileData_);
+        if (decoded) {
+            decodedData = std::move(*decoded);
+            parseData = decodedData;
+        }
+    }
+
+    // Try binary SOX first (has version header = 100).
+    auto binary = std::make_shared<SoxBinary>();
+    if (binary->load(parseData)) {
+        currentBinaryFile_ = binary;
+        currentTextFile_ = nullptr;
         currentPath_ = path;
-        troopEditor_->setData(sox);
-        validationLog_->setIssues(sox->validate());
+        troopEditor_->setData(binary);
+        textEditor_->setData(nullptr);
+        validationLog_->setIssues(binary->validate());
         undoStack_->clear();
+        dirty_ = false;
+        recentFiles_->add(path);
+        return;
+    }
+
+    // Try text SOX.
+    auto text = std::make_shared<SoxText>();
+    if (text->load(parseData)) {
+        currentTextFile_ = text;
+        currentBinaryFile_ = nullptr;
+        currentPath_ = path;
+        textEditor_->setData(text);
+        troopEditor_->setData(nullptr);
+        validationLog_->setIssues(text->validate());
+        undoStack_->clear();
+        dirty_ = false;
+        recentFiles_->add(path);
+        return;
+    }
+
+    // Unknown format.
+    currentBinaryFile_ = nullptr;
+    currentTextFile_ = nullptr;
+    currentPath_ = path;
+    troopEditor_->setData(nullptr);
+    textEditor_->setData(nullptr);
+    validationLog_->setIssues({});
+    undoStack_->clear();
+    dirty_ = false;
+    recentFiles_->add(path);
+}
+
+void Application::saveFile() {
+    if (currentPath_.empty()) return;
+
+    std::vector<std::byte> data;
+    if (currentBinaryFile_) {
+        data = currentBinaryFile_->save();
+    } else if (currentTextFile_) {
+        data = currentTextFile_->save();
+    }
+
+    if (!data.empty()) {
+        // Re-encode to ASCII hex if the original file was hex-encoded.
+        if (isSoxEncoded_) {
+            data = soxEncode(data);
+        }
+
+        std::ofstream file(currentPath_, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(data.data()), data.size());
         dirty_ = false;
     }
 }
@@ -102,12 +213,7 @@ void Application::handleKeyboardShortcuts() {
         }
     }
     if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
-        if (currentFile_ && !currentPath_.empty()) {
-            auto data = currentFile_->save();
-            std::ofstream file(currentPath_, std::ios::binary);
-            file.write(reinterpret_cast<const char*>(data.data()), data.size());
-            dirty_ = false;
-        }
+        saveFile();
     }
 }
 
@@ -119,13 +225,26 @@ void Application::drawMenuBar() {
                     openFile(*path);
                 }
             }
-            if (ImGui::MenuItem("Save", "Ctrl+S", false, currentFile_ != nullptr)) {
-                if (currentFile_ && !currentPath_.empty()) {
-                    auto data = currentFile_->save();
-                    std::ofstream file(currentPath_, std::ios::binary);
-                    file.write(reinterpret_cast<const char*>(data.data()), data.size());
-                    dirty_ = false;
+
+            if (ImGui::BeginMenu("Open Recent", !recentFiles_->empty())) {
+                for (const auto& path : recentFiles_->files()) {
+                    if (ImGui::MenuItem(getFileName(path).c_str())) {
+                        openFile(path);
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", path.c_str());
+                    }
                 }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Clear Recent Files")) {
+                    recentFiles_->clear();
+                }
+                ImGui::EndMenu();
+            }
+
+            bool hasFile = currentBinaryFile_ || currentTextFile_;
+            if (ImGui::MenuItem("Save", "Ctrl+S", false, hasFile)) {
+                saveFile();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
@@ -133,6 +252,7 @@ void Application::drawMenuBar() {
             }
             ImGui::EndMenu();
         }
+
         if (ImGui::BeginMenu("Edit")) {
             std::string undoLabel = "Undo";
             std::string redoLabel = "Redo";
@@ -149,17 +269,25 @@ void Application::drawMenuBar() {
             if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, undoStack_->canRedo())) {
                 undoStack_->redo();
             }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Settings...")) {
+                settingsDialog_->open();
+            }
             ImGui::EndMenu();
         }
+
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Troop Editor", nullptr, &troopEditor_->isOpen());
+            ImGui::MenuItem("Text Editor", nullptr, &textEditor_->isOpen());
             ImGui::MenuItem("Validation Log", nullptr, &validationLog_->isOpen());
             ImGui::EndMenu();
         }
+
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("About")) {}
             ImGui::EndMenu();
         }
+
         ImGui::EndMainMenuBar();
     }
 }
@@ -190,19 +318,31 @@ void Application::drawDockspace() {
 
     drawMenuBar();
 
+    // Reserve space for status bar at bottom.
+    float statusBarHeight = 24.0f;
+    float dockspaceHeight = ImGui::GetContentRegionAvail().y - statusBarHeight;
+
     ImGuiID dockspaceId = ImGui::GetID("MainDockspace");
-    ImGui::DockSpace(dockspaceId, ImVec2(0, 0), ImGuiDockNodeFlags_None);
+    ImGui::DockSpace(dockspaceId, ImVec2(0, dockspaceHeight), ImGuiDockNodeFlags_None);
 
     // Status bar.
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 24);
-    ImGui::BeginChild("StatusBar", ImVec2(0, 24), false);
-    ImGui::SetCursorPosX(8.0f);  // left padding
-    if (currentFile_) {
+    ImGui::BeginChild("StatusBar", ImVec2(0, statusBarHeight), false);
+    ImGui::SetCursorPosX(8.0f);
+    if (currentBinaryFile_) {
         ImGui::Text("%s%s | %s | %zu troops",
             currentPath_.c_str(),
             dirty_ ? "*" : "",
-            currentFile_->detectedVersion() == GameVersion::Crusaders ? "Crusaders" : "Heroes",
-            currentFile_->recordCount());
+            currentBinaryFile_->detectedVersion() == GameVersion::Crusaders ? "Crusaders" : "Heroes",
+            currentBinaryFile_->recordCount());
+    } else if (currentTextFile_) {
+        ImGui::Text("%s%s | Text SOX | %zu entries",
+            currentPath_.c_str(),
+            dirty_ ? "*" : "",
+            currentTextFile_->entryCount());
+    } else if (!currentPath_.empty()) {
+        ImGui::Text("%s | Unknown format | %zu bytes",
+            currentPath_.c_str(),
+            rawFileData_.size());
     } else {
         ImGui::Text("Ready");
     }

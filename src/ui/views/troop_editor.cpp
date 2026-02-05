@@ -1,5 +1,6 @@
 #include "ui/views/troop_editor.h"
 
+#include <cfloat>
 #include <imgui.h>
 
 namespace kuf {
@@ -19,17 +20,18 @@ void TroopEditorView::selectTroop(size_t index) {
 
 void TroopEditorView::drawContent() {
     if (!data_) {
-        ImGui::TextDisabled("No file loaded. Use File > Open to load TroopInfo.sox");
+        ImGui::TextDisabled("No troop data loaded");
         return;
     }
 
-    ImGui::BeginChild("TroopList", ImVec2(250, 0), true);
+    float listHeight = ImGui::GetContentRegionAvail().y;
+    ImGui::BeginChild("TroopList", ImVec2(250, listHeight), ImGuiChildFlags_Borders);
     drawTroopTable();
     ImGui::EndChild();
 
     ImGui::SameLine();
 
-    ImGui::BeginChild("TroopDetails", ImVec2(0, 0), true);
+    ImGui::BeginChild("TroopDetails", ImVec2(0, listHeight), ImGuiChildFlags_Borders);
     if (selectedTroop_ >= 0 && selectedTroop_ < static_cast<int>(data_->troops().size())) {
         drawTroopDetails(selectedTroop_);
     } else {
@@ -57,43 +59,47 @@ void TroopEditorView::drawTroopDetails(size_t index) {
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Movement", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::DragFloat("Move Speed", &troop.moveSpeed, 1.0f, 0.0f, 10000.0f);
-        ImGui::DragFloat("Rotate Rate", &troop.rotateRate, 0.01f, 0.0f, 10.0f);
-        ImGui::DragFloat("Acceleration", &troop.moveAcceleration, 1.0f, 0.0f, 1000.0f);
-        ImGui::DragFloat("Deceleration", &troop.moveDeceleration, 1.0f, 0.0f, 1000.0f);
+        ImGui::DragFloat("Move Speed", &troop.moveSpeed, 1.0f, 0.0f, 10000.0f, "%.0f");
+        ImGui::DragFloat("Rotate Rate", &troop.rotateRate, 1.0f, 0.0f, 1000.0f, "%.0f");
+        ImGui::DragFloat("Acceleration", &troop.moveAcceleration, 1.0f, 0.0f, 1000.0f, "%.0f");
+        ImGui::DragFloat("Deceleration", &troop.moveDeceleration, 1.0f, 0.0f, 1000.0f, "%.0f");
     }
 
     if (ImGui::CollapsingHeader("Combat", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::DragFloat("Sight Range", &troop.sightRange, 10.0f, 0.0f, 50000.0f);
-        ImGui::DragFloat("Attack Range Max", &troop.attackRangeMax, 10.0f, 0.0f, 50000.0f);
-        ImGui::DragFloat("Attack Range Min", &troop.attackRangeMin, 10.0f, 0.0f, 50000.0f);
-        ImGui::DragFloat("Direct Attack", &troop.directAttack, 0.1f, 0.0f, 100.0f);
-        ImGui::DragFloat("Indirect Attack", &troop.indirectAttack, 0.1f, 0.0f, 100.0f);
-        ImGui::DragFloat("Defense", &troop.defense, 0.1f, 0.0f, 100.0f);
+        ImGui::DragFloat("Sight Range", &troop.sightRange, 10.0f, 0.0f, 50000.0f, "%.0f");
+        ImGui::DragFloat("Attack Range Max", &troop.attackRangeMax, 10.0f, 0.0f, 50000.0f, "%.0f");
+        ImGui::DragFloat("Attack Range Min", &troop.attackRangeMin, 10.0f, 0.0f, 50000.0f, "%.0f");
+        ImGui::DragFloat("Direct Attack", &troop.directAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
+        ImGui::DragFloat("Indirect Attack", &troop.indirectAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
+        ImGui::DragFloat("Defense", &troop.defense, 1.0f, 0.0f, 1000.0f, "%.0f");
     }
 
     if (ImGui::CollapsingHeader("Resistances", ImGuiTreeNodeFlags_DefaultOpen)) {
-        auto resistSlider = [](const char* label, float* value) {
-            ImGui::SliderFloat(label, value, 0.0f, 2.0f, "%.2f");
-            ImGui::SameLine();
-            int pct = static_cast<int>((1.0f - *value) * 100.0f);
-            ImGui::Text("(%+d%%)", pct);
+        // File stores: 0=immune, 100=normal, 200=very vulnerable.
+        // Game UI shows: 100=immune, 0=normal, -100=very vulnerable.
+        // Formula: display = 100 - file_value
+        auto resistInput = [](const char* label, float* value) {
+            int fileVal = static_cast<int>(*value);
+            int displayVal = 100 - fileVal;
+            if (ImGui::DragInt(label, &displayVal, 1, -200, 100, "%+d")) {
+                *value = static_cast<float>(100 - displayVal);
+            }
         };
 
-        resistSlider("Melee", &troop.resistMelee);
-        resistSlider("Ranged", &troop.resistRanged);
-        resistSlider("Frontal", &troop.resistFrontal);
-        resistSlider("Explosion", &troop.resistExplosion);
-        resistSlider("Fire", &troop.resistFire);
-        resistSlider("Ice", &troop.resistIce);
-        resistSlider("Lightning", &troop.resistLightning);
-        resistSlider("Holy", &troop.resistHoly);
-        resistSlider("Curse", &troop.resistCurse);
-        resistSlider("Poison", &troop.resistPoison);
+        resistInput("Melee", &troop.resistMelee);
+        resistInput("Ranged", &troop.resistRanged);
+        resistInput("Explosion", &troop.resistExplosion);
+        resistInput("Frontal", &troop.resistFrontal);
+        resistInput("Fire", &troop.resistFire);
+        resistInput("Lightning", &troop.resistLightning);
+        resistInput("Ice", &troop.resistIce);
+        resistInput("Holy", &troop.resistHoly);
+        resistInput("Earth", &troop.resistPoison);
+        resistInput("Curse", &troop.resistCurse);
     }
 
-    if (ImGui::CollapsingHeader("Unit Configuration")) {
-        ImGui::DragFloat("Default HP", &troop.defaultUnitHp, 1.0f, 1.0f, 10000.0f);
+    if (ImGui::CollapsingHeader("Unit Configuration", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::DragFloat("Default HP", &troop.defaultUnitHp, 1.0f, 1.0f, 10000.0f, "%.0f");
         ImGui::DragInt("Units X", &troop.defaultUnitNumX, 1, 1, 20);
         ImGui::DragInt("Units Y", &troop.defaultUnitNumY, 1, 1, 20);
         ImGui::Text("Total Units: %d", troop.defaultUnitNumX * troop.defaultUnitNumY);

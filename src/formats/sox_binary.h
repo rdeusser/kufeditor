@@ -10,7 +10,7 @@ namespace kuf {
 
 struct LevelUpData {
     int32_t skillId;
-    float skillPerLevel;
+    float bonusPerLevel;
 };
 
 struct TroopInfo {

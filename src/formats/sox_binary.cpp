@@ -18,6 +18,16 @@ void writeLE(std::byte* data, T value) {
     std::memcpy(data, &value, sizeof(T));
 }
 
+// Read int32 and convert to float (file stores integers, not IEEE floats).
+float readIntAsFloat(const std::byte* data) {
+    return static_cast<float>(readLE<int32_t>(data));
+}
+
+// Write float as int32 (reverse of readIntAsFloat).
+void writeFloatAsInt(std::byte* data, float value) {
+    writeLE(data, static_cast<int32_t>(value));
+}
+
 constexpr size_t HEADER_SIZE = 8;
 constexpr size_t TROOP_RECORD_SIZE = 148;
 constexpr size_t FOOTER_SIZE = 64;
@@ -49,41 +59,41 @@ bool SoxBinary::load(std::span<const std::byte> data) {
         TroopInfo troop{};
         troop.job = readLE<int32_t>(ptr + 0x00);
         troop.typeId = readLE<int32_t>(ptr + 0x04);
-        troop.moveSpeed = readLE<float>(ptr + 0x08);
-        troop.rotateRate = readLE<float>(ptr + 0x0C);
-        troop.moveAcceleration = readLE<float>(ptr + 0x10);
-        troop.moveDeceleration = readLE<float>(ptr + 0x14);
-        troop.sightRange = readLE<float>(ptr + 0x18);
-        troop.attackRangeMax = readLE<float>(ptr + 0x1C);
-        troop.attackRangeMin = readLE<float>(ptr + 0x20);
-        troop.attackFrontRange = readLE<float>(ptr + 0x24);
-        troop.directAttack = readLE<float>(ptr + 0x28);
-        troop.indirectAttack = readLE<float>(ptr + 0x2C);
-        troop.defense = readLE<float>(ptr + 0x30);
-        troop.baseWidth = readLE<float>(ptr + 0x34);
-        troop.resistMelee = readLE<float>(ptr + 0x38);
-        troop.resistRanged = readLE<float>(ptr + 0x3C);
-        troop.resistFrontal = readLE<float>(ptr + 0x40);
-        troop.resistExplosion = readLE<float>(ptr + 0x44);
-        troop.resistFire = readLE<float>(ptr + 0x48);
-        troop.resistIce = readLE<float>(ptr + 0x4C);
-        troop.resistLightning = readLE<float>(ptr + 0x50);
-        troop.resistHoly = readLE<float>(ptr + 0x54);
-        troop.resistCurse = readLE<float>(ptr + 0x58);
-        troop.resistPoison = readLE<float>(ptr + 0x5C);
-        troop.maxUnitSpeedMultiplier = readLE<float>(ptr + 0x60);
-        troop.defaultUnitHp = readLE<float>(ptr + 0x64);
+        troop.moveSpeed = readIntAsFloat(ptr + 0x08);
+        troop.rotateRate = readIntAsFloat(ptr + 0x0C);
+        troop.moveAcceleration = readIntAsFloat(ptr + 0x10);
+        troop.moveDeceleration = readIntAsFloat(ptr + 0x14);
+        troop.sightRange = readIntAsFloat(ptr + 0x18);
+        troop.attackRangeMax = readIntAsFloat(ptr + 0x1C);
+        troop.attackRangeMin = readIntAsFloat(ptr + 0x20);
+        troop.attackFrontRange = readIntAsFloat(ptr + 0x24);
+        troop.directAttack = readIntAsFloat(ptr + 0x28);
+        troop.indirectAttack = readIntAsFloat(ptr + 0x2C);
+        troop.defense = readIntAsFloat(ptr + 0x30);
+        troop.baseWidth = readIntAsFloat(ptr + 0x34);
+        troop.resistMelee = readIntAsFloat(ptr + 0x38);
+        troop.resistRanged = readIntAsFloat(ptr + 0x3C);
+        troop.resistFrontal = readIntAsFloat(ptr + 0x40);
+        troop.resistExplosion = readIntAsFloat(ptr + 0x44);
+        troop.resistFire = readIntAsFloat(ptr + 0x48);
+        troop.resistIce = readIntAsFloat(ptr + 0x4C);
+        troop.resistLightning = readIntAsFloat(ptr + 0x50);
+        troop.resistHoly = readIntAsFloat(ptr + 0x54);
+        troop.resistCurse = readIntAsFloat(ptr + 0x58);
+        troop.resistPoison = readIntAsFloat(ptr + 0x5C);
+        troop.maxUnitSpeedMultiplier = readIntAsFloat(ptr + 0x60);
+        troop.defaultUnitHp = readIntAsFloat(ptr + 0x64);
         troop.formationRandom = readLE<int32_t>(ptr + 0x68);
         troop.defaultUnitNumX = readLE<int32_t>(ptr + 0x6C);
         troop.defaultUnitNumY = readLE<int32_t>(ptr + 0x70);
-        troop.unitHpLevelUp = readLE<float>(ptr + 0x74);
+        troop.unitHpLevelUp = readIntAsFloat(ptr + 0x74);
 
         for (int j = 0; j < 3; ++j) {
             troop.levelUpData[j].skillId = readLE<int32_t>(ptr + 0x78 + j * 8);
-            troop.levelUpData[j].skillPerLevel = readLE<float>(ptr + 0x7C + j * 8);
+            troop.levelUpData[j].bonusPerLevel = readIntAsFloat(ptr + 0x7C + j * 8);
         }
 
-        troop.damageDistribution = readLE<float>(ptr + 0x90);
+        troop.damageDistribution = readIntAsFloat(ptr + 0x90);
 
         troops_.push_back(troop);
         ptr += TROOP_RECORD_SIZE;
@@ -107,41 +117,41 @@ std::vector<std::byte> SoxBinary::save() const {
     for (const auto& troop : troops_) {
         writeLE(ptr + 0x00, troop.job);
         writeLE(ptr + 0x04, troop.typeId);
-        writeLE(ptr + 0x08, troop.moveSpeed);
-        writeLE(ptr + 0x0C, troop.rotateRate);
-        writeLE(ptr + 0x10, troop.moveAcceleration);
-        writeLE(ptr + 0x14, troop.moveDeceleration);
-        writeLE(ptr + 0x18, troop.sightRange);
-        writeLE(ptr + 0x1C, troop.attackRangeMax);
-        writeLE(ptr + 0x20, troop.attackRangeMin);
-        writeLE(ptr + 0x24, troop.attackFrontRange);
-        writeLE(ptr + 0x28, troop.directAttack);
-        writeLE(ptr + 0x2C, troop.indirectAttack);
-        writeLE(ptr + 0x30, troop.defense);
-        writeLE(ptr + 0x34, troop.baseWidth);
-        writeLE(ptr + 0x38, troop.resistMelee);
-        writeLE(ptr + 0x3C, troop.resistRanged);
-        writeLE(ptr + 0x40, troop.resistFrontal);
-        writeLE(ptr + 0x44, troop.resistExplosion);
-        writeLE(ptr + 0x48, troop.resistFire);
-        writeLE(ptr + 0x4C, troop.resistIce);
-        writeLE(ptr + 0x50, troop.resistLightning);
-        writeLE(ptr + 0x54, troop.resistHoly);
-        writeLE(ptr + 0x58, troop.resistCurse);
-        writeLE(ptr + 0x5C, troop.resistPoison);
-        writeLE(ptr + 0x60, troop.maxUnitSpeedMultiplier);
-        writeLE(ptr + 0x64, troop.defaultUnitHp);
+        writeFloatAsInt(ptr + 0x08, troop.moveSpeed);
+        writeFloatAsInt(ptr + 0x0C, troop.rotateRate);
+        writeFloatAsInt(ptr + 0x10, troop.moveAcceleration);
+        writeFloatAsInt(ptr + 0x14, troop.moveDeceleration);
+        writeFloatAsInt(ptr + 0x18, troop.sightRange);
+        writeFloatAsInt(ptr + 0x1C, troop.attackRangeMax);
+        writeFloatAsInt(ptr + 0x20, troop.attackRangeMin);
+        writeFloatAsInt(ptr + 0x24, troop.attackFrontRange);
+        writeFloatAsInt(ptr + 0x28, troop.directAttack);
+        writeFloatAsInt(ptr + 0x2C, troop.indirectAttack);
+        writeFloatAsInt(ptr + 0x30, troop.defense);
+        writeFloatAsInt(ptr + 0x34, troop.baseWidth);
+        writeFloatAsInt(ptr + 0x38, troop.resistMelee);
+        writeFloatAsInt(ptr + 0x3C, troop.resistRanged);
+        writeFloatAsInt(ptr + 0x40, troop.resistFrontal);
+        writeFloatAsInt(ptr + 0x44, troop.resistExplosion);
+        writeFloatAsInt(ptr + 0x48, troop.resistFire);
+        writeFloatAsInt(ptr + 0x4C, troop.resistIce);
+        writeFloatAsInt(ptr + 0x50, troop.resistLightning);
+        writeFloatAsInt(ptr + 0x54, troop.resistHoly);
+        writeFloatAsInt(ptr + 0x58, troop.resistCurse);
+        writeFloatAsInt(ptr + 0x5C, troop.resistPoison);
+        writeFloatAsInt(ptr + 0x60, troop.maxUnitSpeedMultiplier);
+        writeFloatAsInt(ptr + 0x64, troop.defaultUnitHp);
         writeLE(ptr + 0x68, troop.formationRandom);
         writeLE(ptr + 0x6C, troop.defaultUnitNumX);
         writeLE(ptr + 0x70, troop.defaultUnitNumY);
-        writeLE(ptr + 0x74, troop.unitHpLevelUp);
+        writeFloatAsInt(ptr + 0x74, troop.unitHpLevelUp);
 
         for (int j = 0; j < 3; ++j) {
             writeLE(ptr + 0x78 + j * 8, troop.levelUpData[j].skillId);
-            writeLE(ptr + 0x7C + j * 8, troop.levelUpData[j].skillPerLevel);
+            writeFloatAsInt(ptr + 0x7C + j * 8, troop.levelUpData[j].bonusPerLevel);
         }
 
-        writeLE(ptr + 0x90, troop.damageDistribution);
+        writeFloatAsInt(ptr + 0x90, troop.damageDistribution);
         ptr += TROOP_RECORD_SIZE;
     }
 
@@ -156,12 +166,15 @@ std::vector<ValidationIssue> SoxBinary::validate() const {
     for (size_t i = 0; i < troops_.size(); ++i) {
         const auto& troop = troops_[i];
 
+        // Resistances: 0=immune, 100=normal, 250+=very vulnerable, 1000000+=instant death.
+        // Only flag negative values or extremely high non-instant-death values.
         auto checkResistance = [&](float value, const char* name) {
-            if (value < 0.0f || value > 2.0f) {
+            int v = static_cast<int>(value);
+            if (v < 0 || (v > 500 && v < 1000000)) {
                 issues.push_back({
                     Severity::Warning,
                     name,
-                    "Resistance outside normal range (0.0-2.0)",
+                    "Resistance outside typical range",
                     i
                 });
             }
