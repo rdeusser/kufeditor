@@ -18,7 +18,7 @@ jobs:
           - { os: ubuntu-24.04-arm, name: linux-arm64, artifact: kufeditor-linux-arm64 }
           - { os: windows-2022, name: windows-x64, vcpkg_triplet: x64-windows-static, artifact: kufeditor-windows-x64 }
           - { os: windows-11-arm, name: windows-arm64, vcpkg_triplet: arm64-windows-static, artifact: kufeditor-windows-arm64 }
-          - { os: macos-13, name: macos-x64, artifact: kufeditor-macos-x64 }
+          - { os: macos-15-large, name: macos-x64, artifact: kufeditor-macos-x64 }
           - { os: macos-14, name: macos-arm64, artifact: kufeditor-macos-arm64 }
 
     runs-on: ${{ matrix.os }}
