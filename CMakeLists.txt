@@ -44,7 +44,7 @@ endif()
 
 if(NOT LIBCONFIG_FOUND)
     find_package(libconfig CONFIG REQUIRED)
-    set(LIBCONFIG_LINK_TARGET libconfig::config++)
+    set(LIBCONFIG_LINK_TARGET libconfig::libconfig++)
 else()
     set(LIBCONFIG_LINK_TARGET PkgConfig::LIBCONFIG)
 endif()
