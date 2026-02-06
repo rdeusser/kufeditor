@@ -3,12 +3,19 @@
 #include <optional>
 #include <string>
 
-std::optional<std::string> macosOpenFile(const char* filter) {
+std::optional<std::string> macosOpenFile(const char* filter, const char* initialDir) {
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
         [panel setCanChooseFiles:YES];
         [panel setCanChooseDirectories:NO];
         [panel setAllowsMultipleSelection:NO];
+
+        // Set initial directory if provided.
+        if (initialDir && strlen(initialDir) > 0) {
+            NSString* dirPath = [NSString stringWithUTF8String:initialDir];
+            NSURL* dirURL = [NSURL fileURLWithPath:dirPath isDirectory:YES];
+            [panel setDirectoryURL:dirURL];
+        }
 
         // Parse filter and set allowed file types.
         // Filter format: "*.sox" or similar.
@@ -63,6 +70,24 @@ std::optional<std::string> macosSaveFile(const char* filter, const char* default
 
         if ([panel runModal] == NSModalResponseOK) {
             NSURL* url = [panel URL];
+            if (url) {
+                return std::string([[url path] UTF8String]);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> macosOpenFolder() {
+    @autoreleasepool {
+        NSOpenPanel* panel = [NSOpenPanel openPanel];
+        [panel setCanChooseFiles:NO];
+        [panel setCanChooseDirectories:YES];
+        [panel setAllowsMultipleSelection:NO];
+        [panel setMessage:@"Select the game's SOX folder"];
+
+        if ([panel runModal] == NSModalResponseOK) {
+            NSURL* url = [[panel URLs] firstObject];
             if (url) {
                 return std::string([[url path] UTF8String]);
             }

@@ -67,8 +67,8 @@ TEST_CASE("SoxBinary validates resistance ranges", "[sox_binary]") {
     kuf::SoxBinary sox;
     auto data = createMinimalTroopInfoSox();
 
-    // Set invalid resistance (outside -200 to 200, not in instant-death range).
-    int32_t badResist = 500;
+    // Set invalid resistance (outside typical 0-500 range, not in instant-death range).
+    int32_t badResist = 501;
     std::memcpy(data.data() + 8 + 0x38, &badResist, 4);
 
     REQUIRE(sox.load(data));

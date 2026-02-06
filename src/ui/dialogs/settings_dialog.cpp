@@ -54,11 +54,13 @@ bool SettingsDialog::draw() {
     if (ImGui::Button("Apply", ImVec2(80, 0))) {
         config_ = pendingConfig_;
         apply();
+        save();
     }
     ImGui::SameLine();
     if (ImGui::Button("OK", ImVec2(80, 0))) {
         config_ = pendingConfig_;
         apply();
+        save();
         open_ = false;
     }
     ImGui::SameLine();

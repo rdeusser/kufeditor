@@ -23,6 +23,20 @@ To read a SOX file:
 - **Footer**: `THEND` marker + space padding (0x20) to 64 bytes (also hex encoded)
 - **Special value**: `-1` stored as `0xFFFFFFFF` → ASCII `"FFFFFFFF"`
 
+## Data Type Conventions
+
+From KUF Discord modding community (Keaton):
+
+| Size | Type | Notes |
+|------|------|-------|
+| 4 bytes | int/uint | Standard integer |
+| 4 bytes (float) | float32 | IEEE 754 single precision |
+| 2 bytes | short | Unsigned short integer |
+| 1 byte | char | Signed character |
+| 1 byte (bool) | bool | 0 = false, non-zero = true |
+
+**Important**: In SOX files, shorts and chars are typically **padded to 4 bytes** unless otherwise specified. This means a "short" field still occupies 4 bytes in the file.
+
 ## File Variants
 
 1. **Main files** (`AbilityInfo.sox`): Contains gameplay data with localization keys like `@(Scout)`
@@ -243,6 +257,8 @@ Each record contains an ID followed by a space-separated list of possible names 
 
 Defines all troop/unit types with their combat statistics.
 
+**Verification Status**: The field layout below was determined through game UI testing, NOT from original source code. No authoritative header file defining the TroopInfo struct has been found. The resistance field order (14-23) should be treated as best-effort reverse engineering.
+
 **Main File Structure:**
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
@@ -264,20 +280,20 @@ Defines all troop/unit types with their combat statistics.
 | 7 | AttackRangeMax | float32 | Max attack range |
 | 8 | AttackRangeMin | float32 | Min attack range (0 = no ranged) |
 | 9 | AttackFrontRange | float32 | Frontal attack range |
-| 10 | DirectAttack | float32 | Melee/frontal attack strength |
-| 11 | IndirectAttack | float32 | Ranged attack strength |
+| 10 | IndirectAttack | float32 | Secondary/splash attack strength |
+| 11 | DirectAttack | float32 | Primary attack strength |
 | 12 | Defense | float32 | Defense strength |
 | 13 | BaseWidth | float32 | Base troop size |
-| 14 | ResistMelee | float32 | Melee damage resistance |
-| 15 | ResistRanged | float32 | Ranged damage resistance |
-| 16 | ResistExplosion | float32 | Explosion damage resistance |
-| 17 | ResistFrontal | float32 | Frontal damage resistance |
-| 18 | ResistFire | float32 | Fire damage resistance |
-| 19 | ResistLightning | float32 | Lightning damage resistance |
-| 20 | ResistIce | float32 | Ice damage resistance |
-| 21 | ResistHoly | float32 | Holy damage resistance |
-| 22 | ResistPoison | float32 | Poison damage resistance |
-| 23 | ResistCurse | float32 | Curse damage resistance |
+| 14 | ResistMelee | int32 | Melee damage resistance |
+| 15 | ResistRanged | int32 | Ranged damage resistance |
+| 16 | ResistFrontal | int32 | Frontal damage resistance |
+| 17 | ResistExplosion | int32 | Explosion damage resistance |
+| 18 | ResistFire | int32 | Fire damage resistance |
+| 19 | ResistIce | int32 | Ice damage resistance |
+| 20 | ResistLightning | int32 | Lightning damage resistance |
+| 21 | ResistHoly | int32 | Holy damage resistance |
+| 22 | ResistCurse | int32 | Curse damage resistance |
+| 23 | ResistEarth | int32 | Earth/Poison damage resistance |
 | 24 | MaxUnitSpeedMultiplier | float32 | Unit speed multiplier |
 | 25 | DefaultUnitHP | float32 | Default HP per unit |
 | 26 | FormationRandom | int32 | Formation randomness |
@@ -300,24 +316,25 @@ Defines all troop/unit types with their combat statistics.
 | 1000000+ | Instant death | (recon units) |
 
 **Example - Flying Units (Storm Riders, Black Wyverns):**
-- Melee: 0 (immune - ground troops can't reach them)
-- Ranged: -50 (vulnerable - archers can shoot them down)
-- Explosion: -100 (very vulnerable - anti-air siege weapons)
-- All others: 0 (immune)
+- Melee: 0 (file=100, normal - immunity is engine-enforced for flying units)
+- Ranged: -50 (file=150, vulnerable - archers can shoot them down)
+- Frontal: 0 (file=100, normal)
+- Explosion: -100 (file=200, very vulnerable - anti-air siege weapons)
+- All elemental: 0 (file=100, normal)
 
 **Damage Type Mapping:**
 | Field | Type | Notes |
 |-------|------|-------|
 | 14 | Melee | Direct melee attacks |
 | 15 | Ranged | Arrow/projectile attacks |
-| 16 | Explosion | Explosive damage (catapults, Ghoul Selfdestruct) |
-| 17 | Frontal | Frontal charge attacks |
+| 16 | Frontal | Frontal charge attacks |
+| 17 | Explosion | Explosive damage (catapults, Ghoul Selfdestruct) |
 | 18 | Fire | Fire elemental |
-| 19 | Lightning | Lightning elemental |
-| 20 | Ice | Ice elemental |
+| 19 | Ice | Ice elemental |
+| 20 | Lightning | Lightning elemental |
 | 21 | Holy | Holy damage (Ghouls vulnerable) |
-| 22 | Poison | Poison damage (Ghouls immune) |
-| 23 | Curse | Curse damage (Ghouls immune) |
+| 22 | Curse | Curse damage (Ghouls immune) |
+| 23 | Earth | Earth/Poison damage (Ghouls immune) |
 
 **TypeID Classes (from K2TroopDef.h):**
 | Hex | TypeID | Category |
@@ -365,15 +382,18 @@ Defines all troop/unit types with their combat statistics.
 | 0x0C | Earth |
 | 0x0D | Curse |
 
-**Notable Damage Resistances:**
-| Unit | Resistances (0=immune) | Vulnerabilities (negative) |
-|------|------------------------|---------------------------|
-| Storm Riders | Melee (0), Frontal (0), All Magic (0) | Ranged (-50), Explosion (-100) |
-| Black Wyverns | Melee (0), Frontal (0), All Magic (0) | Ranged (-50), Explosion (-100) |
-| Ghoul | Poison (0), Curse (0) | Holy (-200) |
-| WallGuards | All elemental (0) | Physical (-100) |
-| S.Mammoth | Most types (0) | - |
-| Scout/Exp.Ghoul | None | All (1M+) = instant death |
+**Notable Damage Resistances (UI values = 100 - file value):**
+| Unit | Normal (0) | Vulnerabilities (negative) |
+|------|------------|---------------------------|
+| Storm Riders | Melee, Frontal, All Magic | Ranged (-50), Explosion (-100) |
+| Black Wyverns | Melee, Frontal, All Magic | Ranged (-50), Explosion (-100) |
+| Ghoul | Earth (+100), Curse (+100) | Holy (-200), Ice (-100) |
+| Infantry | Melee, Frontal, Explosion, Fire, Holy | Ice (-150), Lightning (-20), Curse (-20), Earth (-50), Ranged (+20) |
+| Scout/Exp.Ghoul | None | All (file value 1M+) = instant death |
+
+**Note:** Flying units (Storm Riders, Wyverns, Dirigibles) cannot be hit by ground melee attacks - this is enforced by the game engine, not resistance values. Their melee resistance in the file is 100 (normal), not 0 (immune).
+
+**PC Port Bug (Patch 4):** The PC port's Patch 4 inverted resistance calculations. Positive resistances now INCREASE damage taken instead of reducing it. Workaround: use Steam console to download Patch 3 depot: `download_depot 1121420 1121421 4395673366137241035`
 
 **Resistance Sources:**
 - **Troop resistances**: Defined in TroopInfo.sox (fields 14-23). Includes all 10 damage types.
@@ -493,11 +513,11 @@ Defines character/unit type configurations for all unit types (63 entries).
 | Field | Type | Description |
 |-------|------|-------------|
 | 0 | uint32 | Character ID (0-62) |
-| 1 | int32 | Animation ID (-1 = none) |
+| 1 | int32 | Animation ID (-1 = none, see below) |
 | 2 | int32 | Model ID variant (-1 = default) |
 | 3 | int32 | Unknown (-1 = default) |
 | 4 | uint32 | Max HP |
-| 5 | uint32 | Current/Base HP |
+| 5 | uint32 | **Hero Class** (see below) |
 | 6 | uint32 | Unknown HP field |
 | 7 | uint32 | Unknown (0) |
 | 8 | uint32 | Unknown (2) |
@@ -508,6 +528,42 @@ Defines character/unit type configurations for all unit types (63 entries).
 | 20-27 | int32[8] | Skill/ability slot IDs (-1 = empty) |
 | 28-32 | int32[5] | Additional ability slots (-1 = empty) |
 | 33 | uint32 | Unknown footer value |
+
+**Field 5 - Hero Class:**
+
+Controls whether a character can use elemental equipment attributes (Fire, Ice, Lightning, Holy, Poison, Curse from ItemAttInfo Category 7).
+
+| Value | Meaning | Characters |
+|-------|---------|------------|
+| 5 | Human Hero | Gerald (Hironeiden), Kendal (Ecclesian) |
+| 10 | Dark Elf Hero | Lucretia (Dark Legion) |
+| 15 | Empowered Hero | Regnier (Dark Legion/Hexter, transformed by Ancient Heart) |
+| 0 | Generic Troop | Siege units, flying units, etc. |
+| 20 | Standard Troop | Infantry, spearmen, knights, etc. |
+| 25 | Special NPC | Urukubarr |
+| 40 | Officer/Support | Ellen, Morene, Rupert, Cirith, Leinhart, Thomas, Duane, etc. |
+
+**Elemental Equipment Rule:** Only characters with Field5 in {5, 10, 15} can receive elemental equipment attributes. All officers (Field5=40) cannot.
+
+**Field 1 - Animation ID (Playable Heroes):**
+
+| Anim ID | Hero | Notes |
+|---------|------|-------|
+| 30 | Gerald | Human sword fighter |
+| 31 | Kendal | Human mace/staff fighter |
+| 32 | Regnier | Transformed human, huge flaming sword |
+| 44 | Lucretia | Dark Elf dual sword fighter |
+
+These 4 animation IDs are unique to the main playable heroes and have full player-controllable combat animations. Other characters use animation IDs 0-29 (troops) or 33+ (officers/NPCs).
+
+**Main Playable Heroes:**
+
+| Char ID | Name | Faction | Race | Field5 | Anim ID |
+|---------|------|---------|------|--------|---------|
+| 32 | Gerald | Hironeiden | Human | 5 | 30 |
+| 37 | Kendal | Ecclesian | Human | 5 | 31 |
+| 43 | Lucretia | Dark Legion | Dark Elf | 10 | 44 |
+| 34 | Regnier | Dark Legion/Hexter | Human (empowered) | 15 | 32 |
 
 **Localized File (_ENG.sox) Structure:**
 Variable-length records with ID and display name:
@@ -834,3 +890,20 @@ Font styles use a markup format with directives:
 | 89B3FF | Blue | Links, special text |
 | FF6A42 | Red | Warnings |
 | 878075 | Gray | Disabled/inactive |
+
+---
+
+## Modding Resources
+
+| Resource | URL | Description |
+|----------|-----|-------------|
+| SOX Guide | https://steamcommunity.com/sharedfiles/filedetails/?id=2016205613 | Floyd's SOX file format guide |
+| STG Guide | https://steamcommunity.com/sharedfiles/filedetails/?id=3033606561 | Mission file editing guide |
+| Savegame Guide | https://steamcommunity.com/sharedfiles/filedetails/?id=2089344971 | Hex editing save files |
+| KUF Discord | https://discord.gg/kuf | Modding community (#🛠modding-chat) |
+
+## Known Limitations
+
+- **No authoritative struct definitions**: Original C header files for SOX record structures (TroopInfo, etc.) have not been found. Field layouts are reverse-engineered.
+- **PC Port Patch 4 resistance bug**: Resistance calculations are inverted. Use Patch 3 depot for correct behavior.
+- **Skill level cap**: Maximum 65535 enforced by executable. SkillPointTable.sox must be extended for levels beyond 99.

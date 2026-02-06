@@ -46,6 +46,12 @@ bool SoxText::load(std::span<const std::byte> data) {
         uint16_t textLen = readLE<uint16_t>(data.data() + offset);
         offset += 2;
 
+        // Reject entries with zero length.
+        if (textLen == 0) {
+            entries_.clear();
+            return false;
+        }
+
         if (offset + textLen > data.size()) {
             break;
         }
@@ -55,6 +61,14 @@ bool SoxText::load(std::span<const std::byte> data) {
 
         const char* textStart = reinterpret_cast<const char*>(data.data() + offset);
         entry.text = std::string(textStart, textLen);
+
+        // Validate text is printable ASCII (plus common whitespace).
+        for (char c : entry.text) {
+            if (c != '\t' && c != '\n' && c != '\r' && (c < 32 || c > 126)) {
+                entries_.clear();
+                return false;
+            }
+        }
 
         entries_.push_back(std::move(entry));
         offset += textLen;

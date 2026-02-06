@@ -1,4 +1,4 @@
-#include "ui/views/text_editor.h"
+#include "ui/tabs/text_editor_tab.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -6,21 +6,19 @@
 
 namespace kuf {
 
-TextEditorView::TextEditorView() : View("Text Editor") {}
-
-void TextEditorView::setData(std::shared_ptr<SoxText> data) {
-    data_ = std::move(data);
-    selectedEntry_ = -1;
+TextEditorTab::TextEditorTab(std::shared_ptr<OpenDocument> doc)
+    : EditorTab(std::move(doc)) {
     editBuffer_[0] = '\0';
 }
 
-void TextEditorView::drawContent() {
-    if (!data_) {
+void TextEditorTab::drawContent() {
+    if (!document_ || !document_->textData) {
         ImGui::TextDisabled("No text file loaded");
         return;
     }
 
-    ImGui::Text("%zu text entries", data_->entryCount());
+    auto& textData = document_->textData;
+    ImGui::Text("%zu text entries", textData->entryCount());
     ImGui::Separator();
 
     ImGui::BeginChild("TextList", ImVec2(0, 0), true);
@@ -33,8 +31,8 @@ void TextEditorView::drawContent() {
         ImGui::TableSetupColumn("Text", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        for (size_t i = 0; i < data_->entries().size(); ++i) {
-            auto& entry = data_->entries()[i];
+        for (size_t i = 0; i < textData->entries().size(); ++i) {
+            auto& entry = textData->entries()[i];
             ImGui::TableNextRow();
 
             // Index.
@@ -59,6 +57,7 @@ void TextEditorView::drawContent() {
                 if (ImGui::InputText("##edit", editBuffer_, entry.maxLength + 1,
                         ImGuiInputTextFlags_EnterReturnsTrue)) {
                     entry.text = editBuffer_;
+                    document_->dirty = true;
                 }
             } else {
                 ImGui::Text("%s", entry.text.c_str());

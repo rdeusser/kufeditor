@@ -2,22 +2,22 @@
 #include "core/window.h"
 #include "core/imgui_context.h"
 #include "core/recent_files.h"
-#include "ui/views/troop_editor.h"
-#include "ui/views/text_editor.h"
+#include "core/tab_manager.h"
+#include "ui/views/home_view.h"
 #include "ui/views/validation_log.h"
 #include "ui/dialogs/file_dialog.h"
 #include "ui/dialogs/settings_dialog.h"
+#include "ui/tabs/editor_tab.h"
+#include "ui/tabs/troop_editor_tab.h"
 #include "formats/sox_binary.h"
 #include "formats/sox_text.h"
-#include "formats/sox_encoding.h"
-#include "undo/undo_stack.h"
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <GLFW/glfw3.h>
 
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 
 namespace kuf {
 
@@ -37,16 +37,17 @@ Application::Application() {
     window_ = std::make_unique<Window>("KUF Editor", 1280, 720);
     imgui_ = std::make_unique<ImGuiContext>(window_->handle());
 
-    // Create all views.
-    troopEditor_ = std::make_unique<TroopEditorView>();
-    textEditor_ = std::make_unique<TextEditorView>();
+    // Create views.
+    homeView_ = std::make_unique<HomeView>();
     validationLog_ = std::make_unique<ValidationLogView>();
+
+    // Create tab manager.
+    tabManager_ = std::make_unique<TabManager>();
 
     // Create dialogs.
     settingsDialog_ = std::make_unique<SettingsDialog>();
 
     // Create core services.
-    undoStack_ = std::make_unique<UndoStack>();
     recentFiles_ = std::make_unique<RecentFiles>(10);
 
     // Load config.
@@ -56,18 +57,27 @@ Application::Application() {
     recentFiles_->setMaxFiles(settingsDialog_->config().maxRecentFiles);
 
     // Set up callbacks.
-    undoStack_->setOnChange([this]() {
-        dirty_ = true;
+    homeView_->setOnSelectGameDirectory([this](const std::string& dir) {
+        setGameDirectory(dir);
+    });
+
+    tabManager_->setOnDocumentOpened([this](OpenDocument* doc) {
+        if (doc && !doc->path.empty()) {
+            recentFiles_->add(doc->path);
+            settingsDialog_->config().recentFiles = recentFiles_->files();
+            settingsDialog_->save();
+        }
     });
 
     validationLog_->setOnNavigate([this](size_t recordIndex) {
-        troopEditor_->selectTroop(recordIndex);
-        troopEditor_->isOpen() = true;
+        auto* tab = tabManager_->activeTab();
+        if (auto* troopTab = dynamic_cast<TroopEditorTab*>(tab)) {
+            troopTab->selectTroop(recordIndex);
+        }
     });
 }
 
 Application::~Application() {
-    // Save config.
     settingsDialog_->config().recentFiles = recentFiles_->files();
     settingsDialog_->save();
 }
@@ -81,13 +91,25 @@ void Application::run() {
         handleKeyboardShortcuts();
         drawDockspace();
 
-        // Draw all views.
-        troopEditor_->draw();
-        textEditor_->draw();
+        // Draw validation log (dockable).
         validationLog_->draw();
 
         // Draw dialogs.
         settingsDialog_->draw();
+
+        // Error popup.
+        if (showErrorPopup_) {
+            ImGui::OpenPopup("Error");
+            showErrorPopup_ = false;
+        }
+        if (ImGui::BeginPopupModal("Error", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("%s", pendingPopupMessage_.c_str());
+            ImGui::Separator();
+            if (ImGui::Button("OK", ImVec2(120, 0))) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
 
         imgui_->endFrame();
 
@@ -100,91 +122,27 @@ void Application::run() {
 }
 
 void Application::openFile(const std::string& path) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return;
+    auto result = tabManager_->openFile(path);
 
-    auto size = file.tellg();
-    file.seekg(0);
-
-    rawFileData_.resize(size);
-    file.read(reinterpret_cast<char*>(rawFileData_.data()), size);
-
-    std::string filename = getFileName(path);
-
-    // SOX files use ASCII hex encoding. Decode if detected.
-    std::span<const std::byte> parseData = rawFileData_;
-    std::vector<std::byte> decodedData;
-    isSoxEncoded_ = isSoxEncoded(rawFileData_);
-
-    if (isSoxEncoded_) {
-        auto decoded = soxDecode(rawFileData_);
-        if (decoded) {
-            decodedData = std::move(*decoded);
-            parseData = decodedData;
-        }
+    if (result.result == OpenResult::FileNotFound) {
+        pendingPopupMessage_ = "Cannot open file: File not found";
+        showErrorPopup_ = true;
+    } else if (result.result == OpenResult::UnsupportedFormat) {
+        pendingPopupMessage_ = "Cannot open file: Unsupported format";
+        showErrorPopup_ = true;
     }
 
-    // Try binary SOX first (has version header = 100).
-    auto binary = std::make_shared<SoxBinary>();
-    if (binary->load(parseData)) {
-        currentBinaryFile_ = binary;
-        currentTextFile_ = nullptr;
-        currentPath_ = path;
-        troopEditor_->setData(binary);
-        textEditor_->setData(nullptr);
-        validationLog_->setIssues(binary->validate());
-        undoStack_->clear();
-        dirty_ = false;
-        recentFiles_->add(path);
-        return;
-    }
-
-    // Try text SOX.
-    auto text = std::make_shared<SoxText>();
-    if (text->load(parseData)) {
-        currentTextFile_ = text;
-        currentBinaryFile_ = nullptr;
-        currentPath_ = path;
-        textEditor_->setData(text);
-        troopEditor_->setData(nullptr);
-        validationLog_->setIssues(text->validate());
-        undoStack_->clear();
-        dirty_ = false;
-        recentFiles_->add(path);
-        return;
-    }
-
-    // Unknown format.
-    currentBinaryFile_ = nullptr;
-    currentTextFile_ = nullptr;
-    currentPath_ = path;
-    troopEditor_->setData(nullptr);
-    textEditor_->setData(nullptr);
-    validationLog_->setIssues({});
-    undoStack_->clear();
-    dirty_ = false;
-    recentFiles_->add(path);
+    updateValidationLog();
 }
 
-void Application::saveFile() {
-    if (currentPath_.empty()) return;
+void Application::setGameDirectory(const std::string& dir) {
+    gameDirectory_ = dir;
+}
 
-    std::vector<std::byte> data;
-    if (currentBinaryFile_) {
-        data = currentBinaryFile_->save();
-    } else if (currentTextFile_) {
-        data = currentTextFile_->save();
-    }
-
-    if (!data.empty()) {
-        // Re-encode to ASCII hex if the original file was hex-encoded.
-        if (isSoxEncoded_) {
-            data = soxEncode(data);
-        }
-
-        std::ofstream file(currentPath_, std::ios::binary);
-        file.write(reinterpret_cast<const char*>(data.data()), data.size());
-        dirty_ = false;
+void Application::saveActiveDocument() {
+    auto* tab = tabManager_->activeTab();
+    if (tab && tab->document()) {
+        tabManager_->saveDocument(tab->document().get());
     }
 }
 
@@ -197,32 +155,62 @@ void Application::handleKeyboardShortcuts() {
     cmdOrCtrl = io.KeySuper;
 #endif
 
+    auto* activeTab = tabManager_->activeTab();
+    auto* activeDoc = activeTab ? activeTab->document().get() : nullptr;
+
     if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-        if (io.KeyShift) {
-            undoStack_->redo();
-        } else {
-            undoStack_->undo();
+        if (activeDoc && activeDoc->undoStack) {
+            if (io.KeyShift) {
+                activeDoc->undoStack->redo();
+            } else {
+                activeDoc->undoStack->undo();
+            }
         }
     }
     if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) {
-        undoStack_->redo();
+        if (activeDoc && activeDoc->undoStack) {
+            activeDoc->undoStack->redo();
+        }
     }
     if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) {
-        if (auto path = FileDialog::openFile("*.sox")) {
+        if (auto path = FileDialog::openFile("*.sox", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
             openFile(*path);
         }
     }
     if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
-        saveFile();
+        saveActiveDocument();
+    }
+}
+
+void Application::updateValidationLog() {
+    auto* tab = tabManager_->activeTab();
+    if (!tab || !tab->document()) {
+        validationLog_->setIssues({});
+        return;
+    }
+
+    auto* doc = tab->document().get();
+    if (doc->binaryData) {
+        validationLog_->setIssues(doc->binaryData->validate());
+    } else if (doc->textData) {
+        validationLog_->setIssues(doc->textData->validate());
+    } else {
+        validationLog_->setIssues({});
     }
 }
 
 void Application::drawMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open...", "Ctrl+O")) {
-                if (auto path = FileDialog::openFile("*.sox")) {
+            if (ImGui::MenuItem("Open File...", "Ctrl+O")) {
+                if (auto path = FileDialog::openFile("*.sox", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
                     openFile(*path);
+                }
+            }
+
+            if (ImGui::MenuItem("Set Game Directory...")) {
+                if (auto path = FileDialog::openFolder()) {
+                    setGameDirectory(*path);
                 }
             }
 
@@ -242,9 +230,10 @@ void Application::drawMenuBar() {
                 ImGui::EndMenu();
             }
 
-            bool hasFile = currentBinaryFile_ || currentTextFile_;
+            auto* activeTab = tabManager_->activeTab();
+            bool hasFile = activeTab && activeTab->document() && activeTab->document()->hasData();
             if (ImGui::MenuItem("Save", "Ctrl+S", false, hasFile)) {
-                saveFile();
+                saveActiveDocument();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
@@ -254,20 +243,27 @@ void Application::drawMenuBar() {
         }
 
         if (ImGui::BeginMenu("Edit")) {
+            auto* activeTab = tabManager_->activeTab();
+            auto* activeDoc = activeTab ? activeTab->document().get() : nullptr;
+            auto* undoStack = activeDoc ? activeDoc->undoStack.get() : nullptr;
+
             std::string undoLabel = "Undo";
             std::string redoLabel = "Redo";
-            if (undoStack_->canUndo()) {
-                undoLabel += " " + undoStack_->undoDescription();
+            bool canUndo = undoStack && undoStack->canUndo();
+            bool canRedo = undoStack && undoStack->canRedo();
+
+            if (canUndo) {
+                undoLabel += " " + undoStack->undoDescription();
             }
-            if (undoStack_->canRedo()) {
-                redoLabel += " " + undoStack_->redoDescription();
+            if (canRedo) {
+                redoLabel += " " + undoStack->redoDescription();
             }
 
-            if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, undoStack_->canUndo())) {
-                undoStack_->undo();
+            if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, canUndo)) {
+                undoStack->undo();
             }
-            if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, undoStack_->canRedo())) {
-                undoStack_->redo();
+            if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, canRedo)) {
+                undoStack->redo();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Settings...")) {
@@ -277,8 +273,7 @@ void Application::drawMenuBar() {
         }
 
         if (ImGui::BeginMenu("View")) {
-            ImGui::MenuItem("Troop Editor", nullptr, &troopEditor_->isOpen());
-            ImGui::MenuItem("Text Editor", nullptr, &textEditor_->isOpen());
+            ImGui::MenuItem("Home", nullptr, &showHomeTab_);
             ImGui::MenuItem("Validation Log", nullptr, &validationLog_->isOpen());
             ImGui::EndMenu();
         }
@@ -289,6 +284,72 @@ void Application::drawMenuBar() {
         }
 
         ImGui::EndMainMenuBar();
+    }
+}
+
+void Application::drawTabBar() {
+    ImGuiTabBarFlags tabBarFlags = ImGuiTabBarFlags_Reorderable |
+                                   ImGuiTabBarFlags_AutoSelectNewTabs |
+                                   ImGuiTabBarFlags_FittingPolicyScroll;
+
+    if (ImGui::BeginTabBar("MainTabBar", tabBarFlags)) {
+        // Home tab.
+        if (showHomeTab_) {
+            ImGuiTabItemFlags homeFlags = ImGuiTabItemFlags_None;
+            bool homeOpen = true;
+            if (ImGui::BeginTabItem("Home", &homeOpen, homeFlags)) {
+                homeView_->drawContent();
+                ImGui::EndTabItem();
+            }
+            if (!homeOpen) {
+                showHomeTab_ = false;
+            }
+        }
+
+        // Editor tabs.
+        EditorTab* tabToClose = nullptr;
+        EditorTab* newActiveTab = nullptr;
+
+        for (const auto& tab : tabManager_->tabs()) {
+            ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
+            bool open = tab->isOpen();
+
+            // Mark dirty tabs.
+            if (tab->document() && tab->document()->dirty) {
+                flags |= ImGuiTabItemFlags_UnsavedDocument;
+            }
+
+            ImGui::PushID(tab->tabId());
+            if (ImGui::BeginTabItem(tab->tabTitle().c_str(), &open, flags)) {
+                // Track selection.
+                if (tabManager_->activeTab() != tab.get()) {
+                    newActiveTab = tab.get();
+                }
+
+                tab->drawContent();
+                ImGui::EndTabItem();
+            }
+            ImGui::PopID();
+
+            if (!open) {
+                tabToClose = tab.get();
+            }
+        }
+
+        // Update active tab if it changed.
+        if (newActiveTab) {
+            tabManager_->setActiveTab(newActiveTab);
+            updateValidationLog();
+        }
+
+        // Close tab if requested.
+        if (tabToClose) {
+            // TODO: Prompt to save if dirty.
+            tabManager_->closeTab(tabToClose);
+            updateValidationLog();
+        }
+
+        ImGui::EndTabBar();
     }
 }
 
@@ -318,6 +379,11 @@ void Application::drawDockspace() {
 
     drawMenuBar();
 
+    // Tab bar area.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 6));
+    drawTabBar();
+    ImGui::PopStyleVar();
+
     // Reserve space for status bar at bottom.
     float statusBarHeight = 24.0f;
     float dockspaceHeight = ImGui::GetContentRegionAvail().y - statusBarHeight;
@@ -328,21 +394,28 @@ void Application::drawDockspace() {
     // Status bar.
     ImGui::BeginChild("StatusBar", ImVec2(0, statusBarHeight), false);
     ImGui::SetCursorPosX(8.0f);
-    if (currentBinaryFile_) {
-        ImGui::Text("%s%s | %s | %zu troops",
-            currentPath_.c_str(),
-            dirty_ ? "*" : "",
-            currentBinaryFile_->detectedVersion() == GameVersion::Crusaders ? "Crusaders" : "Heroes",
-            currentBinaryFile_->recordCount());
-    } else if (currentTextFile_) {
-        ImGui::Text("%s%s | Text SOX | %zu entries",
-            currentPath_.c_str(),
-            dirty_ ? "*" : "",
-            currentTextFile_->entryCount());
-    } else if (!currentPath_.empty()) {
-        ImGui::Text("%s | Unknown format | %zu bytes",
-            currentPath_.c_str(),
-            rawFileData_.size());
+
+    auto* activeTab = tabManager_->activeTab();
+    if (activeTab && activeTab->document()) {
+        auto* doc = activeTab->document().get();
+        if (doc->binaryData) {
+            ImGui::Text("%s%s | %s | %zu troops",
+                doc->path.c_str(),
+                doc->dirty ? "*" : "",
+                doc->binaryData->detectedVersion() == GameVersion::Crusaders ? "Crusaders" : "Heroes",
+                doc->binaryData->recordCount());
+        } else if (doc->textData) {
+            ImGui::Text("%s%s | Text SOX | %zu entries",
+                doc->path.c_str(),
+                doc->dirty ? "*" : "",
+                doc->textData->entryCount());
+        } else {
+            ImGui::Text("%s | Unknown format | %zu bytes",
+                doc->path.c_str(),
+                doc->rawData.size());
+        }
+    } else if (showHomeTab_) {
+        ImGui::Text("Ready - Select a game or open a file");
     } else {
         ImGui::Text("Ready");
     }

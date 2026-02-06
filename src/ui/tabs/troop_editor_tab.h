@@ -1,27 +1,25 @@
 #pragma once
 
-#include "ui/views/view.h"
+#include "ui/tabs/editor_tab.h"
 #include "formats/sox_binary.h"
 
 #include <memory>
 
 namespace kuf {
 
-class TroopEditorView : public View {
+class TroopEditorTab : public EditorTab {
 public:
-    TroopEditorView();
+    explicit TroopEditorTab(std::shared_ptr<OpenDocument> doc);
 
     void drawContent() override;
 
-    void setData(std::shared_ptr<SoxBinary> data);
-    bool hasData() const { return data_ != nullptr; }
     void selectTroop(size_t index);
+    int selectedTroop() const { return selectedTroop_; }
 
 private:
     void drawTroopTable();
     void drawTroopDetails(size_t index);
 
-    std::shared_ptr<SoxBinary> data_;
     int selectedTroop_ = -1;
 
     static constexpr const char* TROOP_NAMES[] = {

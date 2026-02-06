@@ -8,14 +8,13 @@ namespace kuf {
 
 class Window;
 class ImGuiContext;
-class TroopEditorView;
-class TextEditorView;
+class HomeView;
 class ValidationLogView;
 class SettingsDialog;
-class SoxBinary;
-class SoxText;
-class UndoStack;
+class TabManager;
 class RecentFiles;
+class OpenDocument;
+class EditorTab;
 
 class Application {
 public:
@@ -24,32 +23,29 @@ public:
 
     void run();
 
-    UndoStack& undoStack() { return *undoStack_; }
-
 private:
     void drawMenuBar();
+    void drawTabBar();
     void drawDockspace();
     void openFile(const std::string& path);
-    void saveFile();
+    void setGameDirectory(const std::string& dir);
+    void saveActiveDocument();
     void handleKeyboardShortcuts();
-    void updateRecentFilesMenu();
+    void updateValidationLog();
 
     std::unique_ptr<Window> window_;
     std::unique_ptr<ImGuiContext> imgui_;
-    std::unique_ptr<TroopEditorView> troopEditor_;
-    std::unique_ptr<TextEditorView> textEditor_;
+    std::unique_ptr<HomeView> homeView_;
     std::unique_ptr<ValidationLogView> validationLog_;
     std::unique_ptr<SettingsDialog> settingsDialog_;
-    std::unique_ptr<UndoStack> undoStack_;
+    std::unique_ptr<TabManager> tabManager_;
     std::unique_ptr<RecentFiles> recentFiles_;
 
-    std::shared_ptr<SoxBinary> currentBinaryFile_;
-    std::shared_ptr<SoxText> currentTextFile_;
-    std::vector<std::byte> rawFileData_;
-    std::string currentPath_;
+    std::string gameDirectory_;
+    std::string pendingPopupMessage_;
     bool running_ = true;
-    bool dirty_ = false;
-    bool isSoxEncoded_ = false;
+    bool showHomeTab_ = true;
+    bool showErrorPopup_ = false;
 };
 
 } // namespace kuf

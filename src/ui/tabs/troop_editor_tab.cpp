@@ -1,25 +1,22 @@
-#include "ui/views/troop_editor.h"
+#include "ui/tabs/troop_editor_tab.h"
 
 #include <cfloat>
 #include <imgui.h>
 
 namespace kuf {
 
-TroopEditorView::TroopEditorView() : View("Troop Editor") {}
+TroopEditorTab::TroopEditorTab(std::shared_ptr<OpenDocument> doc)
+    : EditorTab(std::move(doc)) {}
 
-void TroopEditorView::setData(std::shared_ptr<SoxBinary> data) {
-    data_ = std::move(data);
-    selectedTroop_ = -1;
-}
-
-void TroopEditorView::selectTroop(size_t index) {
-    if (data_ && index < data_->troops().size()) {
+void TroopEditorTab::selectTroop(size_t index) {
+    if (document_ && document_->binaryData &&
+        index < document_->binaryData->troops().size()) {
         selectedTroop_ = static_cast<int>(index);
     }
 }
 
-void TroopEditorView::drawContent() {
-    if (!data_) {
+void TroopEditorTab::drawContent() {
+    if (!document_ || !document_->binaryData) {
         ImGui::TextDisabled("No troop data loaded");
         return;
     }
@@ -32,7 +29,8 @@ void TroopEditorView::drawContent() {
     ImGui::SameLine();
 
     ImGui::BeginChild("TroopDetails", ImVec2(0, listHeight), ImGuiChildFlags_Borders);
-    if (selectedTroop_ >= 0 && selectedTroop_ < static_cast<int>(data_->troops().size())) {
+    if (selectedTroop_ >= 0 &&
+        selectedTroop_ < static_cast<int>(document_->binaryData->troops().size())) {
         drawTroopDetails(selectedTroop_);
     } else {
         ImGui::TextDisabled("Select a troop to edit");
@@ -40,8 +38,9 @@ void TroopEditorView::drawContent() {
     ImGui::EndChild();
 }
 
-void TroopEditorView::drawTroopTable() {
-    for (size_t i = 0; i < data_->troops().size(); ++i) {
+void TroopEditorTab::drawTroopTable() {
+    const auto& troops = document_->binaryData->troops();
+    for (size_t i = 0; i < troops.size(); ++i) {
         const char* name = (i < std::size(TROOP_NAMES)) ? TROOP_NAMES[i] : "Unknown";
         bool selected = (selectedTroop_ == static_cast<int>(i));
 
@@ -51,8 +50,8 @@ void TroopEditorView::drawTroopTable() {
     }
 }
 
-void TroopEditorView::drawTroopDetails(size_t index) {
-    auto& troop = data_->troops()[index];
+void TroopEditorTab::drawTroopDetails(size_t index) {
+    auto& troop = document_->binaryData->troops()[index];
     const char* name = (index < std::size(TROOP_NAMES)) ? TROOP_NAMES[index] : "Unknown";
 
     ImGui::Text("%s", name);
@@ -69,8 +68,8 @@ void TroopEditorView::drawTroopDetails(size_t index) {
         ImGui::DragFloat("Sight Range", &troop.sightRange, 10.0f, 0.0f, 50000.0f, "%.0f");
         ImGui::DragFloat("Attack Range Max", &troop.attackRangeMax, 10.0f, 0.0f, 50000.0f, "%.0f");
         ImGui::DragFloat("Attack Range Min", &troop.attackRangeMin, 10.0f, 0.0f, 50000.0f, "%.0f");
-        ImGui::DragFloat("Direct Attack", &troop.directAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
         ImGui::DragFloat("Indirect Attack", &troop.indirectAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
+        ImGui::DragFloat("Direct Attack", &troop.directAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
         ImGui::DragFloat("Defense", &troop.defense, 1.0f, 0.0f, 1000.0f, "%.0f");
     }
 
@@ -88,14 +87,14 @@ void TroopEditorView::drawTroopDetails(size_t index) {
 
         resistInput("Melee", &troop.resistMelee);
         resistInput("Ranged", &troop.resistRanged);
-        resistInput("Explosion", &troop.resistExplosion);
         resistInput("Frontal", &troop.resistFrontal);
+        resistInput("Explosion", &troop.resistExplosion);
         resistInput("Fire", &troop.resistFire);
-        resistInput("Lightning", &troop.resistLightning);
         resistInput("Ice", &troop.resistIce);
+        resistInput("Lightning", &troop.resistLightning);
         resistInput("Holy", &troop.resistHoly);
-        resistInput("Earth", &troop.resistPoison);
         resistInput("Curse", &troop.resistCurse);
+        resistInput("Earth", &troop.resistEarth);
     }
 
     if (ImGui::CollapsingHeader("Unit Configuration", ImGuiTreeNodeFlags_DefaultOpen)) {

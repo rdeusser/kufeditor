@@ -24,8 +24,8 @@ struct TroopInfo {
     float attackRangeMax;
     float attackRangeMin;
     float attackFrontRange;
-    float directAttack;
     float indirectAttack;
+    float directAttack;
     float defense;
     float baseWidth;
     float resistMelee;
@@ -37,7 +37,7 @@ struct TroopInfo {
     float resistLightning;
     float resistHoly;
     float resistCurse;
-    float resistPoison;
+    float resistEarth;
     float maxUnitSpeedMultiplier;
     float defaultUnitHp;
     int32_t formationRandom;

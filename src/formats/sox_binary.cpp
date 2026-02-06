@@ -67,8 +67,8 @@ bool SoxBinary::load(std::span<const std::byte> data) {
         troop.attackRangeMax = readIntAsFloat(ptr + 0x1C);
         troop.attackRangeMin = readIntAsFloat(ptr + 0x20);
         troop.attackFrontRange = readIntAsFloat(ptr + 0x24);
-        troop.directAttack = readIntAsFloat(ptr + 0x28);
-        troop.indirectAttack = readIntAsFloat(ptr + 0x2C);
+        troop.indirectAttack = readIntAsFloat(ptr + 0x28);
+        troop.directAttack = readIntAsFloat(ptr + 0x2C);
         troop.defense = readIntAsFloat(ptr + 0x30);
         troop.baseWidth = readIntAsFloat(ptr + 0x34);
         troop.resistMelee = readIntAsFloat(ptr + 0x38);
@@ -80,7 +80,7 @@ bool SoxBinary::load(std::span<const std::byte> data) {
         troop.resistLightning = readIntAsFloat(ptr + 0x50);
         troop.resistHoly = readIntAsFloat(ptr + 0x54);
         troop.resistCurse = readIntAsFloat(ptr + 0x58);
-        troop.resistPoison = readIntAsFloat(ptr + 0x5C);
+        troop.resistEarth = readIntAsFloat(ptr + 0x5C);
         troop.maxUnitSpeedMultiplier = readIntAsFloat(ptr + 0x60);
         troop.defaultUnitHp = readIntAsFloat(ptr + 0x64);
         troop.formationRandom = readLE<int32_t>(ptr + 0x68);
@@ -125,8 +125,8 @@ std::vector<std::byte> SoxBinary::save() const {
         writeFloatAsInt(ptr + 0x1C, troop.attackRangeMax);
         writeFloatAsInt(ptr + 0x20, troop.attackRangeMin);
         writeFloatAsInt(ptr + 0x24, troop.attackFrontRange);
-        writeFloatAsInt(ptr + 0x28, troop.directAttack);
-        writeFloatAsInt(ptr + 0x2C, troop.indirectAttack);
+        writeFloatAsInt(ptr + 0x28, troop.indirectAttack);
+        writeFloatAsInt(ptr + 0x2C, troop.directAttack);
         writeFloatAsInt(ptr + 0x30, troop.defense);
         writeFloatAsInt(ptr + 0x34, troop.baseWidth);
         writeFloatAsInt(ptr + 0x38, troop.resistMelee);
@@ -138,7 +138,7 @@ std::vector<std::byte> SoxBinary::save() const {
         writeFloatAsInt(ptr + 0x50, troop.resistLightning);
         writeFloatAsInt(ptr + 0x54, troop.resistHoly);
         writeFloatAsInt(ptr + 0x58, troop.resistCurse);
-        writeFloatAsInt(ptr + 0x5C, troop.resistPoison);
+        writeFloatAsInt(ptr + 0x5C, troop.resistEarth);
         writeFloatAsInt(ptr + 0x60, troop.maxUnitSpeedMultiplier);
         writeFloatAsInt(ptr + 0x64, troop.defaultUnitHp);
         writeLE(ptr + 0x68, troop.formationRandom);
@@ -189,7 +189,7 @@ std::vector<ValidationIssue> SoxBinary::validate() const {
         checkResistance(troop.resistLightning, "resistLightning");
         checkResistance(troop.resistHoly, "resistHoly");
         checkResistance(troop.resistCurse, "resistCurse");
-        checkResistance(troop.resistPoison, "resistPoison");
+        checkResistance(troop.resistEarth, "resistEarth");
 
         if (troop.defaultUnitHp <= 0) {
             issues.push_back({
