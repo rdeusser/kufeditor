@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Static MSVC runtime for portable Windows builds.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 # Dependencies via FetchContent
 include(FetchContent)
 
@@ -27,9 +32,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
-# libconfig (must be installed on the system, e.g., `brew install libconfig`)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBCONFIG REQUIRED IMPORTED_TARGET libconfig++)
+# libconfig: try pkg-config first (macOS/Linux), fall back to find_package (vcpkg/Windows).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(LIBCONFIG IMPORTED_TARGET libconfig++)
+endif()
+
+if(NOT LIBCONFIG_FOUND)
+    find_package(libconfig CONFIG REQUIRED)
+    set(LIBCONFIG_LINK_TARGET libconfig::config++)
+else()
+    set(LIBCONFIG_LINK_TARGET PkgConfig::LIBCONFIG)
+endif()
 
 # Catch2 for testing
 FetchContent_Declare(
@@ -67,14 +81,9 @@ else()
 endif()
 
 # Platform-specific source files.
-set(PLATFORM_SOURCES)
-if(WIN32)
-    list(APPEND PLATFORM_SOURCES src/ui/dialogs/file_dialog.cpp)
-elseif(APPLE)
-    list(APPEND PLATFORM_SOURCES
-        src/ui/dialogs/file_dialog.cpp
-        src/ui/dialogs/file_dialog_macos.mm
-    )
+set(PLATFORM_SOURCES src/ui/dialogs/file_dialog.cpp)
+if(APPLE)
+    list(APPEND PLATFORM_SOURCES src/ui/dialogs/file_dialog_macos.mm)
 endif()
 
 # Main executable
@@ -85,12 +94,14 @@ add_executable(kufeditor
     src/core/application.cpp
     src/core/config.cpp
     src/core/recent_files.cpp
+    src/core/tab_manager.cpp
     src/formats/sox_binary.cpp
     src/formats/sox_text.cpp
     src/formats/sox_encoding.cpp
-    src/ui/views/troop_editor.cpp
-    src/ui/views/text_editor.cpp
+    src/ui/views/home_view.cpp
     src/ui/views/validation_log.cpp
+    src/ui/tabs/troop_editor_tab.cpp
+    src/ui/tabs/text_editor_tab.cpp
     src/ui/dialogs/settings_dialog.cpp
     src/undo/undo_stack.cpp
     ${PLATFORM_SOURCES}
@@ -98,7 +109,7 @@ add_executable(kufeditor
 target_link_libraries(kufeditor PRIVATE
     imgui
     glfw
-    PkgConfig::LIBCONFIG
+    ${LIBCONFIG_LINK_TARGET}
 )
 target_include_directories(kufeditor PRIVATE src)
 
