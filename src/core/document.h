@@ -2,6 +2,7 @@
 
 #include "formats/sox_binary.h"
 #include "formats/sox_text.h"
+#include "formats/stg_format.h"
 #include "undo/undo_stack.h"
 
 #include <memory>
@@ -16,6 +17,7 @@ struct OpenDocument {
     std::string filename;
     std::shared_ptr<SoxBinary> binaryData;
     std::shared_ptr<SoxText> textData;
+    std::shared_ptr<StgFormat> stgData;
     std::vector<std::byte> rawData;
     bool isSoxEncoded = false;
     bool dirty = false;
@@ -25,7 +27,8 @@ struct OpenDocument {
 
     bool isBinary() const { return binaryData != nullptr; }
     bool isText() const { return textData != nullptr; }
-    bool hasData() const { return isBinary() || isText(); }
+    bool isStg() const { return stgData != nullptr; }
+    bool hasData() const { return isBinary() || isText() || isStg(); }
 };
 
 } // namespace kuf

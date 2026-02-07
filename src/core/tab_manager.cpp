@@ -1,9 +1,11 @@
 #include "core/tab_manager.h"
 #include "ui/tabs/troop_editor_tab.h"
 #include "ui/tabs/text_editor_tab.h"
+#include "ui/tabs/stg_editor_tab.h"
 #include "formats/sox_binary.h"
 #include "formats/sox_text.h"
 #include "formats/sox_encoding.h"
+#include "formats/stg_format.h"
 
 #include <filesystem>
 #include <fstream>
@@ -18,6 +20,16 @@ std::string getFileName(const std::string& path) {
         return path.substr(pos + 1);
     }
     return path;
+}
+
+std::string getFileExtension(const std::string& path) {
+    auto pos = path.find_last_of('.');
+    if (pos != std::string::npos) {
+        std::string ext = path.substr(pos);
+        for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return ext;
+    }
+    return "";
 }
 
 } // namespace
@@ -71,10 +83,12 @@ void TabManager::saveDocument(OpenDocument* doc) {
         data = doc->binaryData->save();
     } else if (doc->textData) {
         data = doc->textData->save();
+    } else if (doc->stgData) {
+        data = doc->stgData->save();
     }
 
     if (!data.empty()) {
-        // Re-encode to ASCII hex if the original file was hex-encoded.
+        // Re-encode to ASCII hex if the original file was hex-encoded (SOX only).
         if (doc->isSoxEncoded) {
             data = soxEncode(data);
         }
@@ -106,6 +120,24 @@ std::shared_ptr<OpenDocument> TabManager::loadDocument(const std::string& path) 
     doc->filename = getFileName(path);
     doc->rawData.resize(size);
     file.read(reinterpret_cast<char*>(doc->rawData.data()), size);
+
+    std::string ext = getFileExtension(path);
+
+    // Try STG format first if extension matches.
+    if (ext == ".stg") {
+        auto stg = std::make_shared<StgFormat>();
+        if (stg->load(doc->rawData)) {
+            doc->stgData = stg;
+            doc->undoStack->setOnChange([doc = doc.get()]() {
+                doc->dirty = true;
+            });
+
+            if (onDocumentOpened_) {
+                onDocumentOpened_(doc.get());
+            }
+            return doc;
+        }
+    }
 
     // SOX files use ASCII hex encoding. Decode if detected.
     std::span<const std::byte> parseData = doc->rawData;
@@ -169,7 +201,9 @@ EditorTab* TabManager::createTabForDocument(std::shared_ptr<OpenDocument> doc) {
 
     std::unique_ptr<EditorTab> tab;
 
-    if (doc->binaryData) {
+    if (doc->stgData) {
+        tab = std::make_unique<StgEditorTab>(std::move(doc));
+    } else if (doc->binaryData) {
         tab = std::make_unique<TroopEditorTab>(std::move(doc));
     } else if (doc->textData) {
         tab = std::make_unique<TextEditorTab>(std::move(doc));

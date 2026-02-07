@@ -9,8 +9,10 @@
 #include "ui/dialogs/settings_dialog.h"
 #include "ui/tabs/editor_tab.h"
 #include "ui/tabs/troop_editor_tab.h"
+#include "ui/tabs/stg_editor_tab.h"
 #include "formats/sox_binary.h"
 #include "formats/sox_text.h"
+#include "formats/stg_format.h"
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
@@ -73,6 +75,8 @@ Application::Application() {
         auto* tab = tabManager_->activeTab();
         if (auto* troopTab = dynamic_cast<TroopEditorTab*>(tab)) {
             troopTab->selectTroop(recordIndex);
+        } else if (auto* stgTab = dynamic_cast<StgEditorTab*>(tab)) {
+            stgTab->selectUnit(recordIndex);
         }
     });
 }
@@ -173,7 +177,7 @@ void Application::handleKeyboardShortcuts() {
         }
     }
     if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) {
-        if (auto path = FileDialog::openFile("*.sox", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
+        if (auto path = FileDialog::openFile("*.sox;*.stg", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
             openFile(*path);
         }
     }
@@ -194,6 +198,8 @@ void Application::updateValidationLog() {
         validationLog_->setIssues(doc->binaryData->validate());
     } else if (doc->textData) {
         validationLog_->setIssues(doc->textData->validate());
+    } else if (doc->stgData) {
+        validationLog_->setIssues(doc->stgData->validate());
     } else {
         validationLog_->setIssues({});
     }
@@ -203,7 +209,7 @@ void Application::drawMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open File...", "Ctrl+O")) {
-                if (auto path = FileDialog::openFile("*.sox", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
+                if (auto path = FileDialog::openFile("*.sox;*.stg", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
                     openFile(*path);
                 }
             }
@@ -409,6 +415,11 @@ void Application::drawDockspace() {
                 doc->path.c_str(),
                 doc->dirty ? "*" : "",
                 doc->textData->entryCount());
+        } else if (doc->stgData) {
+            ImGui::Text("%s%s | STG Mission | %zu units",
+                doc->path.c_str(),
+                doc->dirty ? "*" : "",
+                doc->stgData->unitCount());
         } else {
             ImGui::Text("%s | Unknown format | %zu bytes",
                 doc->path.c_str(),
