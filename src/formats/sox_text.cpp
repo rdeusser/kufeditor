@@ -1,6 +1,7 @@
 #include "formats/sox_text.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 
 namespace kuf {

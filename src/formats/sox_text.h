@@ -2,13 +2,14 @@
 
 #include "formats/file_format.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace kuf {
 
 struct TextEntry {
-    uint8_t maxLength;
+    uint16_t maxLength;
     std::string text;
 };
 

@@ -1,6 +1,7 @@
 #include "formats/sox_encoding.h"
 
 #include <cctype>
+#include <cstdint>
 
 namespace kuf {
 
