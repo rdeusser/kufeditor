@@ -36,6 +36,7 @@ jobs:
             libxi-dev \
             libxext-dev \
             libwayland-dev \
+            libwayland-bin \
             wayland-protocols \
             libxkbcommon-dev \
             pkg-config
