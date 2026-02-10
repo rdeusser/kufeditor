@@ -1,8 +1,10 @@
 #include "core/tab_manager.h"
+#include "ui/tabs/skill_editor_tab.h"
 #include "ui/tabs/troop_editor_tab.h"
 #include "ui/tabs/text_editor_tab.h"
 #include "ui/tabs/stg_editor_tab.h"
 #include "formats/sox_binary.h"
+#include "formats/sox_skill_info.h"
 #include "formats/sox_text.h"
 #include "formats/sox_encoding.h"
 #include "formats/stg_format.h"
@@ -81,6 +83,8 @@ void TabManager::saveDocument(OpenDocument* doc) {
     std::vector<std::byte> data;
     if (doc->binaryData) {
         data = doc->binaryData->save();
+    } else if (doc->skillData) {
+        data = doc->skillData->save();
     } else if (doc->textData) {
         data = doc->textData->save();
     } else if (doc->stgData) {
@@ -166,6 +170,20 @@ std::shared_ptr<OpenDocument> TabManager::loadDocument(const std::string& path) 
         return doc;
     }
 
+    // Try SkillInfo SOX (variable-length records, rejected by SoxBinary).
+    auto skillInfo = std::make_shared<SoxSkillInfo>();
+    if (skillInfo->load(parseData)) {
+        doc->skillData = skillInfo;
+        doc->undoStack->setOnChange([doc = doc.get()]() {
+            doc->dirty = true;
+        });
+
+        if (onDocumentOpened_) {
+            onDocumentOpened_(doc.get());
+        }
+        return doc;
+    }
+
     // Try text SOX.
     auto text = std::make_shared<SoxText>();
     if (text->load(parseData)) {
@@ -203,6 +221,8 @@ EditorTab* TabManager::createTabForDocument(std::shared_ptr<OpenDocument> doc) {
 
     if (doc->stgData) {
         tab = std::make_unique<StgEditorTab>(std::move(doc));
+    } else if (doc->skillData) {
+        tab = std::make_unique<SkillEditorTab>(std::move(doc));
     } else if (doc->binaryData) {
         tab = std::make_unique<TroopEditorTab>(std::move(doc));
     } else if (doc->textData) {
