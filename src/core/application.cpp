@@ -311,13 +311,17 @@ void Application::drawTabBar() {
                                    ImGuiTabBarFlags_AutoSelectNewTabs |
                                    ImGuiTabBarFlags_FittingPolicyScroll;
 
+    enum class ActiveContent { None, Home, ModManager, Editor };
+    ActiveContent activeContent = ActiveContent::None;
+    EditorTab* activeEditorTab = nullptr;
+    EditorTab* tabToClose = nullptr;
+
     if (ImGui::BeginTabBar("MainTabBar", tabBarFlags)) {
-        // Home tab.
+        // Home tab header.
         if (showHomeTab_) {
-            ImGuiTabItemFlags homeFlags = ImGuiTabItemFlags_None;
             bool homeOpen = true;
-            if (ImGui::BeginTabItem("Home", &homeOpen, homeFlags)) {
-                homeView_->drawContent();
+            if (ImGui::BeginTabItem("Home", &homeOpen)) {
+                activeContent = ActiveContent::Home;
                 ImGui::EndTabItem();
             }
             if (!homeOpen) {
@@ -325,11 +329,11 @@ void Application::drawTabBar() {
             }
         }
 
-        // Mod Manager tab.
+        // Mod Manager tab header.
         if (showModManager_) {
             bool modOpen = true;
             if (ImGui::BeginTabItem("Mod Manager", &modOpen)) {
-                modManagerView_->drawContent();
+                activeContent = ActiveContent::ModManager;
                 ImGui::EndTabItem();
             }
             if (!modOpen) {
@@ -337,27 +341,23 @@ void Application::drawTabBar() {
             }
         }
 
-        // Editor tabs.
-        EditorTab* tabToClose = nullptr;
-        EditorTab* newActiveTab = nullptr;
-
+        // Editor tab headers.
         for (const auto& tab : tabManager_->tabs()) {
             ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
             bool open = tab->isOpen();
 
-            // Mark dirty tabs.
             if (tab->document() && tab->document()->dirty) {
                 flags |= ImGuiTabItemFlags_UnsavedDocument;
             }
 
             ImGui::PushID(tab->tabId());
             if (ImGui::BeginTabItem(tab->tabTitle().c_str(), &open, flags)) {
-                // Track selection.
                 if (tabManager_->activeTab() != tab.get()) {
-                    newActiveTab = tab.get();
+                    tabManager_->setActiveTab(tab.get());
+                    updateValidationLog();
                 }
-
-                tab->drawContent();
+                activeContent = ActiveContent::Editor;
+                activeEditorTab = tab.get();
                 ImGui::EndTabItem();
             }
             ImGui::PopID();
@@ -367,20 +367,31 @@ void Application::drawTabBar() {
             }
         }
 
-        // Update active tab if it changed.
-        if (newActiveTab) {
-            tabManager_->setActiveTab(newActiveTab);
-            updateValidationLog();
-        }
-
-        // Close tab if requested.
-        if (tabToClose) {
-            // TODO: Prompt to save if dirty.
-            tabManager_->closeTab(tabToClose);
-            updateValidationLog();
-        }
-
         ImGui::EndTabBar();
+    }
+
+    // Draw active tab content in a child window that reserves 24px for the status bar.
+    ImGui::BeginChild("TabContent", ImVec2(0, -24.0f));
+    switch (activeContent) {
+    case ActiveContent::Home:
+        homeView_->drawContent();
+        break;
+    case ActiveContent::ModManager:
+        modManagerView_->drawContent();
+        break;
+    case ActiveContent::Editor:
+        if (activeEditorTab) {
+            activeEditorTab->drawContent();
+        }
+        break;
+    case ActiveContent::None:
+        break;
+    }
+    ImGui::EndChild();
+
+    if (tabToClose) {
+        tabManager_->closeTab(tabToClose);
+        updateValidationLog();
     }
 }
 
@@ -399,7 +410,9 @@ void Application::drawDockspace() {
         ImGuiWindowFlags_NoBringToFrontOnFocus |
         ImGuiWindowFlags_NoNavFocus |
         ImGuiWindowFlags_NoBackground |
-        ImGuiWindowFlags_MenuBar;
+        ImGuiWindowFlags_MenuBar |
+        ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoScrollWithMouse;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -415,15 +428,8 @@ void Application::drawDockspace() {
     drawTabBar();
     ImGui::PopStyleVar();
 
-    // Reserve space for status bar at bottom.
-    float statusBarHeight = 24.0f;
-    float dockspaceHeight = ImGui::GetContentRegionAvail().y - statusBarHeight;
-
-    ImGuiID dockspaceId = ImGui::GetID("MainDockspace");
-    ImGui::DockSpace(dockspaceId, ImVec2(0, dockspaceHeight), ImGuiDockNodeFlags_None);
-
     // Status bar.
-    ImGui::BeginChild("StatusBar", ImVec2(0, statusBarHeight), false);
+    ImGui::BeginChild("StatusBar", ImVec2(0, 24.0f), false);
     ImGui::SetCursorPosX(8.0f);
 
     auto* activeTab = tabManager_->activeTab();
