@@ -19,15 +19,16 @@ std::optional<std::string> macosOpenFile(const char* filter, const char* initial
         }
 
         // Parse filter and set allowed content types.
-        // Filter format: "*.sox" or similar.
+        // Filter format: "*.sox;*.stg" — semicolon-separated glob patterns.
         if (filter && strlen(filter) > 0) {
             NSString* filterStr = [NSString stringWithUTF8String:filter];
-            NSArray* parts = [filterStr componentsSeparatedByString:@"*."];
+            NSArray* parts = [filterStr componentsSeparatedByString:@";"];
             NSMutableArray<UTType*>* contentTypes = [NSMutableArray array];
+            NSCharacterSet* strip = [NSCharacterSet characterSetWithCharactersInString:@" *."];
             for (NSString* part in parts) {
-                NSString* trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                if ([trimmed length] > 0) {
-                    UTType* type = [UTType typeWithFilenameExtension:trimmed];
+                NSString* ext = [part stringByTrimmingCharactersInSet:strip];
+                if ([ext length] > 0) {
+                    UTType* type = [UTType typeWithFilenameExtension:ext];
                     if (type) {
                         [contentTypes addObject:type];
                     }
@@ -57,14 +58,16 @@ std::optional<std::string> macosSaveFile(const char* filter, const char* default
         }
 
         // Parse filter and set allowed content types.
+        // Filter format: "*.sox;*.stg" — semicolon-separated glob patterns.
         if (filter && strlen(filter) > 0) {
             NSString* filterStr = [NSString stringWithUTF8String:filter];
-            NSArray* parts = [filterStr componentsSeparatedByString:@"*."];
+            NSArray* parts = [filterStr componentsSeparatedByString:@";"];
             NSMutableArray<UTType*>* contentTypes = [NSMutableArray array];
+            NSCharacterSet* strip = [NSCharacterSet characterSetWithCharactersInString:@" *."];
             for (NSString* part in parts) {
-                NSString* trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                if ([trimmed length] > 0) {
-                    UTType* type = [UTType typeWithFilenameExtension:trimmed];
+                NSString* ext = [part stringByTrimmingCharactersInSet:strip];
+                if ([ext length] > 0) {
+                    UTType* type = [UTType typeWithFilenameExtension:ext];
                     if (type) {
                         [contentTypes addObject:type];
                     }

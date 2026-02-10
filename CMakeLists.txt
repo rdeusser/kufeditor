@@ -105,11 +105,13 @@ add_executable(kufeditor
     src/core/text_encoding.cpp
     src/core/name_dictionary.cpp
     src/formats/sox_binary.cpp
+    src/formats/sox_skill_info.cpp
     src/formats/sox_text.cpp
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
     src/ui/views/home_view.cpp
     src/ui/views/validation_log.cpp
+    src/ui/tabs/skill_editor_tab.cpp
     src/ui/tabs/troop_editor_tab.cpp
     src/ui/tabs/text_editor_tab.cpp
     src/ui/tabs/stg_editor_tab.cpp
@@ -143,9 +145,11 @@ add_executable(kufeditor_tests
     test/main_test.cpp
     test/sox_binary_test.cpp
     test/sox_encoding_test.cpp
+    test/sox_skill_info_test.cpp
     test/stg_format_test.cpp
     src/core/text_encoding.cpp
     src/formats/sox_binary.cpp
+    src/formats/sox_skill_info.cpp
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
 )

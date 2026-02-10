@@ -434,7 +434,7 @@ Defines all 15 skills available to heroes and troops.
 | Skill ID | int32 | 0-13, or -2 (0xFFFFFFFE) for "Any Elemental" |
 | Loc Key | uint16 + string | Localization key (e.g., "@(S_Melee)") |
 | Icon | uint16 + string | Icon path (e.g., "IL_SKL_Melee.tga") |
-| Skill Type | uint32 | 1=Combat, 2=Magic |
+| Slot Count | uint32 | Number of skill slots required (1 or 2) |
 | Max Level | uint32 | Maximum skill level |
 
 **All Skills:**
@@ -458,8 +458,8 @@ Defines all 15 skills available to heroes and troops.
 
 **Notes:**
 - Skill ID 12 is "Earth" in the localization but uses "@(S_Poison)" internally
-- Combat skills (type 1) generally take 1 skill slot
-- Magic skills (type 2) generally take 2 skill slots
+- Combat skills generally require 1 skill slot
+- Magic skills generally require 2 skill slots
 - Scouting has only 3 max levels (scout speed/range tiers)
 
 ---
