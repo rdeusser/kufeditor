@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# On macOS, ensure Apple's native ar/ranlib are used to avoid GNU archive
+# format incompatibility when Homebrew binutils or ccache are in the PATH.
+if(APPLE AND EXISTS /usr/bin/ar)
+    set(CMAKE_AR /usr/bin/ar)
+    set(CMAKE_RANLIB /usr/bin/ranlib)
+endif()
+
 # Static MSVC runtime for portable Windows builds.
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -56,6 +63,17 @@ FetchContent_Declare(
     GIT_TAG v3.5.2
 )
 FetchContent_MakeAvailable(Catch2)
+
+# miniz for zip archive support
+set(CMAKE_POLICY_DEFAULT_CMP0048 NEW)
+FetchContent_Declare(
+    miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG 3.0.2
+)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+FetchContent_MakeAvailable(miniz)
+unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
 # ImGui library (manual setup required for imgui)
 add_library(imgui STATIC
@@ -117,6 +135,11 @@ add_executable(kufeditor
     src/ui/tabs/stg_editor_tab.cpp
     src/ui/dialogs/settings_dialog.cpp
     src/undo/undo_stack.cpp
+    src/core/json.cpp
+    src/core/zip_archive.cpp
+    src/mods/backup_manager.cpp
+    src/mods/mod_manager.cpp
+    src/ui/views/mod_manager_view.cpp
     ${PLATFORM_SOURCES}
 )
 target_link_libraries(kufeditor PRIVATE
@@ -124,6 +147,7 @@ target_link_libraries(kufeditor PRIVATE
     glfw
     Iconv::Iconv
     ${LIBCONFIG_LINK_TARGET}
+    miniz
 )
 target_include_directories(kufeditor PRIVATE src)
 
