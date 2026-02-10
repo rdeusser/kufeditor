@@ -114,7 +114,7 @@ void drawAnimationIdCombo(const char* label, uint8_t& current, bool isHero,
         snprintf(preview, sizeof(preview), "Model %d", current);
     }
 
-    if (ImGui::BeginCombo(label, preview)) {
+    if (BeginComboCentered(label, preview)) {
         // Standard animation IDs (0-42).
         for (int i = 0; i <= kMaxStandardAnimationId; ++i) {
             char itemLabel[64];
@@ -318,7 +318,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
         }
 
         int ucdIdx = static_cast<int>(unit.ucd);
-        if (ImGui::Combo("UCD", &ucdIdx, ucdNames, IM_ARRAYSIZE(ucdNames))) {
+        if (ComboCentered("UCD", &ucdIdx, ucdNames, IM_ARRAYSIZE(ucdNames))) {
             unit.ucd = static_cast<UCD>(ucdIdx);
             document_->dirty = true;
         }
@@ -356,7 +356,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
         }
 
         int dirIdx = static_cast<int>(unit.direction);
-        if (ImGui::Combo("Direction", &dirIdx, directionNames, IM_ARRAYSIZE(directionNames))) {
+        if (ComboCentered("Direction", &dirIdx, directionNames, IM_ARRAYSIZE(directionNames))) {
             unit.direction = static_cast<Direction>(dirIdx);
             document_->dirty = true;
         }
