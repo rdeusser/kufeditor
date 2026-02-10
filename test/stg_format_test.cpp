@@ -59,10 +59,10 @@ std::vector<std::byte> createMinimalStg() {
     // Direction = North (2) at +0x4C.
     unit[0x4C] = std::byte{2};
 
-    // Job type = HumanSpearman (3) at +0x54.
+    // Animation ID = 3 (HumanSpearman) at +0x54.
     unit[0x54] = std::byte{3};
 
-    // Model ID = 0 at +0x55.
+    // Model variant = 0 at +0x55.
     unit[0x55] = std::byte{0};
 
     // Worldmap ID = 0xFF at +0x56.
@@ -79,13 +79,17 @@ std::vector<std::byte> createMinimalStg() {
     uint32_t troopIdx = 3;
     std::memcpy(unit + 0x1C0, &troopIdx, 4);
 
-    // Grid X = 4 at +0x190.
-    uint32_t gridX = 4;
-    std::memcpy(unit + 0x190, &gridX, 4);
+    // Unknown field at +0x190 (uint32).
+    uint32_t gridUnk190 = 1;
+    std::memcpy(unit + 0x190, &gridUnk190, 4);
 
-    // Grid Y = 3 at +0x194.
+    // Grid X = 4 at +0x194 (uint32).
+    uint32_t gridX = 4;
+    std::memcpy(unit + 0x194, &gridX, 4);
+
+    // Grid Y = 3 at +0x198 (uint32).
     uint32_t gridY = 3;
-    std::memcpy(unit + 0x194, &gridY, 4);
+    std::memcpy(unit + 0x198, &gridY, 4);
 
     // Stat overrides: all -1.0 (22 floats at +0x1C8).
     for (int i = 0; i < 22; ++i) {
@@ -141,8 +145,8 @@ TEST_CASE("StgFormat parses leader configuration", "[stg]") {
     REQUIRE(stg.load(data));
     const auto& unit = stg.units()[0];
 
-    REQUIRE(unit.leaderJobType == kuf::JobType::HumanSpearman);
-    REQUIRE(unit.leaderModelId == 0);
+    REQUIRE(unit.leaderAnimationId == 3);
+    REQUIRE(unit.leaderModelVariant == 0);
     REQUIRE(unit.leaderWorldmapId == 0xFF);
     REQUIRE(unit.leaderLevel == 5);
     REQUIRE(unit.officerCount == 0);
@@ -158,6 +162,7 @@ TEST_CASE("StgFormat parses unit configuration", "[stg]") {
     REQUIRE(unit.troopInfoIndex == 3);
     REQUIRE(unit.gridX == 4);
     REQUIRE(unit.gridY == 3);
+    REQUIRE(unit.gridUnk190 == 1);
 
     // All stat overrides should be -1.0.
     for (int i = 0; i < 22; ++i) {
@@ -184,7 +189,7 @@ TEST_CASE("StgFormat round-trip preserves modified fields", "[stg]") {
 
     // Modify some fields.
     stg.units()[0].unitName = "ModifiedUnit";
-    stg.units()[0].leaderJobType = kuf::JobType::HumanPaladin;
+    stg.units()[0].leaderAnimationId = 6;
     stg.units()[0].leaderLevel = 10;
     stg.units()[0].positionX = 9999.0f;
 
@@ -196,7 +201,7 @@ TEST_CASE("StgFormat round-trip preserves modified fields", "[stg]") {
 
     const auto& unit = stg2.units()[0];
     REQUIRE(unit.unitName == "ModifiedUnit");
-    REQUIRE(unit.leaderJobType == kuf::JobType::HumanPaladin);
+    REQUIRE(unit.leaderAnimationId == 6);
     REQUIRE(unit.leaderLevel == 10);
     REQUIRE_THAT(unit.positionX, Catch::Matchers::WithinAbs(9999.0f, 0.001f));
 }
@@ -243,27 +248,6 @@ TEST_CASE("StgFormat validates duplicate unique IDs", "[stg]") {
         }
     }
     REQUIRE(foundDuplicate);
-}
-
-TEST_CASE("StgFormat validates invalid job type", "[stg]") {
-    auto data = createMinimalStg();
-
-    // Set job type to invalid value 99.
-    std::byte* unit = data.data() + kuf::kStgHeaderSize;
-    unit[0x54] = std::byte{99};
-
-    kuf::StgFormat stg;
-    REQUIRE(stg.load(data));
-
-    auto issues = stg.validate();
-    bool foundJobError = false;
-    for (const auto& issue : issues) {
-        if (issue.field == "leaderJobType" && issue.severity == kuf::Severity::Error) {
-            foundJobError = true;
-            break;
-        }
-    }
-    REQUIRE(foundJobError);
 }
 
 TEST_CASE("StgFormat preserves raw tail on round-trip", "[stg]") {

@@ -15,6 +15,7 @@ ImGuiContext::ImGuiContext(GLFWwindow* window) {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
+    loadFont(io);
     applyDarkTheme();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -39,6 +40,32 @@ void ImGuiContext::beginFrame() {
 
 void ImGuiContext::endFrame() {
     ImGui::Render();
+}
+
+void ImGuiContext::loadFont(ImGuiIO& io) {
+    const char* fontPaths[] = {
+#ifdef __APPLE__
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+#elif defined(_WIN32)
+        "C:\\Windows\\Fonts\\malgun.ttf",
+        "C:\\Windows\\Fonts\\gulim.ttc",
+#else
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+#endif
+    };
+
+    for (const char* path : fontPaths) {
+        if (io.Fonts->AddFontFromFileTTF(path, 14.0f, nullptr,
+                                          io.Fonts->GetGlyphRangesKorean())) {
+            return;
+        }
+    }
+
+    io.Fonts->AddFontDefault();
 }
 
 void ImGuiContext::applyDarkTheme() {

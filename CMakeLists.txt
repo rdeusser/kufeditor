@@ -90,6 +90,9 @@ if(APPLE)
     list(APPEND PLATFORM_SOURCES src/ui/dialogs/file_dialog_macos.mm)
 endif()
 
+# iconv for CP949/Korean text encoding conversion.
+find_package(Iconv REQUIRED)
+
 # Main executable
 add_executable(kufeditor
     src/main.cpp
@@ -99,6 +102,8 @@ add_executable(kufeditor
     src/core/config.cpp
     src/core/recent_files.cpp
     src/core/tab_manager.cpp
+    src/core/text_encoding.cpp
+    src/core/name_dictionary.cpp
     src/formats/sox_binary.cpp
     src/formats/sox_text.cpp
     src/formats/sox_encoding.cpp
@@ -115,6 +120,7 @@ add_executable(kufeditor
 target_link_libraries(kufeditor PRIVATE
     imgui
     glfw
+    Iconv::Iconv
     ${LIBCONFIG_LINK_TARGET}
 )
 target_include_directories(kufeditor PRIVATE src)
@@ -128,7 +134,7 @@ endif()
 if(WIN32)
     target_link_libraries(kufeditor PRIVATE comdlg32)
 elseif(APPLE)
-    target_link_libraries(kufeditor PRIVATE "-framework Cocoa")
+    target_link_libraries(kufeditor PRIVATE "-framework Cocoa" "-framework UniformTypeIdentifiers")
 endif()
 
 # Tests
@@ -138,11 +144,12 @@ add_executable(kufeditor_tests
     test/sox_binary_test.cpp
     test/sox_encoding_test.cpp
     test/stg_format_test.cpp
+    src/core/text_encoding.cpp
     src/formats/sox_binary.cpp
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
 )
-target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain)
+target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain Iconv::Iconv)
 target_include_directories(kufeditor_tests PRIVATE src)
 include(CTest)
 include(Catch)

@@ -16,62 +16,75 @@ const char* directionNames[] = {
     "West", "SouthWest", "South", "SouthEast"
 };
 
-struct JobTypeEntry {
-    JobType type;
+// Standard animation names from K2JobDef.h (0-42).
+const char* animationNames[] = {
+    "Human Archer",          "Human Longbows",        "Human Infantry",
+    "Human Spearman",        "Human Heavy Infantry",  "Human Knight",
+    "Human Paladin",         "Human Cavalry",         "Human Heavy Cavalry",
+    "Human Storm Riders",    "Human Sapper",          "Human Pyro Technician",
+    "Human Bomber Wing",     "Human Mortar",          "Human Ballista",
+    "Human Harpoon",         "Human Catapult",        "Human Battaloon",
+    "Dark Elf Archer",       "Dark Elf Cavalry Archer","Dark Elf Fighter",
+    "Dark Elf Knight",       "Dark Elf Light Cavalry","Dark Orc Infantry",
+    "Dark Orc Rider",        "Dark Orc Heavy Riders", "Dark Orc Axe Man",
+    "Dark Orc Heavy Infantry","Dark Orc Sapper",      "Scorpion",
+    "Swamp Mammoth",         "Dirigible",             "Black Wyvern",
+    "Ghoul",                 "Bone Dragon",           "Wall",
+    "Scout",                 "Self-Destruction",      "Encablosa Melee",
+    "Encablosa Flying",      "Encablosa Ranged",      "Elf Wall",
+    "Encablosa Large",
+};
+
+struct HeroModelEntry {
+    uint8_t id;
     const char* name;
 };
 
-const JobTypeEntry jobTypes[] = {
-    {JobType::HumanArcher,          "Human Archer"},
-    {JobType::HumanLongbows,        "Human Longbows"},
-    {JobType::HumanInfantry,        "Human Infantry"},
-    {JobType::HumanSpearman,        "Human Spearman"},
-    {JobType::HumanHeavyInfantry,   "Human Heavy Infantry"},
-    {JobType::HumanKnight,          "Human Knight"},
-    {JobType::HumanPaladin,         "Human Paladin"},
-    {JobType::HumanCavalry,         "Human Cavalry"},
-    {JobType::HumanHeavyCavalry,    "Human Heavy Cavalry"},
-    {JobType::HumanStormRiders,     "Human Storm Riders"},
-    {JobType::HumanSapper,          "Human Sapper"},
-    {JobType::HumanPyroTechnician,  "Human Pyro Technician"},
-    {JobType::HumanBomberWing,      "Human Bomber Wing"},
-    {JobType::HumanMortar,          "Human Mortar"},
-    {JobType::HumanBallista,        "Human Ballista"},
-    {JobType::HumanHarpoon,         "Human Harpoon"},
-    {JobType::HumanCatapult,        "Human Catapult"},
-    {JobType::HumanBattaloon,       "Human Battaloon"},
-    {JobType::DarkElfArcher,        "Dark Elf Archer"},
-    {JobType::DarkElfCavalryArcher, "Dark Elf Cavalry Archer"},
-    {JobType::DarkElfFighter,       "Dark Elf Fighter"},
-    {JobType::DarkElfKnight,        "Dark Elf Knight"},
-    {JobType::DarkElfLightCavalry,  "Dark Elf Light Cavalry"},
-    {JobType::DarkOrcInfantry,      "Dark Orc Infantry"},
-    {JobType::DarkOrcRider,         "Dark Orc Rider"},
-    {JobType::DarkOrcHeavyRiders,   "Dark Orc Heavy Riders"},
-    {JobType::DarkOrcAxeMan,        "Dark Orc Axe Man"},
-    {JobType::DarkOrcHeavyInfantry, "Dark Orc Heavy Infantry"},
-    {JobType::DarkOrcSapper,        "Dark Orc Sapper"},
-    {JobType::Scorpion,             "Scorpion"},
-    {JobType::SwampMammoth,         "Swamp Mammoth"},
-    {JobType::Dirigible,            "Dirigible"},
-    {JobType::BlackWyvern,          "Black Wyvern"},
-    {JobType::Ghoul,                "Ghoul"},
-    {JobType::BoneDragon,           "Bone Dragon"},
-    {JobType::Wall,                 "Wall"},
-    {JobType::Scout,                "Scout"},
-    {JobType::SelfDestruction,      "Self-Destruction"},
-    {JobType::EncablosaMelee,       "Encablosa Melee"},
-    {JobType::EncablosaFlying,      "Encablosa Flying"},
-    {JobType::EncablosaRanged,      "Encablosa Ranged"},
-    {JobType::ElfWall,              "Elf Wall"},
-    {JobType::EncablosaLarge,       "Encablosa Large"},
+const HeroModelEntry heroModels[] = {
+    {0x20, "Gerald"},   {0x21, "Ellen"},    {0x22, "Regnier"},
+    {0x23, "Morene"},   {0x24, "Rupert"},   {0x25, "Kendal"},
+    {0x26, "Cirith"},   {0x2B, "Lucretia"}, {0x2C, "Leinhart"},
+    {0x44, "Walter"},
 };
 
-const char* jobTypeName(JobType jt) {
-    uint8_t idx = static_cast<uint8_t>(jt);
-    if (idx < std::size(jobTypes)) {
-        return jobTypes[idx].name;
+const char* animationIdName(uint8_t id, bool isHero) {
+    if (isHero) {
+        for (const auto& h : heroModels) {
+            if (h.id == id) return h.name;
+        }
     }
+    if (id <= kMaxStandardAnimationId) {
+        return animationNames[id];
+    }
+    return nullptr;
+}
+
+std::string resolveDisplayName(const StgUnit& unit, const NameDictionary& dict) {
+    // 1. Hero name from animation ID.
+    if (unit.isHero) {
+        for (const auto& h : heroModels) {
+            if (h.id == unit.leaderAnimationId) return h.name;
+        }
+    }
+
+    // 2. Troop type name from troopInfoIndex (the actual unit type).
+    const char* troopName = dict.troopNameByIndex(unit.troopInfoIndex);
+    if (troopName) return troopName;
+
+    // 3. Standard animation name (0-42).
+    if (unit.leaderAnimationId <= kMaxStandardAnimationId) {
+        return animationNames[unit.leaderAnimationId];
+    }
+
+    // 4. Extended animation name from CharInfo_ENG.sox.
+    const char* charName = dict.troopName(unit.leaderAnimationId);
+    if (charName) return charName;
+
+    // 5. Korean-to-English translation.
+    std::string translated = dict.translate(unit.unitName);
+    if (!translated.empty()) return translated;
+
+    // 6. Never show raw Korean.
     return "Unknown";
 }
 
@@ -85,17 +98,45 @@ ImVec4 ucdColor(UCD ucd) {
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
-void drawJobTypeCombo(const char* label, JobType& current) {
-    int currentIdx = static_cast<int>(current);
-    if (ImGui::BeginCombo(label, jobTypeName(current))) {
-        for (size_t i = 0; i < std::size(jobTypes); ++i) {
-            bool selected = (static_cast<int>(i) == currentIdx);
-            if (ImGui::Selectable(jobTypes[i].name, selected)) {
-                current = jobTypes[i].type;
+void drawAnimationIdCombo(const char* label, uint8_t& current, bool isHero,
+                          const NameDictionary& dict) {
+    const char* currentName = animationIdName(current, isHero);
+    if (!currentName) {
+        currentName = dict.troopName(current);
+    }
+
+    char preview[64];
+    if (currentName) {
+        snprintf(preview, sizeof(preview), "%s (%d)", currentName, current);
+    } else {
+        snprintf(preview, sizeof(preview), "Model %d", current);
+    }
+
+    if (ImGui::BeginCombo(label, preview)) {
+        // Standard animation IDs (0-42).
+        for (int i = 0; i <= kMaxStandardAnimationId; ++i) {
+            char itemLabel[64];
+            const char* name = dict.troopName(static_cast<uint8_t>(i));
+            if (!name) name = animationNames[i];
+            snprintf(itemLabel, sizeof(itemLabel), "%s (%d)", name, i);
+            bool selected = (!isHero && current == i);
+            if (ImGui::Selectable(itemLabel, selected)) {
+                current = static_cast<uint8_t>(i);
             }
-            if (selected) {
-                ImGui::SetItemDefaultFocus();
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+
+        ImGui::Separator();
+
+        // Hero model IDs.
+        for (const auto& h : heroModels) {
+            char itemLabel[64];
+            snprintf(itemLabel, sizeof(itemLabel), "Hero: %s (%d)", h.name, h.id);
+            bool selected = (current == h.id);
+            if (ImGui::Selectable(itemLabel, selected)) {
+                current = h.id;
             }
+            if (selected) ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
     }
@@ -104,7 +145,14 @@ void drawJobTypeCombo(const char* label, JobType& current) {
 } // namespace
 
 StgEditorTab::StgEditorTab(std::shared_ptr<OpenDocument> doc)
-    : EditorTab(std::move(doc)) {}
+    : EditorTab(std::move(doc)) {
+    if (document_ && !document_->path.empty()) {
+        std::string soxDir = findGameDirectory(document_->path);
+        if (!soxDir.empty()) {
+            nameDictionary_.load(soxDir);
+        }
+    }
+}
 
 void StgEditorTab::selectUnit(size_t index) {
     if (document_ && document_->stgData &&
@@ -209,15 +257,17 @@ void StgEditorTab::drawUnitList() {
         const auto& unit = units[i];
         bool selected = (selectedUnit_ == static_cast<int>(i));
 
-        // Color-code by UCD.
-        ImGui::PushStyleColor(ImGuiCol_Text, ucdColor(unit.ucd));
+        // Color-code by UCD, dimming disabled units.
+        ImVec4 color = ucdColor(unit.ucd);
+        if (!unit.isEnabled) {
+            color.w = 0.4f;
+        }
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+
+        std::string displayName = resolveDisplayName(unit, nameDictionary_);
 
         char label[64];
-        if (unit.unitName.empty()) {
-            snprintf(label, sizeof(label), "[%zu] %s", i, jobTypeName(unit.leaderJobType));
-        } else {
-            snprintf(label, sizeof(label), "[%zu] %s", i, unit.unitName.c_str());
-        }
+        snprintf(label, sizeof(label), "[%zu] %s", i, displayName.c_str());
 
         if (ImGui::Selectable(label, selected)) {
             selectedUnit_ = static_cast<int>(i);
@@ -226,11 +276,13 @@ void StgEditorTab::drawUnitList() {
         ImGui::PopStyleColor();
 
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("ID: %u | %s | %s | Lv%d",
+            ImGui::SetTooltip("ID: %u | %s | TroopIdx: %u | Anim: %d | Lv%d%s",
                 unit.uniqueId,
                 ucdNames[static_cast<int>(unit.ucd)],
-                jobTypeName(unit.leaderJobType),
-                unit.leaderLevel);
+                unit.troopInfoIndex,
+                unit.leaderAnimationId,
+                unit.leaderLevel,
+                unit.isEnabled ? "" : " [Disabled]");
         }
     }
 }
@@ -238,16 +290,23 @@ void StgEditorTab::drawUnitList() {
 void StgEditorTab::drawUnitDetails(size_t index) {
     auto& unit = document_->stgData->units()[index];
 
-    ImGui::Text("[%zu] %s", index, unit.unitName.empty() ? "(unnamed)" : unit.unitName.c_str());
+    std::string detailDisplayName = resolveDisplayName(unit, nameDictionary_);
+    ImGui::Text("[%zu] %s", index, detailDisplayName.c_str());
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Core", ImGuiTreeNodeFlags_DefaultOpen)) {
-        char nameBuf[32];
-        std::memset(nameBuf, 0, sizeof(nameBuf));
-        std::strncpy(nameBuf, unit.unitName.c_str(), sizeof(nameBuf) - 1);
-        if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf))) {
-            unit.unitName = nameBuf;
-            document_->dirty = true;
+        ImGui::Text("Display Name: %s", detailDisplayName.c_str());
+
+        if (ImGui::TreeNode("Advanced##name")) {
+            char nameBuf[32];
+            std::memset(nameBuf, 0, sizeof(nameBuf));
+            std::strncpy(nameBuf, unit.unitName.c_str(), sizeof(nameBuf) - 1);
+            if (ImGui::InputText("Internal Name", nameBuf, sizeof(nameBuf))) {
+                unit.unitName = nameBuf;
+                document_->dirty = true;
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("File-internal CP949 name (Korean). Changing this may break save references.");
+            ImGui::TreePop();
         }
 
         int uid = static_cast<int>(unit.uniqueId);
@@ -302,11 +361,11 @@ void StgEditorTab::drawUnitDetails(size_t index) {
     }
 
     if (ImGui::CollapsingHeader("Leader", ImGuiTreeNodeFlags_DefaultOpen)) {
-        drawJobTypeCombo("Job Type", unit.leaderJobType);
+        drawAnimationIdCombo("Animation ID", unit.leaderAnimationId, unit.isHero != 0, nameDictionary_);
 
-        int modelId = unit.leaderModelId;
-        if (ImGui::InputInt("Model ID", &modelId)) {
-            unit.leaderModelId = static_cast<uint8_t>(std::clamp(modelId, 0, 255));
+        int modelVar = unit.leaderModelVariant;
+        if (ImGui::InputInt("Model Variant", &modelVar)) {
+            unit.leaderModelVariant = static_cast<uint8_t>(std::clamp(modelVar, 0, 255));
             document_->dirty = true;
         }
 
@@ -315,7 +374,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
             unit.leaderWorldmapId = static_cast<uint8_t>(std::clamp(wmId, 0, 255));
             document_->dirty = true;
         }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("0xFF = safe default (no worldmap state)");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("0xFF = standalone (no campaign save). Other values link to barracks slot - DO NOT reuse.");
 
         int level = unit.leaderLevel;
         if (ImGui::InputInt("Level", &level)) {
@@ -335,7 +394,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
 
             ImGui::Text("%s:", skillLabel);
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(80);
+            ImGui::SetNextItemWidth(120);
             if (ImGui::InputInt("##id", &skillId)) {
                 unit.leaderSkills[i].skillId = static_cast<uint8_t>(std::clamp(skillId, 0, 255));
                 document_->dirty = true;
@@ -343,7 +402,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
             ImGui::SameLine();
             ImGui::Text("Lv:");
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(60);
+            ImGui::SetNextItemWidth(80);
             if (ImGui::InputInt("##lv", &skillLv)) {
                 unit.leaderSkills[i].level = static_cast<uint8_t>(std::clamp(skillLv, 0, 255));
                 document_->dirty = true;
@@ -420,7 +479,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
             unit.gridY = static_cast<uint32_t>(std::max(1, gy));
             document_->dirty = true;
         }
-        ImGui::Text("Total Units: %u", unit.gridX * unit.gridY);
+        ImGui::Text("Total Units: %u", static_cast<uint32_t>(unit.gridX) * unit.gridY);
     }
 
     if (ImGui::CollapsingHeader("Stat Overrides")) {
@@ -445,11 +504,11 @@ void StgEditorTab::drawOfficerSection(const char* label, OfficerData& officer, b
 
     ImGui::PushID(label);
     if (ImGui::TreeNode(label)) {
-        drawJobTypeCombo("Job Type", officer.jobType);
+        drawAnimationIdCombo("Animation ID", officer.animationId, false, nameDictionary_);
 
-        int modelId = officer.modelId;
-        if (ImGui::InputInt("Model ID", &modelId)) {
-            officer.modelId = static_cast<uint8_t>(std::clamp(modelId, 0, 255));
+        int modelVar = officer.modelVariant;
+        if (ImGui::InputInt("Model Variant", &modelVar)) {
+            officer.modelVariant = static_cast<uint8_t>(std::clamp(modelVar, 0, 255));
             document_->dirty = true;
         }
 
@@ -465,25 +524,29 @@ void StgEditorTab::drawOfficerSection(const char* label, OfficerData& officer, b
             document_->dirty = true;
         }
 
-        if (ImGui::TreeNode("Skills")) {
-            for (int i = 0; i < 4; ++i) {
-                ImGui::PushID(i);
-                int sid = officer.skills[i].skillId;
-                int slv = officer.skills[i].level;
-                ImGui::Text("Skill %d:", i + 1);
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(80);
-                if (ImGui::InputInt("##id", &sid)) {
-                    officer.skills[i].skillId = static_cast<uint8_t>(std::clamp(sid, 0, 255));
-                    document_->dirty = true;
-                }
-                ImGui::SameLine();
-                ImGui::Text("Lv:");
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(60);
-                if (ImGui::InputInt("##lv", &slv)) {
-                    officer.skills[i].level = static_cast<uint8_t>(std::clamp(slv, 0, 255));
-                    document_->dirty = true;
+        if (ImGui::TreeNode("Abilities")) {
+            ImGui::TextDisabled("Officers store skills/passives here (IDs). Magic skill lv5+ unlocks actives.");
+            for (int i = 0; i < 23; ++i) {
+                ImGui::PushID(i + 300);
+                int val = officer.abilities[i];
+                if (val == -1) {
+                    ImGui::TextDisabled("Slot %d: Empty", i);
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Set")) {
+                        officer.abilities[i] = 0;
+                        document_->dirty = true;
+                    }
+                } else {
+                    ImGui::SetNextItemWidth(120);
+                    if (ImGui::InputInt(("Slot " + std::to_string(i)).c_str(), &val)) {
+                        officer.abilities[i] = val;
+                        document_->dirty = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Clear")) {
+                        officer.abilities[i] = -1;
+                        document_->dirty = true;
+                    }
                 }
                 ImGui::PopID();
             }

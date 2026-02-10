@@ -16,8 +16,8 @@ public:
     bool canUndo() const { return !undoStack_.empty(); }
     bool canRedo() const { return !redoStack_.empty(); }
 
-    const std::string& undoDescription() const;
-    const std::string& redoDescription() const;
+    std::string undoDescription() const;
+    std::string redoDescription() const;
 
     void clear();
 
@@ -29,8 +29,6 @@ private:
     std::vector<CommandPtr> undoStack_;
     std::vector<CommandPtr> redoStack_;
     std::function<void()> onChange_;
-
-    static const std::string emptyStr_;
 };
 
 } // namespace kuf

@@ -1,6 +1,7 @@
 #pragma once
 
 struct GLFWwindow;
+struct ImGuiIO;
 
 namespace kuf {
 
@@ -16,6 +17,7 @@ public:
     void endFrame();
 
 private:
+    void loadFont(ImGuiIO& io);
     void applyDarkTheme();
 };
 

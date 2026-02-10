@@ -29,52 +29,9 @@ enum class Direction : uint8_t {
     SouthEast = 7
 };
 
-// Unit types from K2JobDef.h.
-enum class JobType : uint8_t {
-    HumanArcher           = 0,
-    HumanLongbows         = 1,
-    HumanInfantry         = 2,
-    HumanSpearman         = 3,
-    HumanHeavyInfantry    = 4,
-    HumanKnight           = 5,
-    HumanPaladin          = 6,
-    HumanCavalry          = 7,
-    HumanHeavyCavalry     = 8,
-    HumanStormRiders      = 9,
-    HumanSapper           = 10,
-    HumanPyroTechnician   = 11,
-    HumanBomberWing       = 12,
-    HumanMortar           = 13,
-    HumanBallista         = 14,
-    HumanHarpoon          = 15,
-    HumanCatapult         = 16,
-    HumanBattaloon        = 17,
-    DarkElfArcher         = 18,
-    DarkElfCavalryArcher  = 19,
-    DarkElfFighter        = 20,
-    DarkElfKnight         = 21,
-    DarkElfLightCavalry   = 22,
-    DarkOrcInfantry       = 23,
-    DarkOrcRider          = 24,
-    DarkOrcHeavyRiders    = 25,
-    DarkOrcAxeMan         = 26,
-    DarkOrcHeavyInfantry  = 27,
-    DarkOrcSapper         = 28,
-    Scorpion              = 29,
-    SwampMammoth          = 30,
-    Dirigible             = 31,
-    BlackWyvern           = 32,
-    Ghoul                 = 33,
-    BoneDragon            = 34,
-    Wall                  = 35,
-    Scout                 = 36,
-    SelfDestruction       = 37,
-    EncablosaMelee        = 38,
-    EncablosaFlying       = 39,
-    EncablosaRanged       = 40,
-    ElfWall               = 41,
-    EncablosaLarge        = 42
-};
+// K2JobDef.h animation IDs (0-42). Values above 42 are extended model IDs
+// for hero characters and special unit animations.
+constexpr uint8_t kMaxStandardAnimationId = 42;
 
 // Skill slot: 1 byte skill ID + 1 byte level, packed into 2 bytes (4 slots = 8 bytes).
 struct SkillSlot {
@@ -84,8 +41,8 @@ struct SkillSlot {
 
 // Officer data within a unit block.
 struct OfficerData {
-    JobType jobType = JobType::HumanArcher;
-    uint8_t modelId = 0;
+    uint8_t animationId = 0;
+    uint8_t modelVariant = 0;
     uint8_t worldmapId = 0xFF;
     uint8_t level = 1;
     std::array<SkillSlot, 4> skills{};
@@ -128,8 +85,8 @@ struct StgUnit {
     Direction direction = Direction::East;
 
     // Leader configuration (108 bytes).
-    JobType leaderJobType = JobType::HumanArcher;
-    uint8_t leaderModelId = 0;
+    uint8_t leaderAnimationId = 0;
+    uint8_t leaderModelVariant = 0;
     uint8_t leaderWorldmapId = 0xFF;
     uint8_t leaderLevel = 1;
     std::array<SkillSlot, 4> leaderSkills{};
@@ -143,6 +100,7 @@ struct StgUnit {
     // Unit configuration (160 bytes).
     uint32_t troopInfoIndex = 0;
     uint32_t formationType = 0;
+    uint32_t gridUnk190 = 1;
     uint32_t gridX = 1;
     uint32_t gridY = 1;
     std::array<float, 22> statOverrides{};

@@ -2,8 +2,6 @@
 
 namespace kuf {
 
-const std::string UndoStack::emptyStr_;
-
 void UndoStack::execute(CommandPtr cmd) {
     cmd->execute();
     undoStack_.push_back(std::move(cmd));
@@ -31,13 +29,13 @@ void UndoStack::redo() {
     notifyChange();
 }
 
-const std::string& UndoStack::undoDescription() const {
-    if (undoStack_.empty()) return emptyStr_;
+std::string UndoStack::undoDescription() const {
+    if (undoStack_.empty()) return {};
     return undoStack_.back()->description();
 }
 
-const std::string& UndoStack::redoDescription() const {
-    if (redoStack_.empty()) return emptyStr_;
+std::string UndoStack::redoDescription() const {
+    if (redoStack_.empty()) return {};
     return redoStack_.back()->description();
 }
 

@@ -1,5 +1,7 @@
 #include "formats/stg_format.h"
 
+#include "core/text_encoding.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -69,7 +71,7 @@ void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
     std::memcpy(unit.rawData.data(), data, kStgUnitSize);
 
     // Core unit data (84 bytes starting at offset 0x00).
-    unit.unitName = readFixedString(data + 0x00, 32);
+    unit.unitName = cp949ToUtf8(readFixedString(data + 0x00, 32));
     unit.uniqueId = readLE<uint32_t>(data + 0x20);
     unit.ucd = static_cast<UCD>(static_cast<uint8_t>(data[0x24]));
     unit.isHero = static_cast<uint8_t>(data[0x25]);
@@ -81,8 +83,8 @@ void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
     unit.direction = static_cast<Direction>(static_cast<uint8_t>(data[0x4C]));
 
     // Leader configuration (108 bytes starting at offset 0x54).
-    unit.leaderJobType = static_cast<JobType>(static_cast<uint8_t>(data[0x54]));
-    unit.leaderModelId = static_cast<uint8_t>(data[0x55]);
+    unit.leaderAnimationId = static_cast<uint8_t>(data[0x54]);
+    unit.leaderModelVariant = static_cast<uint8_t>(data[0x55]);
     unit.leaderWorldmapId = static_cast<uint8_t>(data[0x56]);
     unit.leaderLevel = static_cast<uint8_t>(data[0x57]);
 
@@ -101,8 +103,8 @@ void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
     unit.officerCount = readLE<uint32_t>(data + 0xBC);
 
     // Officer 1 data (starts at offset 0xC0).
-    unit.officer1.jobType = static_cast<JobType>(static_cast<uint8_t>(data[0xC0]));
-    unit.officer1.modelId = static_cast<uint8_t>(data[0xC1]);
+    unit.officer1.animationId = static_cast<uint8_t>(data[0xC0]);
+    unit.officer1.modelVariant = static_cast<uint8_t>(data[0xC1]);
     unit.officer1.worldmapId = static_cast<uint8_t>(data[0xC2]);
     unit.officer1.level = static_cast<uint8_t>(data[0xC3]);
     for (int i = 0; i < 4; ++i) {
@@ -118,8 +120,8 @@ void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
     }
 
     // Officer 2 data (starts at offset 0x128).
-    unit.officer2.jobType = static_cast<JobType>(static_cast<uint8_t>(data[0x128]));
-    unit.officer2.modelId = static_cast<uint8_t>(data[0x129]);
+    unit.officer2.animationId = static_cast<uint8_t>(data[0x128]);
+    unit.officer2.modelVariant = static_cast<uint8_t>(data[0x129]);
     unit.officer2.worldmapId = static_cast<uint8_t>(data[0x12A]);
     unit.officer2.level = static_cast<uint8_t>(data[0x12B]);
     for (int i = 0; i < 4; ++i) {
@@ -134,8 +136,9 @@ void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
     }
 
     // Unit configuration (160 bytes starting at offset 0x180).
-    unit.gridX = readLE<uint32_t>(data + 0x190);
-    unit.gridY = readLE<uint32_t>(data + 0x194);
+    unit.gridUnk190 = readLE<uint32_t>(data + 0x190);
+    unit.gridX = readLE<uint32_t>(data + 0x194);
+    unit.gridY = readLE<uint32_t>(data + 0x198);
     unit.troopInfoIndex = readLE<uint32_t>(data + 0x1C0);
     unit.formationType = readLE<uint32_t>(data + 0x1C4);
 
@@ -149,7 +152,7 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     std::byte* raw = unit.rawData.data();
 
     // Core unit data.
-    writeFixedString(raw + 0x00, 32, unit.unitName);
+    writeFixedString(raw + 0x00, 32, utf8ToCp949(unit.unitName));
     writeLE(raw + 0x20, unit.uniqueId);
     raw[0x24] = static_cast<std::byte>(unit.ucd);
     raw[0x25] = static_cast<std::byte>(unit.isHero);
@@ -161,8 +164,8 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     raw[0x4C] = static_cast<std::byte>(unit.direction);
 
     // Leader configuration.
-    raw[0x54] = static_cast<std::byte>(unit.leaderJobType);
-    raw[0x55] = static_cast<std::byte>(unit.leaderModelId);
+    raw[0x54] = static_cast<std::byte>(unit.leaderAnimationId);
+    raw[0x55] = static_cast<std::byte>(unit.leaderModelVariant);
     raw[0x56] = static_cast<std::byte>(unit.leaderWorldmapId);
     raw[0x57] = static_cast<std::byte>(unit.leaderLevel);
 
@@ -178,8 +181,8 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     writeLE(raw + 0xBC, unit.officerCount);
 
     // Officer 1.
-    raw[0xC0] = static_cast<std::byte>(unit.officer1.jobType);
-    raw[0xC1] = static_cast<std::byte>(unit.officer1.modelId);
+    raw[0xC0] = static_cast<std::byte>(unit.officer1.animationId);
+    raw[0xC1] = static_cast<std::byte>(unit.officer1.modelVariant);
     raw[0xC2] = static_cast<std::byte>(unit.officer1.worldmapId);
     raw[0xC3] = static_cast<std::byte>(unit.officer1.level);
     for (int i = 0; i < 4; ++i) {
@@ -191,8 +194,8 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     }
 
     // Officer 2.
-    raw[0x128] = static_cast<std::byte>(unit.officer2.jobType);
-    raw[0x129] = static_cast<std::byte>(unit.officer2.modelId);
+    raw[0x128] = static_cast<std::byte>(unit.officer2.animationId);
+    raw[0x129] = static_cast<std::byte>(unit.officer2.modelVariant);
     raw[0x12A] = static_cast<std::byte>(unit.officer2.worldmapId);
     raw[0x12B] = static_cast<std::byte>(unit.officer2.level);
     for (int i = 0; i < 4; ++i) {
@@ -204,8 +207,9 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     }
 
     // Unit configuration.
-    writeLE(raw + 0x190, unit.gridX);
-    writeLE(raw + 0x194, unit.gridY);
+    writeLE(raw + 0x190, unit.gridUnk190);
+    writeLE(raw + 0x194, unit.gridX);
+    writeLE(raw + 0x198, unit.gridY);
     writeLE(raw + 0x1C0, unit.troopInfoIndex);
     writeLE(raw + 0x1C4, unit.formationType);
 
@@ -292,15 +296,6 @@ std::vector<ValidationIssue> StgFormat::validate() const {
                 Severity::Error,
                 "ucd",
                 "Invalid UCD value",
-                i
-            });
-        }
-
-        if (static_cast<uint8_t>(unit.leaderJobType) > 42) {
-            issues.push_back({
-                Severity::Error,
-                "leaderJobType",
-                "Invalid job type",
                 i
             });
         }

@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include <optional>
 #include <string>
@@ -17,20 +18,23 @@ std::optional<std::string> macosOpenFile(const char* filter, const char* initial
             [panel setDirectoryURL:dirURL];
         }
 
-        // Parse filter and set allowed file types.
+        // Parse filter and set allowed content types.
         // Filter format: "*.sox" or similar.
         if (filter && strlen(filter) > 0) {
             NSString* filterStr = [NSString stringWithUTF8String:filter];
             NSArray* parts = [filterStr componentsSeparatedByString:@"*."];
-            NSMutableArray* extensions = [NSMutableArray array];
+            NSMutableArray<UTType*>* contentTypes = [NSMutableArray array];
             for (NSString* part in parts) {
                 NSString* trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
                 if ([trimmed length] > 0) {
-                    [extensions addObject:trimmed];
+                    UTType* type = [UTType typeWithFilenameExtension:trimmed];
+                    if (type) {
+                        [contentTypes addObject:type];
+                    }
                 }
             }
-            if ([extensions count] > 0) {
-                [panel setAllowedFileTypes:extensions];
+            if ([contentTypes count] > 0) {
+                [panel setAllowedContentTypes:contentTypes];
             }
         }
 
@@ -52,19 +56,22 @@ std::optional<std::string> macosSaveFile(const char* filter, const char* default
             [panel setNameFieldStringValue:[NSString stringWithUTF8String:defaultName]];
         }
 
-        // Parse filter and set allowed file types.
+        // Parse filter and set allowed content types.
         if (filter && strlen(filter) > 0) {
             NSString* filterStr = [NSString stringWithUTF8String:filter];
             NSArray* parts = [filterStr componentsSeparatedByString:@"*."];
-            NSMutableArray* extensions = [NSMutableArray array];
+            NSMutableArray<UTType*>* contentTypes = [NSMutableArray array];
             for (NSString* part in parts) {
                 NSString* trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
                 if ([trimmed length] > 0) {
-                    [extensions addObject:trimmed];
+                    UTType* type = [UTType typeWithFilenameExtension:trimmed];
+                    if (type) {
+                        [contentTypes addObject:type];
+                    }
                 }
             }
-            if ([extensions count] > 0) {
-                [panel setAllowedFileTypes:extensions];
+            if ([contentTypes count] > 0) {
+                [panel setAllowedContentTypes:contentTypes];
             }
         }
 

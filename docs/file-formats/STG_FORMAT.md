@@ -121,8 +121,8 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x54 | 1 | JobType | Unit type (see K2JobDef.h) |
-| 0x55 | 1 | uint8 | Model ID variant (see Hero Model IDs below) |
+| 0x54 | 1 | uint8 | Animation ID (0-42 = K2JobDef.h standard, 32+ = hero models, see below) |
+| 0x55 | 1 | uint8 | Model Variant (see Hero Model IDs below) |
 | 0x56 | 1 | uint8 | Worldmap ID (see Worldmap ID Behavior) |
 | 0x57 | 1 | uint8 | Level (1-99) |
 | 0x58 | 8 | SkillSlot[4] | Leader skill slots (SkillID + Level per slot) |
@@ -133,8 +133,8 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0xC0 | 1 | JobType | Officer 1 unit type |
-| 0xC1 | 1 | uint8 | Officer 1 Model ID |
+| 0xC0 | 1 | uint8 | Officer 1 Animation ID |
+| 0xC1 | 1 | uint8 | Officer 1 Model Variant |
 | 0xC2 | 1 | uint8 | Officer 1 Worldmap ID |
 | 0xC3 | 1 | uint8 | Officer 1 Level |
 | 0xC4 | 100 | - | Officer 1 skills/abilities |
@@ -143,8 +143,8 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x128 | 1 | JobType | Officer 2 unit type |
-| 0x129 | 1 | uint8 | Officer 2 Model ID |
+| 0x128 | 1 | uint8 | Officer 2 Animation ID |
+| 0x129 | 1 | uint8 | Officer 2 Model Variant |
 | 0x12A | 1 | uint8 | Officer 2 Worldmap ID |
 | 0x12B | 1 | uint8 | Officer 2 Level |
 | 0x12C | 84 | - | Officer 2 skills/abilities |
@@ -153,11 +153,12 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x180 | 12 | - | Padding |
-| 0x18C | 4 | uint32 | Unit animation/grid config |
-| 0x190 | 4 | uint32 | Grid X dimension |
-| 0x194 | 4 | uint32 | Grid Y dimension |
-| 0x198 | 40 | - | Reserved |
+| 0x180 | 16 | - | Padding (all 0xFF) |
+| 0x190 | 2 | uint16 | Grid X dimension (formation width) |
+| 0x192 | 2 | uint16 | Grid Flags (values 0-3 or 0xFFFF, purpose unknown) |
+| 0x194 | 4 | uint32 | Grid Y dimension (formation depth) |
+| 0x198 | 4 | uint32 | Unknown (values 1-6) |
+| 0x19C | 36 | - | Reserved (all 0xFF) |
 | 0x1C0 | 4 | uint32 | **TroopInfo index** (references TroopInfo.sox) |
 | 0x1C4 | 4 | uint32 | Formation type |
 | 0x1C8 | 88 | float[22] | Stat overrides (all -1.0 = use defaults) |
@@ -407,7 +408,7 @@ From `K2JobDef.h` - maps to Animation ID / unit type fields.
 
 ### Hero Model/Animation IDs
 
-These byte values map to hero character models and animations in the Model ID field. Used in both Crusaders and Heroes.
+These byte values appear in the Animation ID field (+0x54) when the unit is a hero (IsHero=1). Values 0-42 overlap with K2JobDef.h standard animation IDs, but hero characters use values 32+ as character model identifiers. Used in both Crusaders and Heroes.
 
 | Hex | Decimal | Character |
 |-----|---------|-----------|
@@ -468,12 +469,12 @@ From `K2AbilityDef.h` - maps to ability slot values. Value 0xFFFFFFFF (-1) means
 
 ### Worldmap ID Behavior
 
-The Worldmap ID field (offset 0x56 in the leader configuration) controls how the game loads and saves unit state relative to the worldmap:
+The Worldmap ID field (offset 0x56 in the leader configuration) controls **post-mission barracks persistence**, not level or stat loading during the mission. The level byte at +0x57 is always the actual level used in-game.
 
-- **0xFF**: Prevents the mission from loading any worldmap state. The unit is treated as entirely new. This is the safe default for custom units.
-- **Any other value**: The game loads the corresponding worldmap entry and overwrites the STG unit data with whatever the worldmap save contains. This means the unit's type, level, equipment, and officers will be replaced by the saved worldmap state.
+- **0xFF**: Unit is standalone. No campaign save/load. STG values are final. This is the safe default for new/custom units.
+- **0x00+**: Links the unit to a worldmap/barracks slot for campaign progression. After the mission completes, the game saves the unit's state back to this slot. This is described by the Steam STG guide as "a after-Mission thing" for barracks persistence.
 
-After a mission completes, the game saves the unit back to the worldmap entry referenced by this ID. Using an existing Worldmap ID on a different unit type can cause crashes or data corruption.
+**WARNING**: Reusing an existing Worldmap ID on a different unit type can cause crashes or data corruption. The Steam guide marks this field as "DO NOT TOUCH."
 
 ### Worldmap File Limitations (Crusaders only)
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/tabs/editor_tab.h"
+#include "core/name_dictionary.h"
 #include "formats/stg_format.h"
 
 #include <memory>
@@ -16,6 +17,8 @@ public:
     void selectUnit(size_t index);
     int selectedUnit() const { return selectedUnit_; }
 
+    const NameDictionary& nameDictionary() const { return nameDictionary_; }
+
 private:
     enum class Section {
         Header,
@@ -30,6 +33,7 @@ private:
 
     Section currentSection_ = Section::Units;
     int selectedUnit_ = -1;
+    NameDictionary nameDictionary_;
 };
 
 } // namespace kuf
