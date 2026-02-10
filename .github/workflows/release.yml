@@ -55,7 +55,7 @@ jobs:
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install libconfig:${{ matrix.vcpkg_triplet }}
+        run: vcpkg install libconfig:${{ matrix.vcpkg_triplet }} libiconv:${{ matrix.vcpkg_triplet }}
 
       - name: Configure (Unix)
         if: runner.os != 'Windows'
