@@ -15,6 +15,7 @@ class TabManager;
 class RecentFiles;
 class OpenDocument;
 class EditorTab;
+class ModManagerView;
 
 class Application {
 public:
@@ -40,11 +41,13 @@ private:
     std::unique_ptr<SettingsDialog> settingsDialog_;
     std::unique_ptr<TabManager> tabManager_;
     std::unique_ptr<RecentFiles> recentFiles_;
+    std::unique_ptr<ModManagerView> modManagerView_;
 
     std::string gameDirectory_;
     std::string pendingPopupMessage_;
     bool running_ = true;
     bool showHomeTab_ = true;
+    bool showModManager_ = true;
     bool showErrorPopup_ = false;
 };
 

@@ -5,6 +5,7 @@
 #include "core/tab_manager.h"
 #include "ui/views/home_view.h"
 #include "ui/views/validation_log.h"
+#include "ui/views/mod_manager_view.h"
 #include "ui/dialogs/file_dialog.h"
 #include "ui/dialogs/settings_dialog.h"
 #include "ui/tabs/editor_tab.h"
@@ -42,6 +43,12 @@ Application::Application() {
     // Create views.
     homeView_ = std::make_unique<HomeView>();
     validationLog_ = std::make_unique<ValidationLogView>();
+    modManagerView_ = std::make_unique<ModManagerView>();
+
+    modManagerView_->setOnError([this](const std::string& msg) {
+        pendingPopupMessage_ = msg;
+        showErrorPopup_ = true;
+    });
 
     // Create tab manager.
     tabManager_ = std::make_unique<TabManager>();
@@ -141,6 +148,7 @@ void Application::openFile(const std::string& path) {
 
 void Application::setGameDirectory(const std::string& dir) {
     gameDirectory_ = dir;
+    modManagerView_->setGameDirectory(dir);
 }
 
 void Application::saveActiveDocument() {
@@ -272,6 +280,10 @@ void Application::drawMenuBar() {
                 undoStack->redo();
             }
             ImGui::Separator();
+            if (ImGui::MenuItem("Restore from Backup...", nullptr, false, !gameDirectory_.empty())) {
+                modManagerView_->restoreLatestBackup();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Settings...")) {
                 settingsDialog_->open();
             }
@@ -280,6 +292,7 @@ void Application::drawMenuBar() {
 
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Home", nullptr, &showHomeTab_);
+            ImGui::MenuItem("Mod Manager", nullptr, &showModManager_);
             ImGui::MenuItem("Validation Log", nullptr, &validationLog_->isOpen());
             ImGui::EndMenu();
         }
@@ -309,6 +322,18 @@ void Application::drawTabBar() {
             }
             if (!homeOpen) {
                 showHomeTab_ = false;
+            }
+        }
+
+        // Mod Manager tab.
+        if (showModManager_) {
+            bool modOpen = true;
+            if (ImGui::BeginTabItem("Mod Manager", &modOpen)) {
+                modManagerView_->drawContent();
+                ImGui::EndTabItem();
+            }
+            if (!modOpen) {
+                showModManager_ = false;
             }
         }
 
