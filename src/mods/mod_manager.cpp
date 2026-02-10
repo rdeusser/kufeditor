@@ -3,7 +3,11 @@
 #include "core/json.h"
 #include "core/zip_archive.h"
 
+#include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
 
 namespace kuf {
 
@@ -172,6 +176,95 @@ std::vector<ModInfo> ModManager::listMods() {
     });
 
     return mods;
+}
+
+std::vector<InstalledModInfo> ModManager::listInstalledMods() {
+    std::string path = modsDirectory() + "/installed.json";
+    if (!fs::exists(path)) return {};
+
+    std::ifstream file(path);
+    if (!file) return {};
+
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+    return parseInstalledModsJson(content);
+}
+
+bool ModManager::markInstalled(const ModInfo& mod) {
+    auto mods = listInstalledMods();
+
+    // Replace existing entry with the same name.
+    bool replaced = false;
+    for (auto& m : mods) {
+        if (m.name == mod.metadata.name) {
+            m.version = mod.metadata.version;
+            m.author = mod.metadata.author;
+            m.game = mod.metadata.game;
+            m.zipPath = mod.zipPath;
+
+            auto now = std::chrono::system_clock::now();
+            auto time = std::chrono::system_clock::to_time_t(now);
+            std::tm tm{};
+#ifdef _WIN32
+            gmtime_s(&tm, &time);
+#else
+            gmtime_r(&time, &tm);
+#endif
+            std::ostringstream ss;
+            ss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+            m.installedAt = ss.str();
+
+            replaced = true;
+            break;
+        }
+    }
+
+    if (!replaced) {
+        InstalledModInfo info;
+        info.name = mod.metadata.name;
+        info.version = mod.metadata.version;
+        info.author = mod.metadata.author;
+        info.game = mod.metadata.game;
+        info.zipPath = mod.zipPath;
+
+        auto now = std::chrono::system_clock::now();
+        auto time = std::chrono::system_clock::to_time_t(now);
+        std::tm tm{};
+#ifdef _WIN32
+        gmtime_s(&tm, &time);
+#else
+        gmtime_r(&time, &tm);
+#endif
+        std::ostringstream ss;
+        ss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+        info.installedAt = ss.str();
+
+        mods.push_back(std::move(info));
+    }
+
+    fs::create_directories(modsDirectory());
+    std::string path = modsDirectory() + "/installed.json";
+    std::ofstream file(path);
+    if (!file) return false;
+
+    file << serializeInstalledModsJson(mods);
+    return file.good();
+}
+
+bool ModManager::markUninstalled(const std::string& name) {
+    auto mods = listInstalledMods();
+
+    auto it = std::remove_if(mods.begin(), mods.end(),
+                             [&name](const InstalledModInfo& m) { return m.name == name; });
+    if (it == mods.end()) return false;
+    mods.erase(it, mods.end());
+
+    std::string path = modsDirectory() + "/installed.json";
+    std::ofstream file(path);
+    if (!file) return false;
+
+    file << serializeInstalledModsJson(mods);
+    return file.good();
 }
 
 } // namespace kuf
