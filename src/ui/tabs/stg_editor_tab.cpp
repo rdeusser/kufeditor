@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "ui/imgui_helpers.h"
+
 namespace kuf {
 
 namespace {
@@ -219,7 +221,7 @@ void StgEditorTab::drawHeaderSection() {
     ImGui::Separator();
 
     int missionId = static_cast<int>(hdr.missionId);
-    if (ImGui::InputInt("Mission ID", &missionId)) {
+    if (ImGui::DragInt("Mission ID", &missionId, 1, 0, 0)) {
         hdr.missionId = static_cast<uint32_t>(std::max(0, missionId));
         document_->dirty = true;
     }
@@ -229,7 +231,7 @@ void StgEditorTab::drawHeaderSection() {
     auto stringInput = [&](const char* label, std::string& str) {
         std::memset(buf, 0, sizeof(buf));
         std::strncpy(buf, str.c_str(), sizeof(buf) - 1);
-        if (ImGui::InputText(label, buf, sizeof(buf))) {
+        if (InputTextCentered(label, buf, sizeof(buf))) {
             str = buf;
             document_->dirty = true;
         }
@@ -301,7 +303,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
             char nameBuf[32];
             std::memset(nameBuf, 0, sizeof(nameBuf));
             std::strncpy(nameBuf, unit.unitName.c_str(), sizeof(nameBuf) - 1);
-            if (ImGui::InputText("Internal Name", nameBuf, sizeof(nameBuf))) {
+            if (InputTextCentered("Internal Name", nameBuf, sizeof(nameBuf))) {
                 unit.unitName = nameBuf;
                 document_->dirty = true;
             }
@@ -310,7 +312,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
         }
 
         int uid = static_cast<int>(unit.uniqueId);
-        if (ImGui::InputInt("Unique ID", &uid)) {
+        if (ImGui::DragInt("Unique ID", &uid, 1, 0, 0)) {
             unit.uniqueId = static_cast<uint32_t>(std::max(0, uid));
             document_->dirty = true;
         }
@@ -364,20 +366,20 @@ void StgEditorTab::drawUnitDetails(size_t index) {
         drawAnimationIdCombo("Animation ID", unit.leaderAnimationId, unit.isHero != 0, nameDictionary_);
 
         int modelVar = unit.leaderModelVariant;
-        if (ImGui::InputInt("Model Variant", &modelVar)) {
+        if (ImGui::DragInt("Model Variant", &modelVar, 1, 0, 255)) {
             unit.leaderModelVariant = static_cast<uint8_t>(std::clamp(modelVar, 0, 255));
             document_->dirty = true;
         }
 
         int wmId = unit.leaderWorldmapId;
-        if (ImGui::InputInt("Worldmap ID", &wmId)) {
+        if (ImGui::DragInt("Worldmap ID", &wmId, 1, 0, 255)) {
             unit.leaderWorldmapId = static_cast<uint8_t>(std::clamp(wmId, 0, 255));
             document_->dirty = true;
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("0xFF = standalone (no campaign save). Other values link to barracks slot - DO NOT reuse.");
 
         int level = unit.leaderLevel;
-        if (ImGui::InputInt("Level", &level)) {
+        if (ImGui::DragInt("Level", &level, 1, 1, 99)) {
             unit.leaderLevel = static_cast<uint8_t>(std::clamp(level, 1, 99));
             document_->dirty = true;
         }
@@ -395,7 +397,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
             ImGui::Text("%s:", skillLabel);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(120);
-            if (ImGui::InputInt("##id", &skillId)) {
+            if (ImGui::DragInt("##id", &skillId, 1, 0, 255)) {
                 unit.leaderSkills[i].skillId = static_cast<uint8_t>(std::clamp(skillId, 0, 255));
                 document_->dirty = true;
             }
@@ -403,7 +405,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
             ImGui::Text("Lv:");
             ImGui::SameLine();
             ImGui::SetNextItemWidth(80);
-            if (ImGui::InputInt("##lv", &skillLv)) {
+            if (ImGui::DragInt("##lv", &skillLv, 1, 0, 255)) {
                 unit.leaderSkills[i].level = static_cast<uint8_t>(std::clamp(skillLv, 0, 255));
                 document_->dirty = true;
             }
@@ -427,7 +429,7 @@ void StgEditorTab::drawUnitDetails(size_t index) {
                 }
             } else {
                 ImGui::SetNextItemWidth(120);
-                if (ImGui::InputInt(abilLabel, &val)) {
+                if (ImGui::DragInt(abilLabel, &val)) {
                     unit.leaderAbilities[i] = val;
                     document_->dirty = true;
                 }
@@ -458,24 +460,24 @@ void StgEditorTab::drawUnitDetails(size_t index) {
 
     if (ImGui::CollapsingHeader("Unit Configuration")) {
         int troopIdx = static_cast<int>(unit.troopInfoIndex);
-        if (ImGui::InputInt("TroopInfo Index", &troopIdx)) {
+        if (ImGui::DragInt("TroopInfo Index", &troopIdx, 1, 0, 0)) {
             unit.troopInfoIndex = static_cast<uint32_t>(std::max(0, troopIdx));
             document_->dirty = true;
         }
 
         int formation = static_cast<int>(unit.formationType);
-        if (ImGui::InputInt("Formation", &formation)) {
+        if (ImGui::DragInt("Formation", &formation, 1, 0, 0)) {
             unit.formationType = static_cast<uint32_t>(std::max(0, formation));
             document_->dirty = true;
         }
 
         int gx = static_cast<int>(unit.gridX);
         int gy = static_cast<int>(unit.gridY);
-        if (ImGui::InputInt("Grid X", &gx)) {
+        if (ImGui::DragInt("Grid X", &gx, 1, 1, 0)) {
             unit.gridX = static_cast<uint32_t>(std::max(1, gx));
             document_->dirty = true;
         }
-        if (ImGui::InputInt("Grid Y", &gy)) {
+        if (ImGui::DragInt("Grid Y", &gy, 1, 1, 0)) {
             unit.gridY = static_cast<uint32_t>(std::max(1, gy));
             document_->dirty = true;
         }
@@ -507,19 +509,19 @@ void StgEditorTab::drawOfficerSection(const char* label, OfficerData& officer, b
         drawAnimationIdCombo("Animation ID", officer.animationId, false, nameDictionary_);
 
         int modelVar = officer.modelVariant;
-        if (ImGui::InputInt("Model Variant", &modelVar)) {
+        if (ImGui::DragInt("Model Variant", &modelVar, 1, 0, 255)) {
             officer.modelVariant = static_cast<uint8_t>(std::clamp(modelVar, 0, 255));
             document_->dirty = true;
         }
 
         int wmId = officer.worldmapId;
-        if (ImGui::InputInt("Worldmap ID", &wmId)) {
+        if (ImGui::DragInt("Worldmap ID", &wmId, 1, 0, 255)) {
             officer.worldmapId = static_cast<uint8_t>(std::clamp(wmId, 0, 255));
             document_->dirty = true;
         }
 
         int level = officer.level;
-        if (ImGui::InputInt("Level", &level)) {
+        if (ImGui::DragInt("Level", &level, 1, 1, 99)) {
             officer.level = static_cast<uint8_t>(std::clamp(level, 1, 99));
             document_->dirty = true;
         }
@@ -538,7 +540,7 @@ void StgEditorTab::drawOfficerSection(const char* label, OfficerData& officer, b
                     }
                 } else {
                     ImGui::SetNextItemWidth(120);
-                    if (ImGui::InputInt(("Slot " + std::to_string(i)).c_str(), &val)) {
+                    if (ImGui::DragInt(("Slot " + std::to_string(i)).c_str(), &val)) {
                         officer.abilities[i] = val;
                         document_->dirty = true;
                     }
