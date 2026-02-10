@@ -23,12 +23,15 @@ public:
     void restoreLatestBackup();
 
 private:
+    void drawInstalledSidebar();
+    void drawMainContent();
     void drawBackupsSection();
     void drawModLibrarySection();
     void drawCreateModSection();
     void drawProgressOverlay();
     void refreshBackups();
     void refreshMods();
+    void refreshInstalledMods();
 
     std::string gameDirectory_;
     AsyncTask task_;
@@ -49,6 +52,12 @@ private:
     char modDescription_[256] = {};
     int modGame_ = 0; // 0 = crusaders, 1 = heroes
     std::vector<std::string> modFiles_;
+
+    // Installed mods.
+    std::vector<InstalledModInfo> installedMods_;
+    bool installedModsLoaded_ = false;
+    int selectedInstalledMod_ = -1;
+    bool showUninstallConfirm_ = false;
 
     // Confirmation popups.
     bool showRestoreConfirm_ = false;

@@ -15,6 +15,15 @@ struct ModInfo {
     size_t fileSize = 0;
 };
 
+struct InstalledModInfo {
+    std::string name;
+    std::string version;
+    std::string author;
+    std::string game;
+    std::string installedAt;
+    std::string zipPath;
+};
+
 class ModManager {
 public:
     static std::string modsDirectory();
@@ -25,6 +34,10 @@ public:
     static bool applyMod(const ModInfo& mod, const std::string& gameDir, AsyncTask& task);
     static bool removeMod(const ModInfo& mod);
     static std::vector<ModInfo> listMods();
+
+    static std::vector<InstalledModInfo> listInstalledMods();
+    static bool markInstalled(const ModInfo& mod);
+    static bool markUninstalled(const std::string& name);
 };
 
 } // namespace kuf

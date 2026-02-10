@@ -1,4 +1,5 @@
 #include "core/json.h"
+#include "mods/mod_manager.h"
 
 #include <sstream>
 
@@ -146,6 +147,104 @@ std::string serializeModJson(const ModMetadata& meta) {
     }
     out << "  ]\n";
     out << "}\n";
+    return out.str();
+}
+
+std::vector<InstalledModInfo> parseInstalledModsJson(const std::string& text) {
+    std::vector<InstalledModInfo> result;
+    size_t pos = 0;
+
+    skipWhitespace(text, pos);
+    if (pos >= text.size() || text[pos] != '{') return result;
+    ++pos;
+
+    // Find "mods" key.
+    while (pos < text.size() && text[pos] != '}') {
+        skipWhitespace(text, pos);
+        if (text[pos] != '"') { ++pos; continue; }
+
+        std::string key = readJsonString(text, pos);
+        skipWhitespace(text, pos);
+        if (pos >= text.size() || text[pos] != ':') return result;
+        ++pos;
+        skipWhitespace(text, pos);
+
+        if (key == "mods" && pos < text.size() && text[pos] == '[') {
+            ++pos; // skip '['
+            skipWhitespace(text, pos);
+
+            while (pos < text.size() && text[pos] != ']') {
+                if (text[pos] == '{') {
+                    ++pos;
+                    InstalledModInfo info;
+
+                    while (pos < text.size() && text[pos] != '}') {
+                        skipWhitespace(text, pos);
+                        if (text[pos] != '"') { ++pos; continue; }
+
+                        std::string k = readJsonString(text, pos);
+                        skipWhitespace(text, pos);
+                        if (pos >= text.size() || text[pos] != ':') break;
+                        ++pos;
+                        skipWhitespace(text, pos);
+
+                        if (pos < text.size() && text[pos] == '"') {
+                            std::string v = readJsonString(text, pos);
+                            if (k == "name") info.name = v;
+                            else if (k == "version") info.version = v;
+                            else if (k == "author") info.author = v;
+                            else if (k == "game") info.game = v;
+                            else if (k == "installedAt") info.installedAt = v;
+                            else if (k == "zipPath") info.zipPath = v;
+                        } else {
+                            while (pos < text.size() && text[pos] != ',' && text[pos] != '}') ++pos;
+                        }
+
+                        skipWhitespace(text, pos);
+                        if (pos < text.size() && text[pos] == ',') ++pos;
+                    }
+
+                    if (pos < text.size()) ++pos; // skip '}'
+                    if (!info.name.empty()) {
+                        result.push_back(std::move(info));
+                    }
+                } else {
+                    ++pos;
+                }
+                skipWhitespace(text, pos);
+                if (pos < text.size() && text[pos] == ',') ++pos;
+                skipWhitespace(text, pos);
+            }
+
+            if (pos < text.size()) ++pos; // skip ']'
+        } else {
+            while (pos < text.size() && text[pos] != ',' && text[pos] != '}') ++pos;
+        }
+
+        skipWhitespace(text, pos);
+        if (pos < text.size() && text[pos] == ',') ++pos;
+    }
+
+    return result;
+}
+
+std::string serializeInstalledModsJson(const std::vector<InstalledModInfo>& mods) {
+    std::ostringstream out;
+    out << "{\n  \"mods\": [\n";
+    for (size_t i = 0; i < mods.size(); ++i) {
+        const auto& m = mods[i];
+        out << "    {\n";
+        out << "      \"name\": \"" << escapeJsonString(m.name) << "\",\n";
+        out << "      \"version\": \"" << escapeJsonString(m.version) << "\",\n";
+        out << "      \"author\": \"" << escapeJsonString(m.author) << "\",\n";
+        out << "      \"game\": \"" << escapeJsonString(m.game) << "\",\n";
+        out << "      \"installedAt\": \"" << escapeJsonString(m.installedAt) << "\",\n";
+        out << "      \"zipPath\": \"" << escapeJsonString(m.zipPath) << "\"\n";
+        out << "    }";
+        if (i + 1 < mods.size()) out << ",";
+        out << "\n";
+    }
+    out << "  ]\n}\n";
     return out.str();
 }
 

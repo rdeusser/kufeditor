@@ -38,6 +38,88 @@ std::string currentIso8601() {
 ModManagerView::ModManagerView() : View("Mod Manager") {}
 
 void ModManagerView::drawContent() {
+    if (!installedModsLoaded_) {
+        refreshInstalledMods();
+        installedModsLoaded_ = true;
+    }
+
+    float height = ImGui::GetContentRegionAvail().y;
+
+    ImGui::BeginChild("InstalledModsSidebar", ImVec2(220, height), ImGuiChildFlags_Borders);
+    drawInstalledSidebar();
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    ImGui::BeginChild("ModManagerContent", ImVec2(0, height), ImGuiChildFlags_Borders);
+    drawMainContent();
+    ImGui::EndChild();
+}
+
+void ModManagerView::drawInstalledSidebar() {
+    ImGui::Text("Installed Mods");
+    ImGui::Separator();
+
+    if (installedMods_.empty()) {
+        ImGui::TextDisabled("No mods installed.");
+    } else {
+        for (int i = 0; i < static_cast<int>(installedMods_.size()); ++i) {
+            bool isSelected = (selectedInstalledMod_ == i);
+            if (ImGui::Selectable(installedMods_[i].name.c_str(), isSelected)) {
+                selectedInstalledMod_ = isSelected ? -1 : i;
+            }
+        }
+    }
+
+    if (selectedInstalledMod_ >= 0 &&
+        selectedInstalledMod_ < static_cast<int>(installedMods_.size())) {
+        const auto& mod = installedMods_[selectedInstalledMod_];
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("Version: %s", mod.version.c_str());
+        if (!mod.author.empty()) {
+            ImGui::Text("Author: %s", mod.author.c_str());
+        }
+        ImGui::Text("Game: %s", mod.game.c_str());
+        if (!mod.installedAt.empty()) {
+            ImGui::Text("Installed: %s", mod.installedAt.c_str());
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("Uninstall", ImVec2(-1, 0))) {
+            showUninstallConfirm_ = true;
+        }
+    }
+
+    if (showUninstallConfirm_) {
+        ImGui::OpenPopup("Confirm Uninstall");
+        showUninstallConfirm_ = false;
+    }
+    if (ImGui::BeginPopupModal("Confirm Uninstall", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Remove this mod from the installed list?");
+        ImGui::TextDisabled("(Files in the game directory are not reverted.)");
+        ImGui::Separator();
+        if (ImGui::Button("Uninstall", ImVec2(120, 0))) {
+            if (selectedInstalledMod_ >= 0 &&
+                selectedInstalledMod_ < static_cast<int>(installedMods_.size())) {
+                ModManager::markUninstalled(installedMods_[selectedInstalledMod_].name);
+                selectedInstalledMod_ = -1;
+                refreshInstalledMods();
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void ModManagerView::drawMainContent() {
     bool taskRunning = task_.state() == AsyncTaskState::Running;
 
     ImGui::BeginDisabled(taskRunning);
@@ -56,6 +138,7 @@ void ModManagerView::drawContent() {
     if (task_.state() == AsyncTaskState::Completed) {
         refreshBackups();
         refreshMods();
+        refreshInstalledMods();
         task_.reset();
     } else if (task_.state() == AsyncTaskState::Failed) {
         if (onError_) {
@@ -293,7 +376,11 @@ void ModManagerView::drawModLibrarySection() {
                 auto mod = mods_[pendingModIndex_];
                 std::string dir = gameDirectory_;
                 task_.start([mod, dir](AsyncTask& t) {
-                    return ModManager::applyMod(mod, dir, t);
+                    bool ok = ModManager::applyMod(mod, dir, t);
+                    if (ok) {
+                        ModManager::markInstalled(mod);
+                    }
+                    return ok;
                 });
             }
             ImGui::CloseCurrentPopup();
@@ -439,6 +526,13 @@ void ModManagerView::refreshMods() {
     mods_ = ModManager::listMods();
     if (selectedMod_ >= static_cast<int>(mods_.size())) {
         selectedMod_ = -1;
+    }
+}
+
+void ModManagerView::refreshInstalledMods() {
+    installedMods_ = ModManager::listInstalledMods();
+    if (selectedInstalledMod_ >= static_cast<int>(installedMods_.size())) {
+        selectedInstalledMod_ = -1;
     }
 }
 
