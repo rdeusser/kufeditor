@@ -15,7 +15,7 @@ enum class Theme {
 // Application configuration.
 struct AppConfig {
     Theme theme = Theme::Dark;
-    float fontSize = 14.0f;
+    float fontSize = 17.0f;
     int maxRecentFiles = 10;
     std::vector<std::string> recentFiles;
 };

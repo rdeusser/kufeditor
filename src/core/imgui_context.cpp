@@ -15,7 +15,7 @@ ImGuiContext::ImGuiContext(GLFWwindow* window) {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-    loadFont(io);
+    loadFont(io, fontSize_);
     applyDarkTheme();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -33,6 +33,10 @@ ImGuiContext::~ImGuiContext() {
 }
 
 void ImGuiContext::beginFrame() {
+    if (fontsDirty_) {
+        rebuildFonts();
+        fontsDirty_ = false;
+    }
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -42,7 +46,19 @@ void ImGuiContext::endFrame() {
     ImGui::Render();
 }
 
-void ImGuiContext::loadFont(ImGuiIO& io) {
+void ImGuiContext::setFontSize(float size) {
+    fontSize_ = size;
+    fontsDirty_ = true;
+}
+
+void ImGuiContext::rebuildFonts() {
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+    loadFont(io, fontSize_);
+    io.Fonts->Build();
+}
+
+void ImGuiContext::loadFont(ImGuiIO& io, float size) {
     const char* fontPaths[] = {
 #ifdef __APPLE__
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",
@@ -59,7 +75,7 @@ void ImGuiContext::loadFont(ImGuiIO& io) {
     };
 
     for (const char* path : fontPaths) {
-        if (io.Fonts->AddFontFromFileTTF(path, 14.0f, nullptr,
+        if (io.Fonts->AddFontFromFileTTF(path, size, nullptr,
                                           io.Fonts->GetGlyphRangesKorean())) {
             return;
         }
