@@ -75,6 +75,12 @@ bool SettingsDialog::draw() {
 
 void SettingsDialog::apply() {
     applyTheme();
+    if (config_.fontSize != appliedFontSize_) {
+        appliedFontSize_ = config_.fontSize;
+        if (onFontSizeChanged_) {
+            onFontSizeChanged_(config_.fontSize);
+        }
+    }
 }
 
 void SettingsDialog::applyTheme() {

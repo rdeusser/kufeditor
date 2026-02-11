@@ -16,9 +16,15 @@ public:
     void beginFrame();
     void endFrame();
 
+    void setFontSize(float size);
+
 private:
-    void loadFont(ImGuiIO& io);
+    void rebuildFonts();
+    void loadFont(ImGuiIO& io, float size);
     void applyDarkTheme();
+
+    float fontSize_ = 17.0f;
+    bool fontsDirty_ = false;
 };
 
 } // namespace kuf

@@ -62,8 +62,13 @@ Application::Application() {
     // Load config.
     settingsDialog_->load();
     settingsDialog_->apply();
+    imgui_->setFontSize(settingsDialog_->config().fontSize);
     recentFiles_->files() = settingsDialog_->config().recentFiles;
     recentFiles_->setMaxFiles(settingsDialog_->config().maxRecentFiles);
+
+    settingsDialog_->setOnFontSizeChanged([this](float size) {
+        imgui_->setFontSize(size);
+    });
 
     // Set up callbacks.
     homeView_->setOnSelectGameDirectory([this](const std::string& dir) {

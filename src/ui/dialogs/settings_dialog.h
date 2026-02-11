@@ -2,6 +2,8 @@
 
 #include "core/config.h"
 
+#include <functional>
+
 namespace kuf {
 
 // Settings dialog.
@@ -28,6 +30,8 @@ public:
     // Save config to disk.
     void save();
 
+    void setOnFontSizeChanged(std::function<void(float)> callback) { onFontSizeChanged_ = std::move(callback); }
+
 private:
     void applyTheme();
     void applyDarkTheme();
@@ -37,6 +41,8 @@ private:
     AppConfig config_;
     AppConfig pendingConfig_;
     bool open_ = false;
+    float appliedFontSize_ = 17.0f;
+    std::function<void(float)> onFontSizeChanged_;
 };
 
 } // namespace kuf
