@@ -4,7 +4,9 @@
 
 namespace kuf {
 
-ValidationLogView::ValidationLogView() : View("Validation Log") {}
+ValidationLogView::ValidationLogView() : View("Validation Log") {
+    open_ = false;
+}
 
 void ValidationLogView::setIssues(std::vector<ValidationIssue> issues) {
     issues_ = std::move(issues);
