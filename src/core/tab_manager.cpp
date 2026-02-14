@@ -92,7 +92,7 @@ void TabManager::saveDocument(OpenDocument* doc) {
     }
 
     if (!data.empty()) {
-        // Re-encode to ASCII hex if the original file was hex-encoded (SOX only).
+        // Re-encode to ASCII hex if the original file was hex-encoded (non-standard).
         if (doc->isSoxEncoded) {
             data = soxEncode(data);
         }
@@ -143,7 +143,7 @@ std::shared_ptr<OpenDocument> TabManager::loadDocument(const std::string& path) 
         }
     }
 
-    // SOX files use ASCII hex encoding. Decode if detected.
+    // SOX files are normally pure binary. Decode if hex-encoded (non-standard).
     std::span<const std::byte> parseData = doc->rawData;
     std::vector<std::byte> decodedData;
     doc->isSoxEncoded = isSoxEncoded(doc->rawData);

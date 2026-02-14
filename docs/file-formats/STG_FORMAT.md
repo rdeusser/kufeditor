@@ -1,6 +1,6 @@
 # STG Format Documentation
 
-STG files define unit placement and configuration for missions in Kingdom Under Fire: Crusaders (PC port). The format is also used by Kingdom Under Fire: Heroes with minor differences noted throughout.
+STG files define unit placement and configuration for missions in Kingdom Under Fire: Crusaders (PC port).
 
 ## File Locations
 
@@ -12,21 +12,16 @@ STG files define unit placement and configuration for missions in Kingdom Under 
 
 ### Crusaders
 
-Crusaders missions use the format `E####.stg` where the first digit identifies the campaign character:
+Crusaders missions use a single-letter prefix identifying the campaign, followed by a 4-digit mission number:
 
-| Prefix | Character |
-|--------|-----------|
-| 0xxx | Ellen |
-| 1xxx | Rupert |
-| 2xxx | Urukubarr |
-| 3xxx | Leinhart |
-| 4xxx | Walter |
-| 5xxx | Morene |
-| 6xxx | Cirith |
+| Prefix | Campaign | Protagonist | Mission Numbers | Unlock |
+|--------|----------|-------------|-----------------|--------|
+| `H####.stg` | Hironeiden | Gerald | H0000-H0200 | Available from start |
+| `V####.stg` | Vellond | Lucretia | V2000-V2200 | Available from start |
+| `E####.stg` | Ecclesia | Kendal | E1001-E1140 | Unlocked after Lucretia's campaign |
+| `X####.stg` | Dark Legion | Regnier | X3001-X3140 | Unlocked after Lucretia's campaign |
 
-### Heroes
-
-Heroes missions use `####.stg` or `H####.stg`. The same prefix convention applies, with an additional `7xxx` range for custom/Heroes-only missions.
+The first digit of the mission number is campaign-specific (0=Gerald, 1=Kendal, 2=Lucretia, 3=Regnier), redundant with the letter prefix.
 
 ### Text File Association
 
@@ -39,33 +34,36 @@ Text files are linked by mission number: e.g., mission E1100 uses `UserTextTable
 - `KufParticle_Def.h` - Particle effect IDs
 - `CruMission.h` - Mission scripting conditions and actions
 - `Text/KufReportMessage_Def.h` - Battle report message types
-- `patterns/stg.hexpat` - ImHex pattern for parsing STG files
 - `MISSION_SCRIPTING.md` - Documentation for event conditions and actions
 
 ---
 
 ## File Structure Overview
 
-The full STG layout is: **Header -> Troops -> AreaIDs -> Variables -> Event Blocks -> Footer**.
+> **✓ VERIFIED FROM BINARY:** The structure below has been confirmed by Ghidra decompilation of `ReadSTGFile` at `0x00489bc0` in `Kuf2Main.exe`, and validated against all 178 STG files in the game data (0 bytes remaining in every file).
 
-The header contains four section counts: `numTroops`, `numAreaIDs`, `numVariables`, and `numBlocks`. The last count (`numBlocks`) is unused and always 0.
+The full STG layout is: **Magic → Header Body → Unit Count → Units → AreaIDs → Variables → Event Blocks → Footer**.
 
 | Section | Size | Description |
 |---------|------|-------------|
-| Header | 628 bytes (0x274) | Mission metadata, filenames, and section counts |
-| Units | 544 bytes x unit_count | Unit definitions |
-| AreaIDs | 4 + (84 x area_count) | Named map regions for scripting |
-| Variables | 4 + variable data | Mission state variables |
-| Events | 4 + (448 x event_count) | Event/trigger data |
-| Footer | 42 bytes | Mission configuration flags |
+| Magic | 4 bytes | Format marker `0x3E9` (1001) — read and validated first |
+| Header Body | 620 bytes (0x26C) | Mission metadata, filenames, configuration |
+| Unit Count | 4 bytes | Number of unit blocks to follow |
+| Units | 544 bytes × unit_count | Unit definitions (0x220 each) |
+| AreaIDs | 4 + (84 × area_count) | Named map regions for scripting |
+| Variables | 4 + variable data | Variable-length mission state variables |
+| Event Blocks | 4 + variable data | Variable-length event/trigger data (NOT fixed-size) |
+| Footer | 4 + (8 × footer_count) | Unit selection slots (briefing files) or empty |
 
 ---
 
 ## Header Structure (628 bytes = 0x274)
 
+The binary reads the header in three parts: 4-byte magic, 620-byte body (`_fread(dest, 0x26C, 1, file)`), then 4-byte unit count. The combined total is 628 bytes.
+
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x000 | 4 | uint32 | Mission ID (e.g., 1001 for E1001) |
+| 0x000 | 4 | uint32 | **Format magic** `0x3E9` (1001) — NOT a mission ID. All STG files share this value. The game validates this before reading. |
 | 0x004 | 4 | int32 | Reserved (-1) |
 | 0x008 | 4 | uint32 | Unknown (typically 1) |
 | 0x00C | 4 | uint32 | Unknown (typically 3) |
@@ -85,15 +83,11 @@ The header contains four section counts: `numTroops`, `numAreaIDs`, `numVariable
 | 0x24C | 36 | - | Configuration data |
 | 0x270 | 4 | uint32 | **Unit count** (numTroops) |
 
-**Crusaders vs Heroes:** The header section containing unit colour and UCD/UAD configuration differs between the two games. The action section format is shared, but the troop block in Heroes has 4 additional bytes compared to Crusaders.
-
 ---
 
 ## Unit Block Structure (544 bytes = 0x220)
 
 Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) may use 1088 bytes (0x440), containing two 544-byte entries.
-
-**Heroes note:** Heroes troop blocks are 548 bytes (4 bytes larger than Crusaders).
 
 ### Core Unit Data (84 bytes = 0x54)
 
@@ -121,8 +115,8 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x54 | 1 | uint8 | Animation ID (0-42 = K2JobDef.h standard, 32+ = hero models, see below) |
-| 0x55 | 1 | uint8 | Model Variant (see Hero Model IDs below) |
+| 0x54 | 1 | JobType | Unit type (see K2JobDef.h) |
+| 0x55 | 1 | uint8 | Model ID variant (see Hero Model IDs below) |
 | 0x56 | 1 | uint8 | Worldmap ID (see Worldmap ID Behavior) |
 | 0x57 | 1 | uint8 | Level (1-99) |
 | 0x58 | 8 | SkillSlot[4] | Leader skill slots (SkillID + Level per slot) |
@@ -133,8 +127,8 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0xC0 | 1 | uint8 | Officer 1 Animation ID |
-| 0xC1 | 1 | uint8 | Officer 1 Model Variant |
+| 0xC0 | 1 | JobType | Officer 1 unit type |
+| 0xC1 | 1 | uint8 | Officer 1 Model ID |
 | 0xC2 | 1 | uint8 | Officer 1 Worldmap ID |
 | 0xC3 | 1 | uint8 | Officer 1 Level |
 | 0xC4 | 100 | - | Officer 1 skills/abilities |
@@ -143,8 +137,8 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x128 | 1 | uint8 | Officer 2 Animation ID |
-| 0x129 | 1 | uint8 | Officer 2 Model Variant |
+| 0x128 | 1 | JobType | Officer 2 unit type |
+| 0x129 | 1 | uint8 | Officer 2 Model ID |
 | 0x12A | 1 | uint8 | Officer 2 Worldmap ID |
 | 0x12B | 1 | uint8 | Officer 2 Level |
 | 0x12C | 84 | - | Officer 2 skills/abilities |
@@ -153,15 +147,16 @@ Base unit blocks are 544 bytes. Units with sub-units (player-controlled troops) 
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x180 | 16 | - | Padding (all 0xFF) |
-| 0x190 | 2 | uint16 | Grid X dimension (formation width) |
-| 0x192 | 2 | uint16 | Grid Flags (values 0-3 or 0xFFFF, purpose unknown) |
-| 0x194 | 4 | uint32 | Grid Y dimension (formation depth) |
-| 0x198 | 4 | uint32 | Unknown (values 1-6) |
-| 0x19C | 36 | - | Reserved (all 0xFF) |
-| 0x1C0 | 4 | uint32 | **TroopInfo index** (references TroopInfo.sox) |
+| 0x180 | 12 | - | Padding |
+| 0x18C | 4 | uint32 | Unit animation/grid config |
+| 0x190 | 4 | uint32 | Grid X dimension |
+| 0x194 | 4 | uint32 | Grid Y dimension |
+| 0x198 | 40 | - | Reserved |
+| 0x1C0 | 4 | int32 | **TroopInfo index** (references TroopInfo.sox). If negative, computed from formation type at runtime |
 | 0x1C4 | 4 | uint32 | Formation type |
 | 0x1C8 | 88 | float[22] | Stat overrides (all -1.0 = use defaults) |
+
+**Stat Override Logic** (confirmed from `ReadSTGFile` decompilation): The game reads the full 544-byte unit block, copies the first 448 bytes (0x1C0) as core unit data, then conditionally applies each of the 22 float overrides. Each override is checked: if `value >= 0.0`, it replaces the corresponding field from TroopInfo defaults. Values of `-1.0` (0xBF800000) are skipped, preserving the default.
 
 ---
 
@@ -192,19 +187,6 @@ Verified against E1100.stg (Crusaders).
 
 Area IDs at +0x40 are sequential (0, 1, 2, 4, 13, 14...), and bounding floats contain realistic map coordinates (e.g., 6375, 7625, 12000, 36625).
 
-### AreaID Entry - Heroes (Unverified)
-
-Community description (Weeb, Discord) describes a smaller/simpler layout:
-
-| Offset | Size | Type | Description |
-|--------|------|------|-------------|
-| 0x00 | 32 | char[32] | Area description (0x20 bytes) |
-| 0x20 | 4 | float | Extra float (possibly radius/rounding of area shape) |
-| 0x24 | 4 | uint32 | **Area ID** |
-| 0x28 | 12 | float[3] | Position XYZ (world coordinates) |
-
-This layout totals 52 bytes per entry, which is smaller than the 84-byte Crusaders entry. The difference may be due to additional fields in Crusaders or a structural difference between the two games. This Heroes layout has not been verified against a binary file.
-
 ### Area Behavior
 
 - Large AreaIDs cause randomized positioning: if an AreaID covers a large region, any unit spawned or moved to that area will be placed at a random position within it.
@@ -220,15 +202,19 @@ Follows immediately after the AreaID section. Variables store mission state that
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
 | +0x00 | 4 | uint32 | **Variable count** (numVariables) |
-| +0x04 | varies | Variable[] | Variable entries |
+| +0x04 | varies | Variable[] | Variable entries (variable-length) |
 
-### Variable Entry Structure
+### Variable Entry Structure (confirmed from `ReadSTGFile` decompilation)
 
-Each variable entry contains a variable name and its initial value. Observed variable names in mission files include `nCurStage`, `nDebug`, `_TROOP_INDICATE_IN_MINIMAP`, `LF_WALL`, and `COUT`.
+The game allocates a 76-byte (0x4C) object per variable, then reads the fields sequentially:
 
-The entry structure consists of a null-terminated name string followed by data fields. The last 12 bytes of each entry follow the pattern: `variable_id (4 bytes) | padding (4 bytes) | initial_value (4 bytes)`.
+| Step | Size | Type | Description |
+|------|------|------|-------------|
+| 1 | 64 (0x40) | char[64] | Variable name (null-terminated, padded) |
+| 2 | 4 | uint32 | Variable ID (used by conditions/actions to reference this variable) |
+| 3 | varies | ParamValue | Initial value — read via `ReadSTGParamValue` (see Parameter Type System below) |
 
-**Note:** The exact variable entry size and full field layout require further verification. The structure may not be fixed-size.
+Observed variable names include `stage`, `cnt`, `att_castle`, `nCurStage`, `nDebug`, `_TROOP_INDICATE_IN_MINIMAP`, `LF_WALL`, and `COUT`.
 
 ### Variable Usage in Events
 
@@ -243,31 +229,43 @@ See `MISSION_SCRIPTING.md` for full condition/action documentation.
 
 Follows immediately after the variable section. Events use condition/action IDs defined in `CruMission.h` (see `MISSION_SCRIPTING.md` for full documentation).
 
-**Crusaders vs Heroes:** The action section format is the same between Crusaders and Heroes.
+> **✓ VERIFIED FROM BINARY:** Event entries are **variable-length**, NOT fixed 448 bytes as previously documented. The structure has been confirmed by decompilation of `ReadSTGFile` (0x00489bc0) and validated against all 178 STG files.
+
+### Event Block Container
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| +0x00 | 4 | uint32 | Event count |
-| +0x04 | 448 x count | EventEntry[] | Event entries |
+| +0x00 | 4 | uint32 | **Event block count** (typically 1) |
 
-### Event Entry (448 bytes)
+Each event block contains:
 
-| Offset | Size | Type | Description |
-|--------|------|------|-------------|
-| 0x00 | 64 | char[64] | Event description (editable label for identification) |
-| 0x40 | 4 | uint32 | Unique block ID (must be unique per mission) |
-| 0x44 | 4 | uint32 | NumConditions |
-| 0x48 | varies | Condition[] | Condition entries (ID + parameters each) |
-| ... | 4 | uint32 | NumActions |
-| ... | varies | Action[] | Action entries (ID + parameters each) |
+| Field | Size | Type | Description |
+|-------|------|------|-------------|
+| Block header | 4 | uint32 | Block identifier/flags (often 0) |
+| Event count | 4 | uint32 | Number of events in this block |
+| Events | varies | Event[] | Variable-length event entries |
 
-**Note:** The first event block in many missions is a leftover debug block. Use text linking to find the actual starting block.
+### Event Entry (variable-length)
+
+Each event is read sequentially — NOT fixed-size:
+
+| Step | Size | Type | Description |
+|------|------|------|-------------|
+| 1 | 64 (0x40) | char[64] | Event description (editable label for identification) |
+| 2 | 4 | uint32 | Unique event ID (must be unique per mission) |
+| 3 | 4 | uint32 | **Condition count** |
+| 4 | varies | Condition[] | Condition entries (see below) |
+| 5 | 4 | uint32 | **Action count** |
+| 6 | varies | Action[] | Action entries (see below) |
+
+The game allocates a 100-byte (0x64) object per event, then reads the description (64 bytes) and ID (4 bytes) with `_fread`, followed by the variable-length condition and action arrays.
 
 ### Condition Entry Format
 
 Each condition consists of:
-1. **Condition ID** (uint32) - Maps to `CON_*` enum in CruMission.h (stored as hex, convert to decimal)
-2. **Parameters** - Variable count based on condition type
+1. **Condition type ID** (uint32) — read via `_fread`, maps to `CON_*` enum in CruMission.h
+2. **Parameter count** (uint32) — number of parameters that follow
+3. **Parameters** — each read via `ReadSTGParamValue` (see Parameter Type System below)
 
 Example: `CON_VAR_INT_COMPARE` (ID 19 = 0x13)
 - Parameters: `[VariableID, Int, Compare]`
@@ -276,16 +274,30 @@ Example: `CON_VAR_INT_COMPARE` (ID 19 = 0x13)
 ### Action Entry Format
 
 Each action consists of:
-1. **Action ID** (uint32) - Maps to `ACT_*` enum in CruMission.h (stored as hex, convert to decimal)
-2. **Parameters** - Variable count based on action type
+1. **Action type ID** (uint32) — read via `_fread`, maps to `ACT_*` enum in CruMission.h
+2. **Parameter count** (uint32) — number of parameters that follow
+3. **Parameters** — each read via `ReadSTGParamValue` (see Parameter Type System below)
 
 Example: `ACT_VAR_INT_SET` (ID 55 = 0x37)
 - Parameters: `[VariableID, Int]`
 - Effect: Sets variable to int value
 
+### Parameter Type System (`ReadSTGParamValue` at 0x004847b0)
+
+All condition/action parameters and variable initial values are read using a common typed-value reader. Each parameter consists of a 4-byte type tag followed by type-specific data:
+
+| Type | Name | Data | Total Size | Description |
+|------|------|------|------------|-------------|
+| 0 | Int | 4 bytes (int32) | 8 bytes | Integer value |
+| 1 | Float | 4 bytes (float32) | 8 bytes | Floating-point value |
+| 2 | String | 4 bytes (length) + N bytes (chars) | 8+N bytes | Length-prefixed string |
+| 3 | Enum | 4 bytes (int32) | 8 bytes | Enumerated value (same binary layout as int) |
+
+This type system means event data is inherently variable-length — string parameters make entries different sizes.
+
 ### Respawn Actions
 
-Respawn actions reference both a TroopID and an AreaID. If the target AreaID covers a large area, the spawn position is randomized within it. The format appears to be: `4B 02 00 TroopID 00 AreaByte` where the area byte varies by map.
+Respawn actions reference both a TroopID and an AreaID. If the target AreaID covers a large area, the spawn position is randomized within it.
 
 ### Text Linking
 
@@ -301,19 +313,21 @@ Events can reference text strings by ID from `Data/Text/{LANG}/` files (e.g., `D
 
 ## Briefing File Structure
 
-Briefing STG files (in `Mission/Briefing/`) control the pre-battle unit selection screen. They share the base STG format but contain additional unit slot configuration data.
+Briefing STG files (in `Mission/Briefing/`) control the pre-battle unit selection screen. They share the base STG format with some distinctive characteristics:
 
-### Unit Selection Slots
+- **0 unit blocks** — units are defined in the corresponding mission file
+- **Area definitions** for unit placement
+- **1 event block** with 1 event (typically briefing configuration actions)
+- **Footer entries** containing unit selection slot data (3-4 entries)
 
-Unit selection slots are located near the bottom of the briefing file. Each slot defines one unit the player can select or that is locked into the mission.
+### Unit Selection Slots (Footer Section)
+
+Unit selection slots are stored as the **footer entries** (8 bytes each). Each entry defines one unit the player can select or that is locked into the mission.
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| 0x00 | 2 | uint16 | UniqueID (must match a unit in the mission file) |
-| 0x02 | 2 | uint16 | Portrait 1 (0xFF = unused) |
-| 0x04 | 2 | uint16 | Portrait 2 (0xFF = unused) |
-| 0x06 | 1 | uint8 | IsLocked: 0x00 = player can select, 0x01 = locked |
-| 0x07 | 1 | uint8 | IsSupport: 0x00 = support unit, 0x01 = not support |
+| 0x00 | 4 | uint32 | Slot data 1 (UniqueID / flags) |
+| 0x04 | 4 | uint32 | Slot data 2 (configuration) |
 
 ### Briefing-Only Actions and Conditions
 
@@ -322,9 +336,21 @@ Unit selection slots are located near the bottom of the briefing file. Each slot
 
 ---
 
-## Footer (42 bytes)
+## Footer Section
 
-Mission configuration flags at the end of the file.
+The footer is a counted array of 8-byte entries, NOT a fixed-size block.
+
+| Offset | Size | Type | Description |
+|--------|------|------|-------------|
+| +0x00 | 4 | uint32 | **Footer entry count** |
+| +0x04 | 8 × count | Entry[] | 8-byte entries (2 × uint32 each) |
+
+**Observed patterns:**
+- **Mission files** (`./ and Live/`): footer count = 0 (no entries)
+- **Briefing files** (`Briefing/`): footer count = 3-4 (unit selection slot data)
+- **Worldmap files** (`Worldmap/`): footer count = 0 (no entries)
+
+In briefing files, the footer entries define the unit selection slots available to the player before battle. See the Briefing File Structure section for details.
 
 ---
 
@@ -358,7 +384,7 @@ Counter-clockwise from East.
 
 ### JobType (Unit Types)
 
-From `K2JobDef.h` - maps to Animation ID / unit type fields.
+From `K2JobDef.h` - maps to Animation ID / unit type fields. Values 0-42 correspond to the `K2_JOB_TYPE` enum. Values >= 43 (`JOB_LAST`) are **CharInfo indices** referencing hero/named character records in `CharInfo.sox`. The game resolves their base combat type from the CharInfo record's internal job type field.
 
 | Value | Enum | Unit Type |
 |-------|------|-----------|
@@ -406,9 +432,36 @@ From `K2JobDef.h` - maps to Animation ID / unit type fields.
 | 41 | JOB_ELF_WALL | Elf Wall |
 | 42 | JOB_ENCABLOSA_LARGE | Encablosa Large |
 
+#### CharInfo Character Types (values >= 43)
+
+Values at or above `JOB_LAST` (43) index directly into `CharInfo.sox` for hero and named character configurations. These entries define the character's base combat type, model, and stats internally. Names below are from `CharInfo_ENG.sox`.
+
+| Value | CharInfo Name | Usage |
+|-------|---------------|-------|
+| 43 | Lucretia | Dark Elf hero |
+| 44 | Leinhart | Dark Legion hero |
+| 45 | Elf | Generic elf allied unit |
+| 46 | Thomas | Named NPC |
+| 47 | Duane | Named NPC |
+| 48 | Wizard | Named wizard/caster |
+| 49 | Dark Elf | Generic Dark Elf character |
+| 50 | Flagman | Human flag bearer |
+| 51 | Orc Flagman | Orc flag bearer |
+| 52 | Dark Elf Flagman | Dark Elf flag bearer |
+| 53 | Dwarf | Dwarf character |
+| 54 | Lich | Lich boss/caster |
+| 55 | Encablossa | Encablossa entity |
+| 56 | Leader | Generic human leader |
+| 57 | Orc Leader | Generic orc leader |
+| 58 | Dark Elf Leader | Generic dark elf leader |
+| 59 | Knight Leader | Knight faction leader |
+| 60 | Castle Archer | Castle defense archer |
+| 61 | Encablossa | Encablossa variant |
+| 62 | Encablossa | Encablossa variant |
+
 ### Hero Model/Animation IDs
 
-These byte values appear in the Animation ID field (+0x54) when the unit is a hero (IsHero=1). Values 0-42 overlap with K2JobDef.h standard animation IDs, but hero characters use values 32+ as character model identifiers. Used in both Crusaders and Heroes.
+These byte values map to hero character models and animations in the Model ID field.
 
 | Hex | Decimal | Character |
 |-----|---------|-----------|
@@ -465,16 +518,15 @@ From `K2AbilityDef.h` - maps to ability slot values. Value 0xFFFFFFFF (-1) means
 - **1088-byte blocks**: Player-controlled units have embedded sub-unit (M1/M2) entries for linked infantry.
 - **Hero Limitation**: Only Gerald, Lucretia, Regnier, and Kendal have working player-controllable animations.
 - **Equipment does not persist**: Equipment set in STG troop blocks is mission-only. The game never carries STG equipment over to the barracks/worldmap. Any equipment changes made via STG modding will only apply during that mission.
-- **ImHex Pattern**: Use `patterns/stg.hexpat` for interactive analysis with full enum support.
 
 ### Worldmap ID Behavior
 
-The Worldmap ID field (offset 0x56 in the leader configuration) controls **post-mission barracks persistence**, not level or stat loading during the mission. The level byte at +0x57 is always the actual level used in-game.
+The Worldmap ID field (offset 0x56 in the leader configuration) controls how the game loads and saves unit state relative to the worldmap:
 
-- **0xFF**: Unit is standalone. No campaign save/load. STG values are final. This is the safe default for new/custom units.
-- **0x00+**: Links the unit to a worldmap/barracks slot for campaign progression. After the mission completes, the game saves the unit's state back to this slot. This is described by the Steam STG guide as "a after-Mission thing" for barracks persistence.
+- **0xFF**: Prevents the mission from loading any worldmap state. The unit is treated as entirely new. This is the safe default for custom units.
+- **Any other value**: The game loads the corresponding worldmap entry and overwrites the STG unit data with whatever the worldmap save contains. This means the unit's type, level, equipment, and officers will be replaced by the saved worldmap state.
 
-**WARNING**: Reusing an existing Worldmap ID on a different unit type can cause crashes or data corruption. The Steam guide marks this field as "DO NOT TOUCH."
+After a mission completes, the game saves the unit back to the worldmap entry referenced by this ID. Using an existing Worldmap ID on a different unit type can cause crashes or data corruption.
 
 ### Worldmap File Limitations (Crusaders only)
 
@@ -482,12 +534,3 @@ The Worldmap ID field (offset 0x56 in the leader configuration) controls **post-
 - Post-game triggers (on campaign completion + forced save) only fire once.
 - There is no way to reset triggers or force the game to re-read worldmap files from the worldmap context.
 
-### Crusaders vs Heroes Summary
-
-| Feature | Crusaders | Heroes |
-|---------|-----------|--------|
-| File naming | `E####.stg` | `####.stg` or `H####.stg` |
-| Troop block size | 544 bytes (0x220) | 548 bytes (0x224) |
-| Header UCD/colour section | Standard | Different layout |
-| Action format | Shared | Shared |
-| Campaign prefixes | 0xxx-6xxx | 0xxx-7xxx (7xxx = custom) |

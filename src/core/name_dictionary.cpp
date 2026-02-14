@@ -3,7 +3,6 @@
 #include "core/text_encoding.h"
 #include "formats/sox_encoding.h"
 
-#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -44,6 +43,11 @@ std::string stripTrailingDigits(const std::string& s) {
     }
     if (end == 0 || end == s.size()) return {};
     return s.substr(0, end);
+}
+
+bool isThendMarker(const std::byte* data, size_t remaining) {
+    if (remaining < 5) return false;
+    return std::strncmp(reinterpret_cast<const char*>(data), "THEND", 5) == 0;
 }
 
 } // namespace
@@ -99,41 +103,86 @@ bool NameDictionary::loadIndexedTextSox(const std::string& path, std::vector<std
     return !entries.empty();
 }
 
-bool NameDictionary::loadNonIndexedTextSox(const std::string& path, std::vector<std::string>& entries) {
-    auto data = readSoxFile(path);
-    if (data.size() < 8) return false;
+bool NameDictionary::loadSpecialNamesSox(const std::string& soxPath, const std::string& localizedPath) {
+    auto soxData = readSoxFile(soxPath);
+    if (soxData.size() < 8) return false;
 
-    uint32_t version = readU32LE(data.data());
-    uint32_t count = readU32LE(data.data() + 4);
+    uint32_t version = readU32LE(soxData.data());
+    uint32_t count = readU32LE(soxData.data() + 4);
     if (version != 100 || count == 0) return false;
+
+    // SpecialNames.sox has a paired format: each record is
+    // (uint16 key_len + key_bytes) + (uint16 default_len + default_bytes).
+    struct RawEntry {
+        std::vector<std::byte> keyBytes;
+        std::string defaultName;
+    };
+
+    std::vector<RawEntry> rawEntries;
+    rawEntries.reserve(count);
 
     size_t offset = 8;
     for (uint32_t i = 0; i < count; ++i) {
-        // Skip null padding bytes.
-        while (offset < data.size() && data[offset] == std::byte{0}) {
-            ++offset;
-        }
+        if (offset + 2 > soxData.size()) break;
+        if (isThendMarker(soxData.data() + offset, soxData.size() - offset)) break;
 
-        // Check for THEND trailer.
-        if (offset + 5 <= data.size()) {
-            const char* p = reinterpret_cast<const char*>(data.data() + offset);
-            if (std::strncmp(p, "THEND", 5) == 0) break;
-        }
+        uint16_t keyLen = readU16LE(soxData.data() + offset);
+        offset += 2;
+        if (offset + keyLen > soxData.size()) break;
 
-        if (offset + 2 > data.size()) break;
+        std::vector<std::byte> keyBytes(soxData.data() + offset, soxData.data() + offset + keyLen);
+        offset += keyLen;
 
-        uint16_t len = readU16LE(data.data() + offset);
+        if (offset + 2 > soxData.size()) break;
+        uint16_t defaultLen = readU16LE(soxData.data() + offset);
         offset += 2;
 
-        if (len == 0 || offset + len > data.size()) break;
+        std::string defaultName;
+        if (defaultLen > 0 && offset + defaultLen <= soxData.size()) {
+            defaultName = std::string(reinterpret_cast<const char*>(soxData.data() + offset), defaultLen);
+        }
+        offset += defaultLen;
 
-        std::string text(reinterpret_cast<const char*>(data.data() + offset), len);
-        offset += len;
-
-        entries.push_back(std::move(text));
+        rawEntries.push_back({std::move(keyBytes), std::move(defaultName)});
     }
 
-    return !entries.empty();
+    // Load localized display names from SpecialNames_ENG.sox.
+    // This file has a simple non-indexed format: one string per entry.
+    std::vector<std::string> displayNames;
+    auto locData = readSoxFile(localizedPath);
+    if (locData.size() >= 8) {
+        uint32_t locVersion = readU32LE(locData.data());
+        uint32_t locCount = readU32LE(locData.data() + 4);
+        if (locVersion == 100 && locCount > 0) {
+            size_t locOffset = 8;
+            for (uint32_t i = 0; i < locCount; ++i) {
+                if (locOffset + 2 > locData.size()) break;
+                if (isThendMarker(locData.data() + locOffset, locData.size() - locOffset)) break;
+
+                uint16_t slen = readU16LE(locData.data() + locOffset);
+                locOffset += 2;
+                if (locOffset + slen > locData.size()) break;
+
+                displayNames.emplace_back(reinterpret_cast<const char*>(locData.data() + locOffset), slen);
+                locOffset += slen;
+            }
+        }
+    }
+
+    specialNames_.clear();
+    specialNames_.reserve(rawEntries.size());
+    for (size_t i = 0; i < rawEntries.size(); ++i) {
+        SpecialNameEntry entry;
+        entry.keyBytes = std::move(rawEntries[i].keyBytes);
+        if (i < displayNames.size() && !displayNames[i].empty()) {
+            entry.displayName = std::move(displayNames[i]);
+        } else {
+            entry.displayName = std::move(rawEntries[i].defaultName);
+        }
+        specialNames_.push_back(std::move(entry));
+    }
+
+    return !specialNames_.empty();
 }
 
 bool NameDictionary::load(const std::string& soxDir) {
@@ -142,69 +191,53 @@ bool NameDictionary::load(const std::string& soxDir) {
     fs::path base(soxDir);
     fs::path engDir = base / "ENG";
 
-    // Load CharInfo_ENG.sox for character type names (covers IDs 0-62+).
-    // This provides names for extended animation IDs (>42) like "Lich",
-    // "Leader", "Dark Elf Leader" that TroopInfo_ENG doesn't cover.
-    fs::path charInfoPath = engDir / "CharInfo_ENG.sox";
-    if (fs::exists(charInfoPath)) {
-        loadIndexedTextSox(charInfoPath.string(), troopNames_);
-    }
-
-    // Load TroopInfo_ENG.sox and overwrite entries 0-42 with its names.
-    // TroopInfo has better names for standard troops ("Archer" vs "Empty Leader").
+    // Load TroopInfo_ENG.sox — names for standard job types 0-42.
     fs::path troopEngPath = engDir / "TroopInfo_ENG.sox";
     if (fs::exists(troopEngPath)) {
-        std::vector<std::string> troopEntries;
-        if (loadIndexedTextSox(troopEngPath.string(), troopEntries)) {
-            for (size_t i = 0; i < troopEntries.size(); ++i) {
-                if (!troopEntries[i].empty()) {
-                    if (i >= troopNames_.size()) {
-                        troopNames_.resize(i + 1);
-                    }
-                    troopNames_[i] = troopEntries[i];
-                }
-            }
-        }
+        loadIndexedTextSox(troopEngPath.string(), troopInfoNames_);
     }
 
-    // Load SpecialNames pairs for Korean→English translation.
+    // Load CharInfo_ENG.sox — names for character types (heroes, special units).
+    fs::path charInfoPath = engDir / "CharInfo_ENG.sox";
+    if (fs::exists(charInfoPath)) {
+        loadIndexedTextSox(charInfoPath.string(), charInfoNames_);
+    }
+
+    // Load SpecialNames paired format for prefix-match name resolution.
+    fs::path specialSoxPath = base / "SpecialNames.sox";
     fs::path specialEngPath = engDir / "SpecialNames_ENG.sox";
-    fs::path specialKorPath = base / "SpecialNames.sox";
+    if (fs::exists(specialSoxPath)) {
+        loadSpecialNamesSox(specialSoxPath.string(), specialEngPath.string());
+    }
 
-    if (fs::exists(specialEngPath) && fs::exists(specialKorPath)) {
-        std::vector<std::string> engNames;
-        std::vector<std::string> korNames;
+    // Build Korean→English translation map from SpecialNames data.
+    for (const auto& entry : specialNames_) {
+        if (entry.keyBytes.empty() || entry.displayName.empty()) continue;
 
-        loadNonIndexedTextSox(specialEngPath.string(), engNames);
-        loadNonIndexedTextSox(specialKorPath.string(), korNames);
+        std::string rawKey(reinterpret_cast<const char*>(entry.keyBytes.data()), entry.keyBytes.size());
+        std::string korClean = stripDelimiters(rawKey);
+        std::string korUtf8 = cp949ToUtf8(korClean);
+        std::string engClean = stripDelimiters(entry.displayName);
 
-        size_t pairs = std::min(engNames.size(), korNames.size());
-        for (size_t i = 0; i < pairs; ++i) {
-            std::string korClean = stripDelimiters(korNames[i]);
-            std::string korUtf8 = cp949ToUtf8(korClean);
-
-            std::string engClean = stripDelimiters(engNames[i]);
-
-            if (!korUtf8.empty() && !engClean.empty()) {
-                koreanToEnglish_[korUtf8] = engClean;
-            }
+        if (!korUtf8.empty() && !engClean.empty()) {
+            koreanToEnglish_[korUtf8] = engClean;
         }
     }
 
-    loaded_ = !troopNames_.empty() || !koreanToEnglish_.empty();
+    loaded_ = !troopInfoNames_.empty() || !charInfoNames_.empty() || !specialNames_.empty();
     return loaded_;
 }
 
-const char* NameDictionary::troopName(uint8_t animId) const {
-    if (animId < troopNames_.size() && !troopNames_[animId].empty()) {
-        return troopNames_[animId].c_str();
+const char* NameDictionary::troopInfoName(uint32_t index) const {
+    if (index < troopInfoNames_.size() && !troopInfoNames_[index].empty()) {
+        return troopInfoNames_[index].c_str();
     }
     return nullptr;
 }
 
-const char* NameDictionary::troopNameByIndex(uint32_t troopInfoIndex) const {
-    if (troopInfoIndex < troopNames_.size() && !troopNames_[troopInfoIndex].empty()) {
-        return troopNames_[troopInfoIndex].c_str();
+const char* NameDictionary::charInfoName(uint8_t jobType) const {
+    if (jobType < charInfoNames_.size() && !charInfoNames_[jobType].empty()) {
+        return charInfoNames_[jobType].c_str();
     }
     return nullptr;
 }

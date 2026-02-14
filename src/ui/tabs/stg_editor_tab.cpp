@@ -3,8 +3,10 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 
+#include "formats/stg_script_catalog.h"
 #include "ui/imgui_helpers.h"
 
 namespace kuf {
@@ -18,75 +20,78 @@ const char* directionNames[] = {
     "West", "SouthWest", "South", "SouthEast"
 };
 
-// Standard animation names from K2JobDef.h (0-42).
-const char* animationNames[] = {
-    "Human Archer",          "Human Longbows",        "Human Infantry",
-    "Human Spearman",        "Human Heavy Infantry",  "Human Knight",
-    "Human Paladin",         "Human Cavalry",         "Human Heavy Cavalry",
-    "Human Storm Riders",    "Human Sapper",          "Human Pyro Technician",
-    "Human Bomber Wing",     "Human Mortar",          "Human Ballista",
-    "Human Harpoon",         "Human Catapult",        "Human Battaloon",
-    "Dark Elf Archer",       "Dark Elf Cavalry Archer","Dark Elf Fighter",
-    "Dark Elf Knight",       "Dark Elf Light Cavalry","Dark Orc Infantry",
-    "Dark Orc Rider",        "Dark Orc Heavy Riders", "Dark Orc Axe Man",
-    "Dark Orc Heavy Infantry","Dark Orc Sapper",      "Scorpion",
-    "Swamp Mammoth",         "Dirigible",             "Black Wyvern",
-    "Ghoul",                 "Bone Dragon",           "Wall",
-    "Scout",                 "Self-Destruction",      "Encablosa Melee",
-    "Encablosa Flying",      "Encablosa Ranged",      "Elf Wall",
-    "Encablosa Large",
-};
+// CharInfo job types that use CharInfo names (from GetUnitDisplayName at 0x005597a0).
+constexpr uint8_t kCharInfoJobTypes[] = {32, 33, 34, 35, 36, 37, 38, 43, 44, 46, 47};
 
-struct HeroModelEntry {
-    uint8_t id;
-    const char* name;
-};
+bool isCharInfoJobType(uint8_t jobType) {
+    for (uint8_t jt : kCharInfoJobTypes) {
+        if (jt == jobType) return true;
+    }
+    return false;
+}
 
-const HeroModelEntry heroModels[] = {
-    {0x20, "Gerald"},   {0x21, "Ellen"},    {0x22, "Regnier"},
-    {0x23, "Morene"},   {0x24, "Rupert"},   {0x25, "Kendal"},
-    {0x26, "Cirith"},   {0x2B, "Lucretia"}, {0x2C, "Leinhart"},
-    {0x44, "Walter"},
-};
+bool asciiPrefixMatch(const std::vector<std::byte>& key, const std::string& unitName) {
+    if (key.empty() || unitName.size() < key.size()) return false;
 
-const char* animationIdName(uint8_t id, bool isHero) {
-    if (isHero) {
-        for (const auto& h : heroModels) {
-            if (h.id == id) return h.name;
+    for (size_t i = 0; i < key.size(); ++i) {
+        char a = static_cast<char>(key[i]);
+        char b = unitName[i];
+        if (std::tolower(static_cast<unsigned char>(a)) != std::tolower(static_cast<unsigned char>(b))) {
+            return false;
         }
     }
-    if (id <= kMaxStandardAnimationId) {
-        return animationNames[id];
+    return true;
+}
+
+std::string resolveSpecialName(const std::string& unitName, const NameDictionary& dict) {
+    for (const auto& entry : dict.specialNames()) {
+        if (asciiPrefixMatch(entry.keyBytes, unitName)) {
+            return entry.displayName;
+        }
     }
-    return nullptr;
+    return {};
 }
 
 std::string resolveDisplayName(const StgUnit& unit, const NameDictionary& dict) {
-    // 1. Hero name from animation ID.
-    if (unit.isHero) {
-        for (const auto& h : heroModels) {
-            if (h.id == unit.leaderAnimationId) return h.name;
-        }
+    // Game-accurate priority chain from GetUnitDisplayName (0x005597a0).
+
+    // 1. SpecialNames prefix match for:
+    //    - Names starting with '-' (0x2D)
+    //    - Paladin (job 6) with model > 12
+    //    - DE Cav Archer (job 19) with model > 6
+    bool trySpecial = false;
+    if (!unit.unitName.empty() && unit.unitName[0] == '-') {
+        trySpecial = true;
+    } else if (unit.leaderJobType == 6 && unit.leaderModelId > 12) {
+        trySpecial = true;
+    } else if (unit.leaderJobType == 19 && unit.leaderModelId > 6) {
+        trySpecial = true;
     }
 
-    // 2. Troop type name from troopInfoIndex (the actual unit type).
-    const char* troopName = dict.troopNameByIndex(unit.troopInfoIndex);
-    if (troopName) return troopName;
-
-    // 3. Standard animation name (0-42).
-    if (unit.leaderAnimationId <= kMaxStandardAnimationId) {
-        return animationNames[unit.leaderAnimationId];
+    if (trySpecial) {
+        std::string special = resolveSpecialName(unit.unitName, dict);
+        if (!special.empty()) return special;
     }
 
-    // 4. Extended animation name from CharInfo_ENG.sox.
-    const char* charName = dict.troopName(unit.leaderAnimationId);
-    if (charName) return charName;
+    // 2. CharInfo name lookup for specific job types or DO Axe Man with model < 1.
+    if (unit.leaderJobType == 26 && unit.leaderModelId < 1) {
+        const char* charName = dict.charInfoName(unit.leaderJobType);
+        if (charName) return charName;
+    } else if (isCharInfoJobType(unit.leaderJobType)) {
+        const char* charName = dict.charInfoName(unit.leaderJobType);
+        if (charName) return charName;
+    }
 
-    // 5. Korean-to-English translation.
+    // 3. TroopInfo name for standard job types 0-42.
+    if (unit.leaderJobType <= kMaxStandardJobType) {
+        const char* troopName = dict.troopInfoName(unit.leaderJobType);
+        if (troopName) return troopName;
+    }
+
+    // 4. Korean-to-English translation fallback.
     std::string translated = dict.translate(unit.unitName);
     if (!translated.empty()) return translated;
 
-    // 6. Never show raw Korean.
     return "Unknown";
 }
 
@@ -100,11 +105,13 @@ ImVec4 ucdColor(UCD ucd) {
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
-void drawAnimationIdCombo(const char* label, uint8_t& current, bool isHero,
-                          const NameDictionary& dict) {
-    const char* currentName = animationIdName(current, isHero);
+void drawJobTypeCombo(const char* label, uint8_t& current, const NameDictionary& dict) {
+    const char* currentName = nullptr;
+    if (current <= kMaxStandardJobType) {
+        currentName = dict.troopInfoName(current);
+    }
     if (!currentName) {
-        currentName = dict.troopName(current);
+        currentName = dict.charInfoName(current);
     }
 
     char preview[64];
@@ -115,13 +122,16 @@ void drawAnimationIdCombo(const char* label, uint8_t& current, bool isHero,
     }
 
     if (BeginComboCentered(label, preview)) {
-        // Standard animation IDs (0-42).
-        for (int i = 0; i <= kMaxStandardAnimationId; ++i) {
+        // Standard job type IDs (0-42).
+        for (int i = 0; i <= kMaxStandardJobType; ++i) {
             char itemLabel[64];
-            const char* name = dict.troopName(static_cast<uint8_t>(i));
-            if (!name) name = animationNames[i];
-            snprintf(itemLabel, sizeof(itemLabel), "%s (%d)", name, i);
-            bool selected = (!isHero && current == i);
+            const char* name = dict.troopInfoName(static_cast<uint32_t>(i));
+            if (!name) {
+                snprintf(itemLabel, sizeof(itemLabel), "Job %d", i);
+            } else {
+                snprintf(itemLabel, sizeof(itemLabel), "%s (%d)", name, i);
+            }
+            bool selected = (current == i);
             if (ImGui::Selectable(itemLabel, selected)) {
                 current = static_cast<uint8_t>(i);
             }
@@ -130,18 +140,30 @@ void drawAnimationIdCombo(const char* label, uint8_t& current, bool isHero,
 
         ImGui::Separator();
 
-        // Hero model IDs.
-        for (const auto& h : heroModels) {
+        // CharInfo entries above standard range.
+        for (int i = kMaxStandardJobType + 1; i < 256; ++i) {
+            const char* charName = dict.charInfoName(static_cast<uint8_t>(i));
+            if (!charName) continue;
             char itemLabel[64];
-            snprintf(itemLabel, sizeof(itemLabel), "Hero: %s (%d)", h.name, h.id);
-            bool selected = (current == h.id);
+            snprintf(itemLabel, sizeof(itemLabel), "%s (%d)", charName, i);
+            bool selected = (current == i);
             if (ImGui::Selectable(itemLabel, selected)) {
-                current = h.id;
+                current = static_cast<uint8_t>(i);
             }
             if (selected) ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
     }
+}
+
+const char* paramTypeName(StgParamType type) {
+    switch (type) {
+        case StgParamType::Int:    return "Int";
+        case StgParamType::Float:  return "Float";
+        case StgParamType::String: return "String";
+        case StgParamType::Enum:   return "Enum";
+    }
+    return "Unknown";
 }
 
 } // namespace
@@ -183,8 +205,72 @@ void StgEditorTab::drawContent() {
         ImGui::BeginChild("StgHeaderContent", ImVec2(0, totalHeight), ImGuiChildFlags_Borders);
         drawHeaderSection();
         ImGui::EndChild();
+    } else if (currentSection_ == Section::Areas) {
+        if (!document_->stgData->tailParsed()) {
+            ImGui::BeginChild("StgAreasUnparsed", ImVec2(0, totalHeight), ImGuiChildFlags_Borders);
+            ImGui::TextDisabled("Area section could not be parsed. Raw data is preserved for round-trip safety.");
+            ImGui::EndChild();
+        } else {
+            ImGui::BeginChild("StgAreaList", ImVec2(230, totalHeight), ImGuiChildFlags_Borders);
+            drawAreaList();
+            ImGui::EndChild();
+
+            ImGui::SameLine();
+
+            ImGui::BeginChild("StgAreaDetails", ImVec2(0, totalHeight), ImGuiChildFlags_Borders);
+            if (selectedArea_ >= 0 &&
+                selectedArea_ < static_cast<int>(document_->stgData->areas().size())) {
+                drawAreaDetails(selectedArea_);
+            } else {
+                ImGui::TextDisabled("Select an area to edit");
+            }
+            ImGui::EndChild();
+        }
+    } else if (currentSection_ == Section::Variables) {
+        if (!document_->stgData->tailParsed()) {
+            ImGui::BeginChild("StgVarsUnparsed", ImVec2(0, totalHeight), ImGuiChildFlags_Borders);
+            ImGui::TextDisabled("Variable section could not be parsed. Raw data is preserved for round-trip safety.");
+            ImGui::EndChild();
+        } else {
+            ImGui::BeginChild("StgVarList", ImVec2(230, totalHeight), ImGuiChildFlags_Borders);
+            drawVariableList();
+            ImGui::EndChild();
+
+            ImGui::SameLine();
+
+            ImGui::BeginChild("StgVarDetails", ImVec2(0, totalHeight), ImGuiChildFlags_Borders);
+            if (selectedVariable_ >= 0 &&
+                selectedVariable_ < static_cast<int>(document_->stgData->variables().size())) {
+                drawVariableDetails(selectedVariable_);
+            } else {
+                ImGui::TextDisabled("Select a variable to edit");
+            }
+            ImGui::EndChild();
+        }
+    } else if (currentSection_ == Section::Events) {
+        if (!document_->stgData->tailParsed()) {
+            ImGui::BeginChild("StgEventsUnparsed", ImVec2(0, totalHeight), ImGuiChildFlags_Borders);
+            ImGui::TextDisabled("Event section could not be parsed. Raw data is preserved for round-trip safety.");
+            ImGui::EndChild();
+        } else {
+            ImGui::BeginChild("StgEventList", ImVec2(230, totalHeight), ImGuiChildFlags_Borders);
+            drawEventList();
+            ImGui::EndChild();
+
+            ImGui::SameLine();
+
+            ImGui::BeginChild("StgEventDetails", ImVec2(0, totalHeight), ImGuiChildFlags_Borders);
+            if (selectedBlock_ >= 0 &&
+                selectedBlock_ < static_cast<int>(document_->stgData->eventBlocks().size()) &&
+                selectedEvent_ >= 0 &&
+                selectedEvent_ < static_cast<int>(document_->stgData->eventBlocks()[selectedBlock_].events.size())) {
+                drawEventDetails(selectedBlock_, selectedEvent_);
+            } else {
+                ImGui::TextDisabled("Select an event to edit");
+            }
+            ImGui::EndChild();
+        }
     } else {
-        // Unit list + details.
         ImGui::BeginChild("StgUnitList", ImVec2(230, totalHeight), ImGuiChildFlags_Borders);
         drawUnitList();
         ImGui::EndChild();
@@ -212,6 +298,41 @@ void StgEditorTab::drawSidebar() {
     if (ImGui::Selectable("Units", currentSection_ == Section::Units)) {
         currentSection_ = Section::Units;
     }
+
+    bool hasParsedTail = document_->stgData->tailParsed();
+
+    {
+        size_t areaCount = hasParsedTail ? document_->stgData->areas().size() : 0;
+        char areasLabel[32];
+        if (hasParsedTail) {
+            snprintf(areasLabel, sizeof(areasLabel), "Areas (%zu)", areaCount);
+        } else {
+            snprintf(areasLabel, sizeof(areasLabel), "Areas (unparsed)");
+        }
+        if (ImGui::Selectable(areasLabel, currentSection_ == Section::Areas)) {
+            currentSection_ = Section::Areas;
+        }
+    }
+
+    {
+        size_t varCount = hasParsedTail ? document_->stgData->variables().size() : 0;
+        char varsLabel[32];
+        if (hasParsedTail) {
+            snprintf(varsLabel, sizeof(varsLabel), "Variables (%zu)", varCount);
+        } else {
+            snprintf(varsLabel, sizeof(varsLabel), "Variables (unparsed)");
+        }
+        if (ImGui::Selectable(varsLabel, currentSection_ == Section::Variables)) {
+            currentSection_ = Section::Variables;
+        }
+    }
+
+    {
+        const char* eventsLabel = hasParsedTail ? "Events" : "Events (unparsed)";
+        if (ImGui::Selectable(eventsLabel, currentSection_ == Section::Events)) {
+            currentSection_ = Section::Events;
+        }
+    }
 }
 
 void StgEditorTab::drawHeaderSection() {
@@ -220,11 +341,7 @@ void StgEditorTab::drawHeaderSection() {
     ImGui::Text("Mission Header");
     ImGui::Separator();
 
-    int missionId = static_cast<int>(hdr.missionId);
-    if (ImGui::DragInt("Mission ID", &missionId, 1, 0, 0)) {
-        hdr.missionId = static_cast<uint32_t>(std::max(0, missionId));
-        document_->dirty = true;
-    }
+    ImGui::Text("Format Magic: 0x%X", hdr.formatMagic);
 
     char buf[64];
 
@@ -278,11 +395,11 @@ void StgEditorTab::drawUnitList() {
         ImGui::PopStyleColor();
 
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("ID: %u | %s | TroopIdx: %u | Anim: %d | Lv%d%s",
+            ImGui::SetTooltip("ID: %u | %s | TroopIdx: %d | Job: %d | Lv%d%s",
                 unit.uniqueId,
                 ucdNames[static_cast<int>(unit.ucd)],
                 unit.troopInfoIndex,
-                unit.leaderAnimationId,
+                unit.leaderJobType,
                 unit.leaderLevel,
                 unit.isEnabled ? "" : " [Disabled]");
         }
@@ -363,11 +480,11 @@ void StgEditorTab::drawUnitDetails(size_t index) {
     }
 
     if (ImGui::CollapsingHeader("Leader", ImGuiTreeNodeFlags_DefaultOpen)) {
-        drawAnimationIdCombo("Animation ID", unit.leaderAnimationId, unit.isHero != 0, nameDictionary_);
+        drawJobTypeCombo("Job Type", unit.leaderJobType, nameDictionary_);
 
-        int modelVar = unit.leaderModelVariant;
-        if (ImGui::DragInt("Model Variant", &modelVar, 1, 0, 255)) {
-            unit.leaderModelVariant = static_cast<uint8_t>(std::clamp(modelVar, 0, 255));
+        int modelId = unit.leaderModelId;
+        if (ImGui::DragInt("Model ID", &modelId, 1, 0, 255)) {
+            unit.leaderModelId = static_cast<uint8_t>(std::clamp(modelId, 0, 255));
             document_->dirty = true;
         }
 
@@ -459,15 +576,22 @@ void StgEditorTab::drawUnitDetails(size_t index) {
     }
 
     if (ImGui::CollapsingHeader("Unit Configuration")) {
-        int troopIdx = static_cast<int>(unit.troopInfoIndex);
+        int troopIdx = unit.troopInfoIndex;
         if (ImGui::DragInt("TroopInfo Index", &troopIdx, 1, 0, 0)) {
-            unit.troopInfoIndex = static_cast<uint32_t>(std::max(0, troopIdx));
+            unit.troopInfoIndex = troopIdx;
             document_->dirty = true;
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("References TroopInfo.sox. Negative values are computed from formation type at runtime.");
 
         int formation = static_cast<int>(unit.formationType);
         if (ImGui::DragInt("Formation", &formation, 1, 0, 0)) {
             unit.formationType = static_cast<uint32_t>(std::max(0, formation));
+            document_->dirty = true;
+        }
+
+        int animConfig = static_cast<int>(unit.unitAnimConfig);
+        if (ImGui::DragInt("Anim/Grid Config", &animConfig, 1, 0, 0)) {
+            unit.unitAnimConfig = static_cast<uint32_t>(std::max(0, animConfig));
             document_->dirty = true;
         }
 
@@ -506,11 +630,11 @@ void StgEditorTab::drawOfficerSection(const char* label, OfficerData& officer, b
 
     ImGui::PushID(label);
     if (ImGui::TreeNode(label)) {
-        drawAnimationIdCombo("Animation ID", officer.animationId, false, nameDictionary_);
+        drawJobTypeCombo("Job Type", officer.jobType, nameDictionary_);
 
-        int modelVar = officer.modelVariant;
-        if (ImGui::DragInt("Model Variant", &modelVar, 1, 0, 255)) {
-            officer.modelVariant = static_cast<uint8_t>(std::clamp(modelVar, 0, 255));
+        int modelId = officer.modelId;
+        if (ImGui::DragInt("Model ID", &modelId, 1, 0, 255)) {
+            officer.modelId = static_cast<uint8_t>(std::clamp(modelId, 0, 255));
             document_->dirty = true;
         }
 
@@ -556,6 +680,438 @@ void StgEditorTab::drawOfficerSection(const char* label, OfficerData& officer, b
         }
 
         ImGui::TreePop();
+    }
+    ImGui::PopID();
+}
+
+void StgEditorTab::drawAreaList() {
+    auto& areas = document_->stgData->areas();
+
+    for (size_t i = 0; i < areas.size(); ++i) {
+        const auto& area = areas[i];
+        bool selected = (selectedArea_ == static_cast<int>(i));
+
+        char label[96];
+        if (area.description.empty()) {
+            snprintf(label, sizeof(label), "[%zu] Area %u", i, area.areaId);
+        } else {
+            snprintf(label, sizeof(label), "[%zu] %s (ID %u)", i, area.description.c_str(), area.areaId);
+        }
+
+        if (ImGui::Selectable(label, selected)) {
+            selectedArea_ = static_cast<int>(i);
+        }
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Bounds: (%.0f, %.0f) - (%.0f, %.0f)",
+                area.boundX1, area.boundY1, area.boundX2, area.boundY2);
+        }
+    }
+}
+
+void StgEditorTab::drawAreaDetails(size_t index) {
+    auto& area = document_->stgData->areas()[index];
+
+    ImGui::Text("Area %zu", index);
+    ImGui::Separator();
+
+    char descBuf[32];
+    std::memset(descBuf, 0, sizeof(descBuf));
+    std::strncpy(descBuf, area.description.c_str(), sizeof(descBuf) - 1);
+    if (InputTextCentered("Description", descBuf, sizeof(descBuf))) {
+        area.description = descBuf;
+        document_->dirty = true;
+    }
+
+    int areaId = static_cast<int>(area.areaId);
+    if (ImGui::DragInt("Area ID", &areaId, 1, 0, 0)) {
+        area.areaId = static_cast<uint32_t>(std::max(0, areaId));
+        document_->dirty = true;
+    }
+
+    if (ImGui::CollapsingHeader("Bounds", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::DragFloat("X1", &area.boundX1, 10.0f, -100000.0f, 100000.0f, "%.1f")) {
+            document_->dirty = true;
+        }
+        if (ImGui::DragFloat("Y1", &area.boundY1, 10.0f, -100000.0f, 100000.0f, "%.1f")) {
+            document_->dirty = true;
+        }
+        if (ImGui::DragFloat("X2", &area.boundX2, 10.0f, -100000.0f, 100000.0f, "%.1f")) {
+            document_->dirty = true;
+        }
+        if (ImGui::DragFloat("Y2", &area.boundY2, 10.0f, -100000.0f, 100000.0f, "%.1f")) {
+            document_->dirty = true;
+        }
+
+        float w = std::abs(area.boundX2 - area.boundX1);
+        float h = std::abs(area.boundY2 - area.boundY1);
+        ImGui::Text("Size: %.0f x %.0f", w, h);
+    }
+}
+
+void StgEditorTab::drawVariableList() {
+    auto& vars = document_->stgData->variables();
+
+    for (size_t i = 0; i < vars.size(); ++i) {
+        const auto& var = vars[i];
+        bool selected = (selectedVariable_ == static_cast<int>(i));
+
+        char label[96];
+        snprintf(label, sizeof(label), "[%u] %s", var.variableId, var.name.c_str());
+
+        if (ImGui::Selectable(label, selected)) {
+            selectedVariable_ = static_cast<int>(i);
+        }
+
+        if (ImGui::IsItemHovered()) {
+            const char* typeName = paramTypeName(var.initialValue.type);
+            if (var.initialValue.type == StgParamType::String) {
+                ImGui::SetTooltip("Type: %s | Initial: \"%s\"", typeName, var.initialValue.stringValue.c_str());
+            } else if (var.initialValue.type == StgParamType::Float) {
+                ImGui::SetTooltip("Type: %s | Initial: %.3f", typeName, var.initialValue.floatValue);
+            } else {
+                ImGui::SetTooltip("Type: %s | Initial: %d", typeName, var.initialValue.intValue);
+            }
+        }
+    }
+}
+
+void StgEditorTab::drawVariableDetails(size_t index) {
+    auto& var = document_->stgData->variables()[index];
+
+    ImGui::Text("Variable %zu", index);
+    ImGui::Separator();
+
+    char nameBuf[64];
+    std::memset(nameBuf, 0, sizeof(nameBuf));
+    std::strncpy(nameBuf, var.name.c_str(), sizeof(nameBuf) - 1);
+    if (InputTextCentered("Name", nameBuf, sizeof(nameBuf))) {
+        var.name = nameBuf;
+        document_->dirty = true;
+    }
+
+    int varId = static_cast<int>(var.variableId);
+    if (ImGui::DragInt("Variable ID", &varId, 1, 0, 0)) {
+        var.variableId = static_cast<uint32_t>(std::max(0, varId));
+        document_->dirty = true;
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Initial Value");
+
+    // Type selector.
+    int typeIdx = static_cast<int>(var.initialValue.type);
+    const char* typeNames[] = {"Int", "Float", "String", "Enum"};
+    if (ComboCentered("Type", &typeIdx, typeNames, IM_ARRAYSIZE(typeNames))) {
+        var.initialValue.type = static_cast<StgParamType>(typeIdx);
+        document_->dirty = true;
+    }
+
+    // Value editor based on type.
+    switch (var.initialValue.type) {
+        case StgParamType::Int:
+        case StgParamType::Enum: {
+            int val = var.initialValue.intValue;
+            if (ImGui::DragInt("Value", &val, 1, 0, 0)) {
+                var.initialValue.intValue = val;
+                document_->dirty = true;
+            }
+            break;
+        }
+        case StgParamType::Float: {
+            if (ImGui::DragFloat("Value", &var.initialValue.floatValue, 0.1f, 0.0f, 0.0f, "%.3f")) {
+                document_->dirty = true;
+            }
+            break;
+        }
+        case StgParamType::String: {
+            char strBuf[256];
+            std::memset(strBuf, 0, sizeof(strBuf));
+            std::strncpy(strBuf, var.initialValue.stringValue.c_str(), sizeof(strBuf) - 1);
+            if (InputTextCentered("Value", strBuf, sizeof(strBuf))) {
+                var.initialValue.stringValue = strBuf;
+                document_->dirty = true;
+            }
+            break;
+        }
+    }
+}
+
+void StgEditorTab::drawEventList() {
+    auto& blocks = document_->stgData->eventBlocks();
+
+    // Add event to current/first block.
+    if (ImGui::SmallButton("+ Add Event")) {
+        if (blocks.empty()) {
+            blocks.push_back({});
+        }
+        StgEvent newEvent;
+        newEvent.description = "New Event";
+        newEvent.modified = true;
+        blocks[selectedBlock_ >= 0 ? selectedBlock_ : 0].events.push_back(newEvent);
+        selectedBlock_ = selectedBlock_ >= 0 ? selectedBlock_ : 0;
+        selectedEvent_ = static_cast<int>(blocks[selectedBlock_].events.size() - 1);
+        document_->dirty = true;
+    }
+
+    ImGui::Separator();
+
+    for (size_t b = 0; b < blocks.size(); ++b) {
+        auto& block = blocks[b];
+
+        char blockLabel[64];
+        snprintf(blockLabel, sizeof(blockLabel), "Block %zu (%zu events)", b, block.events.size());
+
+        if (ImGui::TreeNodeEx(blockLabel, ImGuiTreeNodeFlags_DefaultOpen)) {
+            int deleteIndex = -1;
+
+            for (size_t i = 0; i < block.events.size(); ++i) {
+                const auto& event = block.events[i];
+                bool selected = (selectedBlock_ == static_cast<int>(b) &&
+                                 selectedEvent_ == static_cast<int>(i));
+
+                char label[128];
+                if (event.description.empty()) {
+                    snprintf(label, sizeof(label), "[%u] Event %zu", event.eventId, i);
+                } else {
+                    snprintf(label, sizeof(label), "[%u] %s", event.eventId, event.description.c_str());
+                }
+
+                if (ImGui::Selectable(label, selected)) {
+                    selectedBlock_ = static_cast<int>(b);
+                    selectedEvent_ = static_cast<int>(i);
+                }
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Conditions: %zu | Actions: %zu",
+                        event.conditions.size(), event.actions.size());
+                }
+
+                if (ImGui::BeginPopupContextItem()) {
+                    if (ImGui::MenuItem("Delete")) {
+                        deleteIndex = static_cast<int>(i);
+                    }
+                    ImGui::EndPopup();
+                }
+            }
+
+            if (deleteIndex >= 0) {
+                block.events.erase(block.events.begin() + deleteIndex);
+                if (selectedBlock_ == static_cast<int>(b) &&
+                    selectedEvent_ >= static_cast<int>(block.events.size())) {
+                    selectedEvent_ = static_cast<int>(block.events.size()) - 1;
+                }
+                document_->dirty = true;
+            }
+
+            ImGui::TreePop();
+        }
+    }
+}
+
+void StgEditorTab::drawEventDetails(size_t blockIdx, size_t eventIdx) {
+    auto& event = document_->stgData->eventBlocks()[blockIdx].events[eventIdx];
+
+    ImGui::Text("Block %zu / Event %zu", blockIdx, eventIdx);
+    ImGui::Separator();
+
+    if (ImGui::CollapsingHeader("Event Header", ImGuiTreeNodeFlags_DefaultOpen)) {
+        char descBuf[64];
+        std::memset(descBuf, 0, sizeof(descBuf));
+        std::strncpy(descBuf, event.description.c_str(), sizeof(descBuf) - 1);
+        if (InputTextCentered("Description", descBuf, sizeof(descBuf))) {
+            event.description = descBuf;
+            event.modified = true;
+            document_->dirty = true;
+        }
+
+        int eventId = static_cast<int>(event.eventId);
+        if (ImGui::DragInt("Event ID", &eventId, 1, 0, 0)) {
+            event.eventId = static_cast<uint32_t>(std::max(0, eventId));
+            event.modified = true;
+            document_->dirty = true;
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Conditions", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("%zu conditions", event.conditions.size());
+
+        int condDelete = -1;
+        for (size_t i = 0; i < event.conditions.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+
+            char entryLabel[32];
+            snprintf(entryLabel, sizeof(entryLabel), "Condition %zu", i);
+            drawScriptEntry(entryLabel, event.conditions[i], true, event);
+
+            ImGui::SameLine();
+            if (ImGui::SmallButton("X")) {
+                condDelete = static_cast<int>(i);
+            }
+
+            ImGui::PopID();
+        }
+
+        if (condDelete >= 0) {
+            event.conditions.erase(event.conditions.begin() + condDelete);
+            event.modified = true;
+            document_->dirty = true;
+        }
+
+        if (ImGui::SmallButton("+ Add Condition")) {
+            event.conditions.push_back({});
+            event.modified = true;
+            document_->dirty = true;
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("%zu actions", event.actions.size());
+
+        int actDelete = -1;
+        for (size_t i = 0; i < event.actions.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i + 1000));
+
+            char entryLabel[32];
+            snprintf(entryLabel, sizeof(entryLabel), "Action %zu", i);
+            drawScriptEntry(entryLabel, event.actions[i], false, event);
+
+            ImGui::SameLine();
+            if (ImGui::SmallButton("X")) {
+                actDelete = static_cast<int>(i);
+            }
+
+            ImGui::PopID();
+        }
+
+        if (actDelete >= 0) {
+            event.actions.erase(event.actions.begin() + actDelete);
+            event.modified = true;
+            document_->dirty = true;
+        }
+
+        if (ImGui::SmallButton("+ Add Action")) {
+            event.actions.push_back({});
+            event.modified = true;
+            document_->dirty = true;
+        }
+    }
+}
+
+void StgEditorTab::drawScriptEntry(const char* entryLabel, StgScriptEntry& entry,
+                                    bool isCondition, StgEvent& event) {
+    const ScriptEntryInfo* info = isCondition
+        ? findConditionInfo(entry.typeId)
+        : findActionInfo(entry.typeId);
+
+    const char* name = info ? info->name : "Unknown";
+
+    if (ImGui::TreeNode(entryLabel, "%s: %s (%u)", entryLabel, name, entry.typeId)) {
+        constexpr float kParamLabelWidth = 120.0f;
+        constexpr float kTypeComboWidth = 70.0f;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Type ID");
+        ImGui::SameLine(kParamLabelWidth);
+        ImGui::SetNextItemWidth(-(kTypeComboWidth + ImGui::GetStyle().ItemSpacing.x));
+        int id = static_cast<int>(entry.typeId);
+        if (ImGui::DragInt("##typeId", &id, 1, 0, 0)) {
+            entry.typeId = static_cast<uint32_t>(std::max(0, id));
+            event.modified = true;
+            document_->dirty = true;
+        }
+
+        // Re-lookup after possible ID change.
+        info = isCondition ? findConditionInfo(entry.typeId) : findActionInfo(entry.typeId);
+
+        // Draw each param with type-aware editing.
+        for (size_t i = 0; i < entry.params.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+
+            const char* paramLabel = "Param";
+            if (info && i < 3 && info->paramNames[i][0]) {
+                paramLabel = info->paramNames[i];
+            }
+
+            char labelBuf[64];
+            snprintf(labelBuf, sizeof(labelBuf), "%s [%zu]", paramLabel, i);
+
+            drawParamValue(labelBuf, entry.params[i], event);
+            ImGui::PopID();
+        }
+
+        // Add/remove param buttons.
+        if (ImGui::SmallButton("+ Param")) {
+            entry.params.push_back({});
+            event.modified = true;
+            document_->dirty = true;
+        }
+        if (!entry.params.empty()) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("- Param")) {
+                entry.params.pop_back();
+                event.modified = true;
+                document_->dirty = true;
+            }
+        }
+
+        ImGui::TreePop();
+    }
+}
+
+void StgEditorTab::drawParamValue(const char* label, StgParamValue& param, StgEvent& event) {
+    constexpr float kLabelWidth = 120.0f;
+    constexpr float kTypeComboWidth = 70.0f;
+
+    // Label text on the left.
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(kLabelWidth);
+
+    // Value editor in the middle — ends where the type combo begins.
+    ImGui::SetNextItemWidth(-(kTypeComboWidth + ImGui::GetStyle().ItemSpacing.x));
+    ImGui::PushID("val");
+    switch (param.type) {
+        case StgParamType::Int:
+        case StgParamType::Enum: {
+            int val = param.intValue;
+            if (ImGui::DragInt("##v", &val, 1, 0, 0)) {
+                param.intValue = val;
+                event.modified = true;
+                document_->dirty = true;
+            }
+            break;
+        }
+        case StgParamType::Float: {
+            if (ImGui::DragFloat("##v", &param.floatValue, 0.1f, 0.0f, 0.0f, "%.3f")) {
+                event.modified = true;
+                document_->dirty = true;
+            }
+            break;
+        }
+        case StgParamType::String: {
+            char strBuf[256];
+            std::memset(strBuf, 0, sizeof(strBuf));
+            std::strncpy(strBuf, param.stringValue.c_str(), sizeof(strBuf) - 1);
+            if (ImGui::InputText("##v", strBuf, sizeof(strBuf))) {
+                param.stringValue = strBuf;
+                event.modified = true;
+                document_->dirty = true;
+            }
+            break;
+        }
+    }
+    ImGui::PopID();
+
+    // Type selector on the right.
+    ImGui::SameLine();
+    ImGui::PushID("type");
+    int typeIdx = static_cast<int>(param.type);
+    const char* typeNames[] = {"Int", "Float", "String", "Enum"};
+    ImGui::SetNextItemWidth(kTypeComboWidth);
+    if (ImGui::Combo("##type", &typeIdx, typeNames, IM_ARRAYSIZE(typeNames))) {
+        param.type = static_cast<StgParamType>(typeIdx);
+        event.modified = true;
+        document_->dirty = true;
     }
     ImGui::PopID();
 }

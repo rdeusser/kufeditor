@@ -66,7 +66,7 @@ bool SoxSkillInfo::load(std::span<const std::byte> data) {
 
         // Slot count and max level.
         if (ptr + 2 * sizeof(uint32_t) > end) return false;
-        skill.slotCount = readLE<uint32_t>(ptr);
+        skill.skillType = readLE<uint32_t>(ptr);
         ptr += sizeof(uint32_t);
         skill.maxLevel = readLE<uint32_t>(ptr);
         ptr += sizeof(uint32_t);
@@ -92,7 +92,7 @@ std::vector<std::byte> SoxSkillInfo::save() const {
         dataSize += sizeof(int32_t);                            // id
         dataSize += sizeof(uint16_t) + skill.locKey.size();     // locKey
         dataSize += sizeof(uint16_t) + skill.iconPath.size();   // iconPath
-        dataSize += sizeof(uint32_t);                           // slotCount
+        dataSize += sizeof(uint32_t);                           // skillType
         dataSize += sizeof(uint32_t);                           // maxLevel
     }
     dataSize += FOOTER_SIZE;
@@ -118,7 +118,7 @@ std::vector<std::byte> SoxSkillInfo::save() const {
         std::memcpy(ptr, skill.iconPath.data(), skill.iconPath.size());
         ptr += skill.iconPath.size();
 
-        writeLE(ptr, skill.slotCount);
+        writeLE(ptr, skill.skillType);
         ptr += sizeof(uint32_t);
         writeLE(ptr, skill.maxLevel);
         ptr += sizeof(uint32_t);
@@ -135,11 +135,11 @@ std::vector<ValidationIssue> SoxSkillInfo::validate() const {
     for (size_t i = 0; i < skills_.size(); ++i) {
         const auto& skill = skills_[i];
 
-        if (skill.slotCount < 1 || skill.slotCount > 4) {
+        if (skill.skillType != 1 && skill.skillType != 2) {
             issues.push_back({
                 Severity::Warning,
-                "slotCount",
-                "Slot count outside typical range (1-4)",
+                "skillType",
+                "Skill type should be 1 (Combat) or 2 (Magic)",
                 i
             });
         }

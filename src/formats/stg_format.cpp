@@ -21,14 +21,40 @@ void writeLE(std::byte* data, T value) {
     std::memcpy(data, &value, sizeof(T));
 }
 
-// Read a null-terminated string from a fixed-size buffer.
+void appendLE(std::vector<std::byte>& out, uint32_t value) {
+    size_t pos = out.size();
+    out.resize(pos + 4);
+    std::memcpy(out.data() + pos, &value, 4);
+}
+
+void appendLE(std::vector<std::byte>& out, int32_t value) {
+    size_t pos = out.size();
+    out.resize(pos + 4);
+    std::memcpy(out.data() + pos, &value, 4);
+}
+
+void appendLE(std::vector<std::byte>& out, float value) {
+    size_t pos = out.size();
+    out.resize(pos + 4);
+    std::memcpy(out.data() + pos, &value, 4);
+}
+
+void appendBytes(std::vector<std::byte>& out, const void* data, size_t len) {
+    size_t pos = out.size();
+    out.resize(pos + len);
+    std::memcpy(out.data() + pos, data, len);
+}
+
+void appendZeros(std::vector<std::byte>& out, size_t count) {
+    out.resize(out.size() + count, std::byte{0});
+}
+
 std::string readFixedString(const std::byte* data, size_t maxLen) {
     const char* str = reinterpret_cast<const char*>(data);
     size_t len = strnlen(str, maxLen);
     return std::string(str, len);
 }
 
-// Write a string into a fixed-size buffer, zero-padding the rest.
 void writeFixedString(std::byte* data, size_t maxLen, const std::string& str) {
     std::memset(data, 0, maxLen);
     size_t copyLen = std::min(str.size(), maxLen - 1);
@@ -40,7 +66,7 @@ void writeFixedString(std::byte* data, size_t maxLen, const std::string& str) {
 void StgFormat::parseHeader(const std::byte* data) {
     std::memcpy(header_.rawData.data(), data, kStgHeaderSize);
 
-    header_.missionId = readLE<uint32_t>(data + 0x000);
+    header_.formatMagic = readLE<uint32_t>(data + 0x000);
     header_.mapFile = readFixedString(data + 0x048, 64);
     header_.bitmapFile = readFixedString(data + 0x088, 64);
     header_.defaultCameraFile = readFixedString(data + 0x0C8, 64);
@@ -55,7 +81,7 @@ void StgFormat::parseHeader(const std::byte* data) {
 void StgFormat::patchHeader() const {
     std::byte* raw = const_cast<std::byte*>(header_.rawData.data());
 
-    writeLE(raw + 0x000, header_.missionId);
+    writeLE(raw + 0x000, header_.formatMagic);
     writeFixedString(raw + 0x048, 64, header_.mapFile);
     writeFixedString(raw + 0x088, 64, header_.bitmapFile);
     writeFixedString(raw + 0x0C8, 64, header_.defaultCameraFile);
@@ -83,8 +109,8 @@ void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
     unit.direction = static_cast<Direction>(static_cast<uint8_t>(data[0x4C]));
 
     // Leader configuration (108 bytes starting at offset 0x54).
-    unit.leaderAnimationId = static_cast<uint8_t>(data[0x54]);
-    unit.leaderModelVariant = static_cast<uint8_t>(data[0x55]);
+    unit.leaderJobType = static_cast<uint8_t>(data[0x54]);
+    unit.leaderModelId = static_cast<uint8_t>(data[0x55]);
     unit.leaderWorldmapId = static_cast<uint8_t>(data[0x56]);
     unit.leaderLevel = static_cast<uint8_t>(data[0x57]);
 
@@ -103,43 +129,36 @@ void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
     unit.officerCount = readLE<uint32_t>(data + 0xBC);
 
     // Officer 1 data (starts at offset 0xC0).
-    unit.officer1.animationId = static_cast<uint8_t>(data[0xC0]);
-    unit.officer1.modelVariant = static_cast<uint8_t>(data[0xC1]);
+    unit.officer1.jobType = static_cast<uint8_t>(data[0xC0]);
+    unit.officer1.modelId = static_cast<uint8_t>(data[0xC1]);
     unit.officer1.worldmapId = static_cast<uint8_t>(data[0xC2]);
     unit.officer1.level = static_cast<uint8_t>(data[0xC3]);
     for (int i = 0; i < 4; ++i) {
         unit.officer1.skills[i].skillId = static_cast<uint8_t>(data[0xC4 + i * 2]);
         unit.officer1.skills[i].level = static_cast<uint8_t>(data[0xC5 + i * 2]);
     }
-    // Officer 1 abilities start after the 4 skill slots (8 bytes) + remaining data.
-    // Officer 1 block is 104 bytes total from 0xC0 to 0x128.
-    // After job/model/worldmap/level (4 bytes) + skills (8 bytes) = 0xCC.
-    // Remaining 92 bytes = 23 abilities.
     for (int i = 0; i < 23; ++i) {
         unit.officer1.abilities[i] = readLE<int32_t>(data + 0xCC + i * 4);
     }
 
     // Officer 2 data (starts at offset 0x128).
-    unit.officer2.animationId = static_cast<uint8_t>(data[0x128]);
-    unit.officer2.modelVariant = static_cast<uint8_t>(data[0x129]);
+    unit.officer2.jobType = static_cast<uint8_t>(data[0x128]);
+    unit.officer2.modelId = static_cast<uint8_t>(data[0x129]);
     unit.officer2.worldmapId = static_cast<uint8_t>(data[0x12A]);
     unit.officer2.level = static_cast<uint8_t>(data[0x12B]);
     for (int i = 0; i < 4; ++i) {
         unit.officer2.skills[i].skillId = static_cast<uint8_t>(data[0x12C + i * 2]);
         unit.officer2.skills[i].level = static_cast<uint8_t>(data[0x12D + i * 2]);
     }
-    // Officer 2 block is 88 bytes total from 0x128 to 0x180.
-    // After job/model/worldmap/level (4 bytes) + skills (8 bytes) = 0x134.
-    // Remaining 76 bytes = 19 abilities (not 23 - smaller block).
     for (int i = 0; i < 19; ++i) {
         unit.officer2.abilities[i] = readLE<int32_t>(data + 0x134 + i * 4);
     }
 
     // Unit configuration (160 bytes starting at offset 0x180).
-    unit.gridUnk190 = readLE<uint32_t>(data + 0x190);
-    unit.gridX = readLE<uint32_t>(data + 0x194);
-    unit.gridY = readLE<uint32_t>(data + 0x198);
-    unit.troopInfoIndex = readLE<uint32_t>(data + 0x1C0);
+    unit.unitAnimConfig = readLE<uint32_t>(data + 0x18C);
+    unit.gridX = readLE<uint32_t>(data + 0x190);
+    unit.gridY = readLE<uint32_t>(data + 0x194);
+    unit.troopInfoIndex = readLE<int32_t>(data + 0x1C0);
     unit.formationType = readLE<uint32_t>(data + 0x1C4);
 
     // Stat overrides: 22 floats at offset 0x1C8.
@@ -164,8 +183,8 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     raw[0x4C] = static_cast<std::byte>(unit.direction);
 
     // Leader configuration.
-    raw[0x54] = static_cast<std::byte>(unit.leaderAnimationId);
-    raw[0x55] = static_cast<std::byte>(unit.leaderModelVariant);
+    raw[0x54] = static_cast<std::byte>(unit.leaderJobType);
+    raw[0x55] = static_cast<std::byte>(unit.leaderModelId);
     raw[0x56] = static_cast<std::byte>(unit.leaderWorldmapId);
     raw[0x57] = static_cast<std::byte>(unit.leaderLevel);
 
@@ -181,8 +200,8 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     writeLE(raw + 0xBC, unit.officerCount);
 
     // Officer 1.
-    raw[0xC0] = static_cast<std::byte>(unit.officer1.animationId);
-    raw[0xC1] = static_cast<std::byte>(unit.officer1.modelVariant);
+    raw[0xC0] = static_cast<std::byte>(unit.officer1.jobType);
+    raw[0xC1] = static_cast<std::byte>(unit.officer1.modelId);
     raw[0xC2] = static_cast<std::byte>(unit.officer1.worldmapId);
     raw[0xC3] = static_cast<std::byte>(unit.officer1.level);
     for (int i = 0; i < 4; ++i) {
@@ -194,8 +213,8 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     }
 
     // Officer 2.
-    raw[0x128] = static_cast<std::byte>(unit.officer2.animationId);
-    raw[0x129] = static_cast<std::byte>(unit.officer2.modelVariant);
+    raw[0x128] = static_cast<std::byte>(unit.officer2.jobType);
+    raw[0x129] = static_cast<std::byte>(unit.officer2.modelId);
     raw[0x12A] = static_cast<std::byte>(unit.officer2.worldmapId);
     raw[0x12B] = static_cast<std::byte>(unit.officer2.level);
     for (int i = 0; i < 4; ++i) {
@@ -207,9 +226,9 @@ void StgFormat::patchUnit(StgUnit& unit) const {
     }
 
     // Unit configuration.
-    writeLE(raw + 0x190, unit.gridUnk190);
-    writeLE(raw + 0x194, unit.gridX);
-    writeLE(raw + 0x198, unit.gridY);
+    writeLE(raw + 0x18C, unit.unitAnimConfig);
+    writeLE(raw + 0x190, unit.gridX);
+    writeLE(raw + 0x194, unit.gridY);
     writeLE(raw + 0x1C0, unit.troopInfoIndex);
     writeLE(raw + 0x1C4, unit.formationType);
 
@@ -240,12 +259,15 @@ bool StgFormat::load(std::span<const std::byte> data) {
         ptr += kStgUnitSize;
     }
 
-    // Everything after units is the raw tail (AreaIDs, Variables, Events, Footer).
     size_t tailOffset = kStgHeaderSize + count * kStgUnitSize;
-    if (tailOffset < data.size()) {
-        rawTail_.assign(data.begin() + tailOffset, data.end());
+    size_t tailSize = data.size() - tailOffset;
+    if (tailSize > 0) {
+        if (!parseTail(data.data() + tailOffset, tailSize)) {
+            rawTail_.assign(data.begin() + tailOffset, data.end());
+            tailParsed_ = false;
+        }
     } else {
-        rawTail_.clear();
+        tailParsed_ = false;
     }
 
     version_ = GameVersion::Crusaders;
@@ -253,27 +275,384 @@ bool StgFormat::load(std::span<const std::byte> data) {
 }
 
 std::vector<std::byte> StgFormat::save() const {
-    // Patch modified fields into raw buffers.
     patchHeader();
     for (auto& unit : const_cast<std::vector<StgUnit>&>(units_)) {
         patchUnit(unit);
     }
 
     std::vector<std::byte> data;
-    data.reserve(kStgHeaderSize + units_.size() * kStgUnitSize + rawTail_.size());
 
-    // Write header from raw data.
+    // Write header.
     data.insert(data.end(), header_.rawData.begin(), header_.rawData.end());
 
-    // Write units from raw data.
+    // Write units.
     for (const auto& unit : units_) {
         data.insert(data.end(), unit.rawData.begin(), unit.rawData.end());
     }
 
-    // Write raw tail (AreaIDs, Variables, Events, Footer).
-    data.insert(data.end(), rawTail_.begin(), rawTail_.end());
+    if (!tailParsed_) {
+        data.insert(data.end(), rawTail_.begin(), rawTail_.end());
+        return data;
+    }
+
+    // Write parsed tail sections.
+    serializeAreaIds(data);
+    serializeVariables(data);
+    serializeEventBlocks(data);
+    serializeFooter(data);
 
     return data;
+}
+
+StgParamValue StgFormat::readParamValue(const std::byte* data, size_t& offset, size_t limit) const {
+    StgParamValue val;
+    if (offset + 4 > limit) {
+        return val;
+    }
+
+    val.type = static_cast<StgParamType>(readLE<uint32_t>(data + offset));
+    offset += 4;
+
+    if (val.type == StgParamType::String) {
+        if (offset + 4 > limit) return val;
+        uint32_t slen = readLE<uint32_t>(data + offset);
+        offset += 4;
+        if (offset + slen > limit) return val;
+        val.stringValue = std::string(reinterpret_cast<const char*>(data + offset), slen);
+        offset += slen;
+    } else if (val.type == StgParamType::Float) {
+        if (offset + 4 > limit) return val;
+        val.floatValue = readLE<float>(data + offset);
+        offset += 4;
+    } else {
+        // Int or Enum — both are 4-byte int32.
+        if (offset + 4 > limit) return val;
+        val.intValue = readLE<int32_t>(data + offset);
+        offset += 4;
+    }
+
+    return val;
+}
+
+void StgFormat::serializeParamValue(std::vector<std::byte>& out, const StgParamValue& val) const {
+    appendLE(out, static_cast<uint32_t>(val.type));
+
+    if (val.type == StgParamType::String) {
+        appendLE(out, static_cast<uint32_t>(val.stringValue.size()));
+        appendBytes(out, val.stringValue.data(), val.stringValue.size());
+    } else if (val.type == StgParamType::Float) {
+        appendLE(out, val.floatValue);
+    } else {
+        appendLE(out, val.intValue);
+    }
+}
+
+size_t StgFormat::parseAreaIds(const std::byte* data, size_t tailSize, size_t offset) {
+    if (offset + 4 > tailSize) return SIZE_MAX;
+    uint32_t areaCount = readLE<uint32_t>(data + offset);
+    size_t areaSection = 4 + static_cast<size_t>(areaCount) * kStgAreaIdEntrySize;
+    if (offset + areaSection > tailSize) return SIZE_MAX;
+    offset += 4;
+
+    areas_.clear();
+    areas_.reserve(areaCount);
+
+    for (uint32_t i = 0; i < areaCount; ++i) {
+        StgArea area;
+        const std::byte* entry = data + offset;
+        std::memcpy(area.rawData.data(), entry, kStgAreaIdEntrySize);
+
+        area.description = readFixedString(entry + 0x00, 32);
+        area.areaId = readLE<uint32_t>(entry + 0x40);
+        area.boundX1 = readLE<float>(entry + 0x44);
+        area.boundY1 = readLE<float>(entry + 0x48);
+        area.boundX2 = readLE<float>(entry + 0x4C);
+        area.boundY2 = readLE<float>(entry + 0x50);
+
+        areas_.push_back(std::move(area));
+        offset += kStgAreaIdEntrySize;
+    }
+
+    return offset;
+}
+
+size_t StgFormat::parseVariables(const std::byte* data, size_t tailSize, size_t offset) {
+    if (offset + 4 > tailSize) return SIZE_MAX;
+    uint32_t varCount = readLE<uint32_t>(data + offset);
+    offset += 4;
+
+    variables_.clear();
+    variables_.reserve(varCount);
+
+    for (uint32_t i = 0; i < varCount; ++i) {
+        StgVariable var;
+
+        // Fixed 64-byte name.
+        if (offset + kStgVariableNameSize > tailSize) return SIZE_MAX;
+        var.name = readFixedString(data + offset, kStgVariableNameSize);
+        offset += kStgVariableNameSize;
+
+        // Variable ID (4 bytes).
+        if (offset + 4 > tailSize) return SIZE_MAX;
+        var.variableId = readLE<uint32_t>(data + offset);
+        offset += 4;
+
+        // Typed initial value via ReadSTGParamValue.
+        var.initialValue = readParamValue(data, offset, tailSize);
+
+        variables_.push_back(std::move(var));
+    }
+
+    return offset;
+}
+
+size_t StgFormat::parseEventBlocks(const std::byte* data, size_t tailSize, size_t offset) {
+    if (offset + 4 > tailSize) return SIZE_MAX;
+    uint32_t blockCount = readLE<uint32_t>(data + offset);
+    offset += 4;
+
+    eventBlocks_.clear();
+    eventBlocks_.reserve(blockCount);
+
+    for (uint32_t b = 0; b < blockCount; ++b) {
+        StgEventBlock block;
+
+        // Block header (4 bytes).
+        if (offset + 4 > tailSize) return SIZE_MAX;
+        block.blockHeader = readLE<uint32_t>(data + offset);
+        offset += 4;
+
+        // Event count (4 bytes).
+        if (offset + 4 > tailSize) return SIZE_MAX;
+        uint32_t eventCount = readLE<uint32_t>(data + offset);
+        offset += 4;
+
+        block.events.reserve(eventCount);
+
+        for (uint32_t e = 0; e < eventCount; ++e) {
+            StgEvent event;
+            size_t eventStart = offset;
+
+            // Description (64 bytes).
+            if (offset + kStgEventDescriptionSize > tailSize) return SIZE_MAX;
+            event.description = readFixedString(data + offset, kStgEventDescriptionSize);
+            offset += kStgEventDescriptionSize;
+
+            // Event ID (4 bytes).
+            if (offset + 4 > tailSize) return SIZE_MAX;
+            event.eventId = readLE<uint32_t>(data + offset);
+            offset += 4;
+
+            // Condition count (4 bytes).
+            if (offset + 4 > tailSize) return SIZE_MAX;
+            uint32_t condCount = readLE<uint32_t>(data + offset);
+            offset += 4;
+
+            event.conditions.reserve(condCount);
+            for (uint32_t c = 0; c < condCount; ++c) {
+                StgScriptEntry cond;
+
+                // Type ID (4 bytes).
+                if (offset + 4 > tailSize) return SIZE_MAX;
+                cond.typeId = readLE<uint32_t>(data + offset);
+                offset += 4;
+
+                // Param count (4 bytes).
+                if (offset + 4 > tailSize) return SIZE_MAX;
+                uint32_t paramCount = readLE<uint32_t>(data + offset);
+                offset += 4;
+
+                cond.params.reserve(paramCount);
+                for (uint32_t p = 0; p < paramCount; ++p) {
+                    cond.params.push_back(readParamValue(data, offset, tailSize));
+                }
+
+                event.conditions.push_back(std::move(cond));
+            }
+
+            // Action count (4 bytes).
+            if (offset + 4 > tailSize) return SIZE_MAX;
+            uint32_t actCount = readLE<uint32_t>(data + offset);
+            offset += 4;
+
+            event.actions.reserve(actCount);
+            for (uint32_t a = 0; a < actCount; ++a) {
+                StgScriptEntry act;
+
+                // Type ID (4 bytes).
+                if (offset + 4 > tailSize) return SIZE_MAX;
+                act.typeId = readLE<uint32_t>(data + offset);
+                offset += 4;
+
+                // Param count (4 bytes).
+                if (offset + 4 > tailSize) return SIZE_MAX;
+                uint32_t paramCount = readLE<uint32_t>(data + offset);
+                offset += 4;
+
+                act.params.reserve(paramCount);
+                for (uint32_t p = 0; p < paramCount; ++p) {
+                    act.params.push_back(readParamValue(data, offset, tailSize));
+                }
+
+                event.actions.push_back(std::move(act));
+            }
+
+            // Store raw bytes for unmodified round-trip.
+            event.rawData.assign(data + eventStart, data + offset);
+            block.events.push_back(std::move(event));
+        }
+
+        eventBlocks_.push_back(std::move(block));
+    }
+
+    return offset;
+}
+
+size_t StgFormat::parseFooter(const std::byte* data, size_t tailSize, size_t offset) {
+    if (offset + 4 > tailSize) return SIZE_MAX;
+    uint32_t footerCount = readLE<uint32_t>(data + offset);
+    offset += 4;
+
+    footerEntries_.clear();
+    footerEntries_.reserve(footerCount);
+
+    if (offset + static_cast<size_t>(footerCount) * 8 > tailSize) return SIZE_MAX;
+
+    for (uint32_t i = 0; i < footerCount; ++i) {
+        StgFooterEntry entry;
+        entry.field1 = readLE<uint32_t>(data + offset);
+        entry.field2 = readLE<uint32_t>(data + offset + 4);
+        footerEntries_.push_back(entry);
+        offset += 8;
+    }
+
+    return offset;
+}
+
+bool StgFormat::parseTail(const std::byte* data, size_t tailSize) {
+    size_t offset = 0;
+
+    // AreaIDs section.
+    offset = parseAreaIds(data, tailSize, offset);
+    if (offset == SIZE_MAX) return false;
+
+    // Variables section.
+    offset = parseVariables(data, tailSize, offset);
+    if (offset == SIZE_MAX) return false;
+
+    // Event blocks section.
+    offset = parseEventBlocks(data, tailSize, offset);
+    if (offset == SIZE_MAX) return false;
+
+    // Footer section.
+    offset = parseFooter(data, tailSize, offset);
+    if (offset == SIZE_MAX) return false;
+
+    // Validate total consumed == tailSize.
+    if (offset != tailSize) return false;
+
+    tailParsed_ = true;
+    return true;
+}
+
+void StgFormat::serializeAreaIds(std::vector<std::byte>& out) const {
+    appendLE(out, static_cast<uint32_t>(areas_.size()));
+
+    for (const auto& area : areas_) {
+        // Patch known fields into rawData, then write the full 84 bytes.
+        std::array<std::byte, 84> patched = area.rawData;
+        writeFixedString(patched.data() + 0x00, 32, area.description);
+        writeLE(patched.data() + 0x40, area.areaId);
+        writeLE(patched.data() + 0x44, area.boundX1);
+        writeLE(patched.data() + 0x48, area.boundY1);
+        writeLE(patched.data() + 0x4C, area.boundX2);
+        writeLE(patched.data() + 0x50, area.boundY2);
+        appendBytes(out, patched.data(), patched.size());
+    }
+}
+
+void StgFormat::serializeVariables(std::vector<std::byte>& out) const {
+    appendLE(out, static_cast<uint32_t>(variables_.size()));
+
+    for (const auto& var : variables_) {
+        // Fixed 64-byte name.
+        size_t nameStart = out.size();
+        appendZeros(out, kStgVariableNameSize);
+        size_t copyLen = std::min(var.name.size(), kStgVariableNameSize - 1);
+        std::memcpy(out.data() + nameStart, var.name.data(), copyLen);
+
+        // Variable ID.
+        appendLE(out, var.variableId);
+
+        // Typed initial value.
+        serializeParamValue(out, var.initialValue);
+    }
+}
+
+void StgFormat::serializeEventBlocks(std::vector<std::byte>& out) const {
+    appendLE(out, static_cast<uint32_t>(eventBlocks_.size()));
+
+    for (const auto& block : eventBlocks_) {
+        // Block header.
+        appendLE(out, block.blockHeader);
+
+        // Event count.
+        appendLE(out, static_cast<uint32_t>(block.events.size()));
+
+        for (const auto& event : block.events) {
+            if (!event.modified && !event.rawData.empty()) {
+                // Unmodified event — emit raw bytes for byte-identical round-trip.
+                out.insert(out.end(), event.rawData.begin(), event.rawData.end());
+                continue;
+            }
+
+            // Description (64 bytes).
+            size_t descStart = out.size();
+            appendZeros(out, kStgEventDescriptionSize);
+            size_t copyLen = std::min(event.description.size(), kStgEventDescriptionSize - 1);
+            std::memcpy(out.data() + descStart, event.description.data(), copyLen);
+
+            // Event ID.
+            appendLE(out, event.eventId);
+
+            // Conditions.
+            appendLE(out, static_cast<uint32_t>(event.conditions.size()));
+            for (const auto& cond : event.conditions) {
+                appendLE(out, cond.typeId);
+                appendLE(out, static_cast<uint32_t>(cond.params.size()));
+                for (const auto& param : cond.params) {
+                    serializeParamValue(out, param);
+                }
+            }
+
+            // Actions.
+            appendLE(out, static_cast<uint32_t>(event.actions.size()));
+            for (const auto& act : event.actions) {
+                appendLE(out, act.typeId);
+                appendLE(out, static_cast<uint32_t>(act.params.size()));
+                for (const auto& param : act.params) {
+                    serializeParamValue(out, param);
+                }
+            }
+        }
+    }
+}
+
+void StgFormat::serializeFooter(std::vector<std::byte>& out) const {
+    appendLE(out, static_cast<uint32_t>(footerEntries_.size()));
+
+    for (const auto& entry : footerEntries_) {
+        appendLE(out, entry.field1);
+        appendLE(out, entry.field2);
+    }
+}
+
+size_t StgFormat::totalEventCount() const {
+    size_t count = 0;
+    for (const auto& block : eventBlocks_) {
+        count += block.events.size();
+    }
+    return count;
 }
 
 std::vector<ValidationIssue> StgFormat::validate() const {

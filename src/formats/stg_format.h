@@ -29,9 +29,9 @@ enum class Direction : uint8_t {
     SouthEast = 7
 };
 
-// K2JobDef.h animation IDs (0-42). Values above 42 are extended model IDs
+// K2JobDef.h job type IDs (0-42). Values above 42 are extended model IDs
 // for hero characters and special unit animations.
-constexpr uint8_t kMaxStandardAnimationId = 42;
+constexpr uint8_t kMaxStandardJobType = 42;
 
 // Skill slot: 1 byte skill ID + 1 byte level, packed into 2 bytes (4 slots = 8 bytes).
 struct SkillSlot {
@@ -41,8 +41,8 @@ struct SkillSlot {
 
 // Officer data within a unit block.
 struct OfficerData {
-    uint8_t animationId = 0;
-    uint8_t modelVariant = 0;
+    uint8_t jobType = 0;
+    uint8_t modelId = 0;
     uint8_t worldmapId = 0xFF;
     uint8_t level = 1;
     std::array<SkillSlot, 4> skills{};
@@ -55,7 +55,7 @@ struct OfficerData {
 
 // STG file header (628 bytes).
 struct StgHeader {
-    uint32_t missionId = 0;
+    uint32_t formatMagic = 0x3E9;
     std::string mapFile;
     std::string bitmapFile;
     std::string defaultCameraFile;
@@ -85,8 +85,8 @@ struct StgUnit {
     Direction direction = Direction::East;
 
     // Leader configuration (108 bytes).
-    uint8_t leaderAnimationId = 0;
-    uint8_t leaderModelVariant = 0;
+    uint8_t leaderJobType = 0;
+    uint8_t leaderModelId = 0;
     uint8_t leaderWorldmapId = 0xFF;
     uint8_t leaderLevel = 1;
     std::array<SkillSlot, 4> leaderSkills{};
@@ -98,9 +98,9 @@ struct StgUnit {
     OfficerData officer2;
 
     // Unit configuration (160 bytes).
-    uint32_t troopInfoIndex = 0;
+    int32_t troopInfoIndex = 0;
     uint32_t formationType = 0;
-    uint32_t gridUnk190 = 1;
+    uint32_t unitAnimConfig = 0;
     uint32_t gridX = 1;
     uint32_t gridY = 1;
     std::array<float, 22> statOverrides{};
@@ -116,6 +116,71 @@ struct StgUnit {
 
 static constexpr size_t kStgHeaderSize = 628;
 static constexpr size_t kStgUnitSize = 544;
+static constexpr size_t kStgAreaIdEntrySize = 84;
+static constexpr size_t kStgEventDescriptionSize = 64;
+static constexpr size_t kStgVariableNameSize = 64;
+
+// Typed parameter value system (matches ReadSTGParamValue at 0x004847b0).
+enum class StgParamType : uint32_t {
+    Int    = 0,
+    Float  = 1,
+    String = 2,
+    Enum   = 3
+};
+
+struct StgParamValue {
+    StgParamType type = StgParamType::Int;
+    int32_t intValue = 0;
+    float floatValue = 0.0f;
+    std::string stringValue;
+
+    size_t serializedSize() const {
+        if (type == StgParamType::String) {
+            return 8 + stringValue.size();
+        }
+        return 8;
+    }
+};
+
+struct StgScriptEntry {
+    uint32_t typeId = 0;
+    std::vector<StgParamValue> params;
+};
+
+struct StgEvent {
+    std::string description;
+    uint32_t eventId = 0;
+    std::vector<StgScriptEntry> conditions;
+    std::vector<StgScriptEntry> actions;
+    std::vector<std::byte> rawData;
+    bool modified = false;
+};
+
+struct StgEventBlock {
+    uint32_t blockHeader = 0;
+    std::vector<StgEvent> events;
+};
+
+struct StgVariable {
+    std::string name;
+    uint32_t variableId = 0;
+    StgParamValue initialValue;
+};
+
+struct StgArea {
+    std::string description;
+    uint32_t areaId = 0;
+    float boundX1 = 0.0f;
+    float boundY1 = 0.0f;
+    float boundX2 = 0.0f;
+    float boundY2 = 0.0f;
+    std::array<std::byte, 84> rawData{};
+};
+
+struct StgFooterEntry {
+    uint32_t field1 = 0;
+    uint32_t field2 = 0;
+};
 
 class StgFormat : public IFileFormat {
 public:
@@ -132,15 +197,48 @@ public:
     const std::vector<StgUnit>& units() const { return units_; }
     std::vector<StgUnit>& units() { return units_; }
 
+    const std::vector<StgArea>& areas() const { return areas_; }
+    std::vector<StgArea>& areas() { return areas_; }
+
+    const std::vector<StgEventBlock>& eventBlocks() const { return eventBlocks_; }
+    std::vector<StgEventBlock>& eventBlocks() { return eventBlocks_; }
+
+    const std::vector<StgVariable>& variables() const { return variables_; }
+    std::vector<StgVariable>& variables() { return variables_; }
+
+    const std::vector<StgFooterEntry>& footerEntries() const { return footerEntries_; }
+    std::vector<StgFooterEntry>& footerEntries() { return footerEntries_; }
+
+    size_t totalEventCount() const;
+    bool tailParsed() const { return tailParsed_; }
+
 private:
     void parseHeader(const std::byte* data);
     void patchHeader() const;
     void parseUnit(StgUnit& unit, const std::byte* data);
     void patchUnit(StgUnit& unit) const;
+    bool parseTail(const std::byte* data, size_t tailSize);
+
+    size_t parseAreaIds(const std::byte* data, size_t tailSize, size_t offset);
+    size_t parseVariables(const std::byte* data, size_t tailSize, size_t offset);
+    size_t parseEventBlocks(const std::byte* data, size_t tailSize, size_t offset);
+    size_t parseFooter(const std::byte* data, size_t tailSize, size_t offset);
+    StgParamValue readParamValue(const std::byte* data, size_t& offset, size_t limit) const;
+
+    void serializeParamValue(std::vector<std::byte>& out, const StgParamValue& val) const;
+    void serializeAreaIds(std::vector<std::byte>& out) const;
+    void serializeVariables(std::vector<std::byte>& out) const;
+    void serializeEventBlocks(std::vector<std::byte>& out) const;
+    void serializeFooter(std::vector<std::byte>& out) const;
 
     StgHeader header_;
     std::vector<StgUnit> units_;
+    std::vector<StgArea> areas_;
+    std::vector<StgVariable> variables_;
+    std::vector<StgEventBlock> eventBlocks_;
+    std::vector<StgFooterEntry> footerEntries_;
     std::vector<std::byte> rawTail_;
+    bool tailParsed_ = false;
     GameVersion version_ = GameVersion::Unknown;
 };
 

@@ -12,7 +12,7 @@ struct SkillInfo {
     int32_t id;
     std::string locKey;
     std::string iconPath;
-    uint32_t slotCount;
+    uint32_t skillType;
     uint32_t maxLevel;
 };
 

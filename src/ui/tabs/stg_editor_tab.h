@@ -22,7 +22,10 @@ public:
 private:
     enum class Section {
         Header,
-        Units
+        Units,
+        Areas,
+        Variables,
+        Events
     };
 
     void drawSidebar();
@@ -30,9 +33,22 @@ private:
     void drawUnitList();
     void drawUnitDetails(size_t index);
     void drawOfficerSection(const char* label, OfficerData& officer, bool active);
+    void drawAreaList();
+    void drawAreaDetails(size_t index);
+    void drawVariableList();
+    void drawVariableDetails(size_t index);
+    void drawEventList();
+    void drawEventDetails(size_t blockIdx, size_t eventIdx);
+    void drawScriptEntry(const char* entryLabel, StgScriptEntry& entry, bool isCondition,
+                         StgEvent& event);
+    void drawParamValue(const char* label, StgParamValue& param, StgEvent& event);
 
     Section currentSection_ = Section::Units;
     int selectedUnit_ = -1;
+    int selectedArea_ = -1;
+    int selectedVariable_ = -1;
+    int selectedBlock_ = 0;
+    int selectedEvent_ = -1;
     NameDictionary nameDictionary_;
 };
 

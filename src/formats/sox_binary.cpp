@@ -67,8 +67,8 @@ bool SoxBinary::load(std::span<const std::byte> data) {
         troop.attackRangeMax = readIntAsFloat(ptr + 0x1C);
         troop.attackRangeMin = readIntAsFloat(ptr + 0x20);
         troop.attackFrontRange = readIntAsFloat(ptr + 0x24);
-        troop.indirectAttack = readIntAsFloat(ptr + 0x28);
-        troop.directAttack = readIntAsFloat(ptr + 0x2C);
+        troop.directAttack = readIntAsFloat(ptr + 0x28);
+        troop.indirectAttack = readIntAsFloat(ptr + 0x2C);
         troop.defense = readIntAsFloat(ptr + 0x30);
         troop.baseWidth = readIntAsFloat(ptr + 0x34);
         troop.resistMelee = readIntAsFloat(ptr + 0x38);
@@ -125,8 +125,8 @@ std::vector<std::byte> SoxBinary::save() const {
         writeFloatAsInt(ptr + 0x1C, troop.attackRangeMax);
         writeFloatAsInt(ptr + 0x20, troop.attackRangeMin);
         writeFloatAsInt(ptr + 0x24, troop.attackFrontRange);
-        writeFloatAsInt(ptr + 0x28, troop.indirectAttack);
-        writeFloatAsInt(ptr + 0x2C, troop.directAttack);
+        writeFloatAsInt(ptr + 0x28, troop.directAttack);
+        writeFloatAsInt(ptr + 0x2C, troop.indirectAttack);
         writeFloatAsInt(ptr + 0x30, troop.defense);
         writeFloatAsInt(ptr + 0x34, troop.baseWidth);
         writeFloatAsInt(ptr + 0x38, troop.resistMelee);

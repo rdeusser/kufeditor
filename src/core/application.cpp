@@ -235,7 +235,8 @@ void Application::drawMenuBar() {
 
             if (ImGui::BeginMenu("Open Recent", !recentFiles_->empty())) {
                 for (const auto& path : recentFiles_->files()) {
-                    if (ImGui::MenuItem(getFileName(path).c_str())) {
+                    std::string label = getFileName(path) + "##" + path;
+                    if (ImGui::MenuItem(label.c_str())) {
                         openFile(path);
                     }
                     if (ImGui::IsItemHovered()) {

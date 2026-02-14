@@ -46,7 +46,7 @@ void writeFooter(std::vector<std::byte>& buf) {
 
 std::vector<std::byte> createSkillInfoSox(
     int32_t id, const std::string& locKey, const std::string& iconPath,
-    uint32_t slotCount, uint32_t maxLevel) {
+    uint32_t skillType, uint32_t maxLevel) {
 
     std::vector<std::byte> data;
 
@@ -58,7 +58,7 @@ std::vector<std::byte> createSkillInfoSox(
     writeLE32(data, id);
     writeString(data, locKey);
     writeString(data, iconPath);
-    writeLE32U(data, slotCount);
+    writeLE32U(data, skillType);
     writeLE32U(data, maxLevel);
 
     // Footer.
@@ -114,7 +114,7 @@ TEST_CASE("SoxSkillInfo parses skill fields", "[sox_skill_info]") {
     REQUIRE(skill.id == 0);
     REQUIRE(skill.locKey == "@(S_Melee)");
     REQUIRE(skill.iconPath == "IL_SKL_Melee.tga");
-    REQUIRE(skill.slotCount == 1);
+    REQUIRE(skill.skillType == 1);
     REQUIRE(skill.maxLevel == 50);
 }
 
@@ -141,7 +141,7 @@ TEST_CASE("SoxSkillInfo handles negative skill ID", "[sox_skill_info]") {
     REQUIRE(std::memcmp(saved.data(), data.data(), saved.size()) == 0);
 }
 
-TEST_CASE("SoxSkillInfo validates out-of-range slot count", "[sox_skill_info]") {
+TEST_CASE("SoxSkillInfo validates invalid skill type", "[sox_skill_info]") {
     kuf::SoxSkillInfo sox;
     auto data = createSkillInfoSox(0, "@(S_Melee)", "IL_SKL_Melee.tga", 5, 50);
 
@@ -149,13 +149,13 @@ TEST_CASE("SoxSkillInfo validates out-of-range slot count", "[sox_skill_info]") 
     auto issues = sox.validate();
 
     REQUIRE(!issues.empty());
-    bool foundSlotWarning = false;
+    bool foundTypeWarning = false;
     for (const auto& issue : issues) {
-        if (issue.field == "slotCount" && issue.severity == kuf::Severity::Warning) {
-            foundSlotWarning = true;
+        if (issue.field == "skillType" && issue.severity == kuf::Severity::Warning) {
+            foundTypeWarning = true;
         }
     }
-    REQUIRE(foundSlotWarning);
+    REQUIRE(foundTypeWarning);
 }
 
 TEST_CASE("SoxSkillInfo validates zero max level", "[sox_skill_info]") {
@@ -219,11 +219,11 @@ TEST_CASE("SoxSkillInfo parses multiple records", "[sox_skill_info]") {
 
     REQUIRE(sox.skills()[0].id == 0);
     REQUIRE(sox.skills()[0].locKey == "@(S_Melee)");
-    REQUIRE(sox.skills()[0].slotCount == 1);
+    REQUIRE(sox.skills()[0].skillType == 1);
     REQUIRE(sox.skills()[0].maxLevel == 50);
 
     REQUIRE(sox.skills()[1].id == 8);
     REQUIRE(sox.skills()[1].locKey == "@(S_Fire)");
-    REQUIRE(sox.skills()[1].slotCount == 2);
+    REQUIRE(sox.skills()[1].skillType == 2);
     REQUIRE(sox.skills()[1].maxLevel == 25);
 }

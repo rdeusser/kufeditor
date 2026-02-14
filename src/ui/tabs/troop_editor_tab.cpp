@@ -68,20 +68,19 @@ void TroopEditorTab::drawTroopDetails(size_t index) {
         ImGui::DragFloat("Sight Range", &troop.sightRange, 10.0f, 0.0f, 50000.0f, "%.0f");
         ImGui::DragFloat("Attack Range Max", &troop.attackRangeMax, 10.0f, 0.0f, 50000.0f, "%.0f");
         ImGui::DragFloat("Attack Range Min", &troop.attackRangeMin, 10.0f, 0.0f, 50000.0f, "%.0f");
-        ImGui::DragFloat("Indirect Attack", &troop.indirectAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
         ImGui::DragFloat("Direct Attack", &troop.directAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
+        ImGui::DragFloat("Indirect Attack", &troop.indirectAttack, 1.0f, 0.0f, 1000.0f, "%.0f");
         ImGui::DragFloat("Defense", &troop.defense, 1.0f, 0.0f, 1000.0f, "%.0f");
     }
 
     if (ImGui::CollapsingHeader("Resistances", ImGuiTreeNodeFlags_DefaultOpen)) {
-        // File stores: 0=immune, 100=normal, 200=very vulnerable.
-        // Game UI shows: 100=immune, 0=normal, -100=very vulnerable.
-        // Formula: display = 100 - file_value
+        // File stores damage percentage as int32: 0=immune, 100=normal, 200=very vulnerable.
+        // Game divides by 100.0 to get damage multiplier (0.0×, 1.0×, 2.0×).
+        ImGui::TextDisabled("Damage %% (0=immune, 100=normal, 200+=vulnerable)");
         auto resistInput = [](const char* label, float* value) {
             int fileVal = static_cast<int>(*value);
-            int displayVal = 100 - fileVal;
-            if (ImGui::DragInt(label, &displayVal, 1, -200, 100, "%+d")) {
-                *value = static_cast<float>(100 - displayVal);
+            if (ImGui::DragInt(label, &fileVal, 1, 0, 10000, "%d%%")) {
+                *value = static_cast<float>(fileVal);
             }
         };
 
