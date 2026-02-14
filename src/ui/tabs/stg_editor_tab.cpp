@@ -8,6 +8,7 @@
 
 #include "formats/stg_script_catalog.h"
 #include "ui/imgui_helpers.h"
+#include "undo/reorder_vector_command.h"
 
 namespace kuf {
 
@@ -105,14 +106,20 @@ ImVec4 ucdColor(UCD ucd) {
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
+const char* jobTypeName(uint8_t jobType, const NameDictionary& dict) {
+    if (isCharInfoJobType(jobType)) {
+        const char* name = dict.charInfoName(jobType);
+        if (name) return name;
+    }
+    if (jobType <= kMaxStandardJobType) {
+        const char* name = dict.troopInfoName(jobType);
+        if (name) return name;
+    }
+    return dict.charInfoName(jobType);
+}
+
 void drawJobTypeCombo(const char* label, uint8_t& current, const NameDictionary& dict) {
-    const char* currentName = nullptr;
-    if (current <= kMaxStandardJobType) {
-        currentName = dict.troopInfoName(current);
-    }
-    if (!currentName) {
-        currentName = dict.charInfoName(current);
-    }
+    const char* currentName = jobTypeName(current, dict);
 
     char preview[64];
     if (currentName) {
@@ -125,7 +132,7 @@ void drawJobTypeCombo(const char* label, uint8_t& current, const NameDictionary&
         // Standard job type IDs (0-42).
         for (int i = 0; i <= kMaxStandardJobType; ++i) {
             char itemLabel[64];
-            const char* name = dict.troopInfoName(static_cast<uint32_t>(i));
+            const char* name = jobTypeName(static_cast<uint8_t>(i), dict);
             if (!name) {
                 snprintf(itemLabel, sizeof(itemLabel), "Job %d", i);
             } else {
@@ -937,12 +944,16 @@ void StgEditorTab::drawEventDetails(size_t blockIdx, size_t eventIdx) {
         ImGui::Text("%zu conditions", event.conditions.size());
 
         int condDelete = -1;
+        int condDragSrc = -1;
+        int condDragDst = -1;
         for (size_t i = 0; i < event.conditions.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
 
             char entryLabel[32];
             snprintf(entryLabel, sizeof(entryLabel), "Condition %zu", i);
-            drawScriptEntry(entryLabel, event.conditions[i], true, event);
+            drawScriptEntry(entryLabel, event.conditions[i], true, event,
+                            "COND_REORDER", static_cast<int>(i),
+                            &condDragSrc, &condDragDst);
 
             ImGui::SameLine();
             if (ImGui::SmallButton("X")) {
@@ -952,6 +963,13 @@ void StgEditorTab::drawEventDetails(size_t blockIdx, size_t eventIdx) {
             ImGui::PopID();
         }
 
+        if (condDragSrc >= 0 && condDragDst >= 0 && condDragSrc != condDragDst) {
+            document_->undoStack->execute(
+                std::make_unique<ReorderVectorCommand<StgScriptEntry>>(
+                    &event.conditions, condDragSrc, condDragDst,
+                    "Reorder condition"));
+            event.modified = true;
+        }
         if (condDelete >= 0) {
             event.conditions.erase(event.conditions.begin() + condDelete);
             event.modified = true;
@@ -969,12 +987,16 @@ void StgEditorTab::drawEventDetails(size_t blockIdx, size_t eventIdx) {
         ImGui::Text("%zu actions", event.actions.size());
 
         int actDelete = -1;
+        int actDragSrc = -1;
+        int actDragDst = -1;
         for (size_t i = 0; i < event.actions.size(); ++i) {
             ImGui::PushID(static_cast<int>(i + 1000));
 
             char entryLabel[32];
             snprintf(entryLabel, sizeof(entryLabel), "Action %zu", i);
-            drawScriptEntry(entryLabel, event.actions[i], false, event);
+            drawScriptEntry(entryLabel, event.actions[i], false, event,
+                            "ACT_REORDER", static_cast<int>(i),
+                            &actDragSrc, &actDragDst);
 
             ImGui::SameLine();
             if (ImGui::SmallButton("X")) {
@@ -984,6 +1006,13 @@ void StgEditorTab::drawEventDetails(size_t blockIdx, size_t eventIdx) {
             ImGui::PopID();
         }
 
+        if (actDragSrc >= 0 && actDragDst >= 0 && actDragSrc != actDragDst) {
+            document_->undoStack->execute(
+                std::make_unique<ReorderVectorCommand<StgScriptEntry>>(
+                    &event.actions, actDragSrc, actDragDst,
+                    "Reorder action"));
+            event.modified = true;
+        }
         if (actDelete >= 0) {
             event.actions.erase(event.actions.begin() + actDelete);
             event.modified = true;
@@ -999,43 +1028,84 @@ void StgEditorTab::drawEventDetails(size_t blockIdx, size_t eventIdx) {
 }
 
 void StgEditorTab::drawScriptEntry(const char* entryLabel, StgScriptEntry& entry,
-                                    bool isCondition, StgEvent& event) {
+                                    bool isCondition, StgEvent& event,
+                                    const char* dragPayloadType, int dragIndex,
+                                    int* dragSrc, int* dragDst) {
     const ScriptEntryInfo* info = isCondition
         ? findConditionInfo(entry.typeId)
         : findActionInfo(entry.typeId);
 
     const char* name = info ? info->name : "Unknown";
 
-    if (ImGui::TreeNode(entryLabel, "%s: %s (%u)", entryLabel, name, entry.typeId)) {
+    bool open = ImGui::TreeNode(entryLabel, "%s: %s (%u)", entryLabel, name, entry.typeId);
+
+    if (dragPayloadType && ImGui::IsItemHovered()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
+
+    if (dragPayloadType) {
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+            ImGui::SetDragDropPayload(dragPayloadType, &dragIndex, sizeof(int));
+            ImGui::Text("%s: %s", entryLabel, name);
+            ImGui::EndDragDropSource();
+        }
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(dragPayloadType)) {
+                if (dragSrc) *dragSrc = *static_cast<const int*>(payload->Data);
+                if (dragDst) *dragDst = dragIndex;
+            }
+            ImGui::EndDragDropTarget();
+        }
+    }
+
+    if (open) {
         constexpr float kParamLabelWidth = 120.0f;
-        constexpr float kTypeComboWidth = 70.0f;
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Type ID");
-        ImGui::SameLine(kParamLabelWidth);
-        ImGui::SetNextItemWidth(-(kTypeComboWidth + ImGui::GetStyle().ItemSpacing.x));
-        int id = static_cast<int>(entry.typeId);
-        if (ImGui::DragInt("##typeId", &id, 1, 0, 0)) {
-            entry.typeId = static_cast<uint32_t>(std::max(0, id));
-            event.modified = true;
-            document_->dirty = true;
+
+        const ScriptEntryInfo* catalog = isCondition ? kConditions : kActions;
+        size_t catalogSize = isCondition ? kConditionCount : kActionCount;
+
+        char preview[64];
+        if (info) {
+            snprintf(preview, sizeof(preview), "%s (%u)", info->name, entry.typeId);
+        } else {
+            snprintf(preview, sizeof(preview), "Unknown (%u)", entry.typeId);
         }
 
-        // Re-lookup after possible ID change.
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Type");
+        ImGui::SameLine(kParamLabelWidth);
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::BeginCombo("##typeId", preview)) {
+            for (size_t ci = 0; ci < catalogSize; ++ci) {
+                char itemLabel[64];
+                snprintf(itemLabel, sizeof(itemLabel), "%s (%u)", catalog[ci].name, catalog[ci].id);
+                bool selected = (entry.typeId == catalog[ci].id);
+                if (ImGui::Selectable(itemLabel, selected)) {
+                    entry.typeId = catalog[ci].id;
+                    event.modified = true;
+                    document_->dirty = true;
+                }
+                if (selected) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        // Re-lookup after possible change.
         info = isCondition ? findConditionInfo(entry.typeId) : findActionInfo(entry.typeId);
 
         // Draw each param with type-aware editing.
         for (size_t i = 0; i < entry.params.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
 
-            const char* paramLabel = "Param";
+            const char* paramHint = nullptr;
             if (info && i < 3 && info->paramNames[i][0]) {
-                paramLabel = info->paramNames[i];
+                paramHint = info->paramNames[i];
             }
 
             char labelBuf[64];
-            snprintf(labelBuf, sizeof(labelBuf), "%s [%zu]", paramLabel, i);
+            snprintf(labelBuf, sizeof(labelBuf), "%s [%zu]", paramHint ? paramHint : "Param", i);
 
-            drawParamValue(labelBuf, entry.params[i], event);
+            drawParamValue(labelBuf, entry.params[i], event, paramHint);
             ImGui::PopID();
         }
 
@@ -1058,9 +1128,13 @@ void StgEditorTab::drawScriptEntry(const char* entryLabel, StgScriptEntry& entry
     }
 }
 
-void StgEditorTab::drawParamValue(const char* label, StgParamValue& param, StgEvent& event) {
+void StgEditorTab::drawParamValue(const char* label, StgParamValue& param, StgEvent& event,
+                                   const char* paramHint) {
     constexpr float kLabelWidth = 120.0f;
     constexpr float kTypeComboWidth = 70.0f;
+
+    bool isTroopParam = paramHint && std::strcmp(paramHint, "TroopID") == 0 &&
+                        (param.type == StgParamType::Int || param.type == StgParamType::Enum);
 
     // Label text on the left.
     ImGui::AlignTextToFramePadding();
@@ -1070,7 +1144,40 @@ void StgEditorTab::drawParamValue(const char* label, StgParamValue& param, StgEv
     // Value editor in the middle — ends where the type combo begins.
     ImGui::SetNextItemWidth(-(kTypeComboWidth + ImGui::GetStyle().ItemSpacing.x));
     ImGui::PushID("val");
-    switch (param.type) {
+    if (isTroopParam) {
+        const auto& units = document_->stgData->units();
+        char preview[64];
+
+        // Find the unit matching this ID for the preview.
+        bool found = false;
+        for (const auto& unit : units) {
+            if (static_cast<int>(unit.uniqueId) == param.intValue) {
+                std::string displayName = resolveDisplayName(unit, nameDictionary_);
+                snprintf(preview, sizeof(preview), "%s (%u)", displayName.c_str(), unit.uniqueId);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            snprintf(preview, sizeof(preview), "Unknown (%d)", param.intValue);
+        }
+
+        if (ImGui::BeginCombo("##v", preview)) {
+            for (const auto& unit : units) {
+                std::string displayName = resolveDisplayName(unit, nameDictionary_);
+                char itemLabel[64];
+                snprintf(itemLabel, sizeof(itemLabel), "%s (%u)", displayName.c_str(), unit.uniqueId);
+                bool selected = (static_cast<int>(unit.uniqueId) == param.intValue);
+                if (ImGui::Selectable(itemLabel, selected)) {
+                    param.intValue = static_cast<int>(unit.uniqueId);
+                    event.modified = true;
+                    document_->dirty = true;
+                }
+                if (selected) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+    } else switch (param.type) {
         case StgParamType::Int:
         case StgParamType::Enum: {
             int val = param.intValue;
