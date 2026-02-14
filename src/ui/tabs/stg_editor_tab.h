@@ -40,8 +40,11 @@ private:
     void drawEventList();
     void drawEventDetails(size_t blockIdx, size_t eventIdx);
     void drawScriptEntry(const char* entryLabel, StgScriptEntry& entry, bool isCondition,
-                         StgEvent& event);
-    void drawParamValue(const char* label, StgParamValue& param, StgEvent& event);
+                         StgEvent& event, const char* dragPayloadType = nullptr,
+                         int dragIndex = -1, int* dragSrc = nullptr,
+                         int* dragDst = nullptr);
+    void drawParamValue(const char* label, StgParamValue& param, StgEvent& event,
+                        const char* paramHint = nullptr);
 
     Section currentSection_ = Section::Units;
     int selectedUnit_ = -1;
