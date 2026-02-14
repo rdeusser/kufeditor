@@ -4,38 +4,19 @@ Data format used by Kingdom Under Fire: Crusaders (PC port) for game data files.
 
 ## Encoding
 
-**IMPORTANT**: SOX files use ASCII hex encoding, not pure binary. Each logical byte is stored as 2 ASCII hex characters.
+SOX files use **pure binary** little-endian encoding. Each field is stored directly as its native type (uint32, int32, uint16, etc.) with no text encoding layer.
 
-Example: The uint32 value `100` (0x64) is stored as ASCII `"64000000"` (8 bytes in file).
+Example: The uint32 value `100` (0x64) is stored as bytes `64 00 00 00` (4 bytes in file).
 
-To read a SOX file:
-1. Read 2 ASCII characters at a time
-2. Convert each pair from hex to a byte
-3. Interpret the decoded bytes as little-endian values
-
-**File size relationship**: Actual data size = File size ÷ 2
+> **Note:** Earlier community documentation claimed SOX files use ASCII hex encoding (each byte stored as 2 hex characters). This has been **disproven** by Ghidra decompilation of `ReadTroopInfoSOX` (0x005e3a50) in `Kuf2Main.exe`, which calls `_fread(&buffer, 0x94, 1, file)` to read 148 raw bytes per record directly into a stack buffer. The file sizes confirm binary encoding: TroopInfo.sox = 6436 bytes = 8 (header) + 43×148 (records) + 64 (footer).
 
 ## Common Structure
 
-- **Byte order**: Little-endian (after hex decoding)
+- **Byte order**: Little-endian
 - **Header**: `uint32` header_val (100) + `uint32` record_count
 - **Strings**: `uint16` length prefix + raw bytes (no null terminator)
-- **Footer**: `THEND` marker + space padding (0x20) to 64 bytes (also hex encoded)
-- **Special value**: `-1` stored as `0xFFFFFFFF` → ASCII `"FFFFFFFF"`
-
-## Data Type Conventions
-
-From KUF Discord modding community (Keaton):
-
-| Size | Type | Notes |
-|------|------|-------|
-| 4 bytes | int/uint | Standard integer |
-| 4 bytes (float) | float32 | IEEE 754 single precision |
-| 2 bytes | short | Unsigned short integer |
-| 1 byte | char | Signed character |
-| 1 byte (bool) | bool | 0 = false, non-zero = true |
-
-**Important**: In SOX files, shorts and chars are typically **padded to 4 bytes** unless otherwise specified. This means a "short" field still occupies 4 bytes in the file.
+- **Footer**: `THEND` marker + space padding (0x20) to 64 bytes
+- **Special value**: `-1` stored as `0xFFFFFFFF`
 
 ## File Variants
 
@@ -207,6 +188,11 @@ Note: Power values are **inversely related** to bonus strength. Higher power (10
 - There are NO resistance attributes - resistances come from equipment stats or troop stats
 - Physical damage resistances (Melee, Ranged, Explosion, Frontal) are not available as equipment attributes
 
+**Elemental Priority Order (from Discord):**
+Fire > Lightning > Ice > Holy > Poison > Curse
+
+When multiple elemental effects could apply, this determines which takes precedence. Vanilla files have a 15% chance to apply elemental effects on hit.
+
 ---
 
 ## LeaderGeneration.sox Format
@@ -257,70 +243,122 @@ Each record contains an ID followed by a space-separated list of possible names 
 
 Defines all troop/unit types with their combat statistics.
 
-**Verification Status**: The field layout below was determined through game UI testing, NOT from original source code. No authoritative header file defining the TroopInfo struct has been found. The resistance field order (14-23) should be treated as best-effort reverse engineering.
+> **⚠️ CRITICAL BUG (PC Port Patch 4+):** Resistance values are INVERTED in patch 4 and later. Positive resistance values now INCREASE damage taken instead of reducing it. This is a known bug in the PC port. To get correct behavior, use Steam depot with Patch 3: `download_depot 1121420 1121421 4395673366137241035`
+
+> **✓ VERIFIED FROM BINARY:** The field layout, types, divisor constants, and resistance field ordering below have been confirmed by Ghidra decompilation of `ReadTroopInfoSOX` at `0x005e3a50` in `Kuf2Main.exe`. The resistance field swap pattern (SOX file order → in-memory ResistInfo.sox ID order) is confirmed in the binary.
 
 **Main File Structure:**
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
 | 0x00 | 4 | uint32 | Header marker (100) |
 | 0x04 | 4 | uint32 | Record count (43) |
-| 0x08 | 148×N | records | Fixed 148-byte records |
+| 0x08 | 148×N | records | Fixed 148-byte records (37 × int32) |
 | EOF-64 | 64 | char[] | 'THEND' + space padding |
 
-**Record Structure (148 bytes = 37 fields):**
-| Field | Name | Type | Description |
-|-------|------|------|-------------|
-| 0 | Job | int32 | Troop job type (K2JobDef.h) |
-| 1 | TypeID | int32 | Troop type ID (K2TroopDef.h) |
-| 2 | MoveSpeed | float32 | Max move speed |
-| 3 | RotateRate | float32 | Max rotate rate |
-| 4 | MoveAcceleration | float32 | Move acceleration |
-| 5 | MoveDeceleration | float32 | Move deceleration |
-| 6 | SightRange | float32 | Visible range |
-| 7 | AttackRangeMax | float32 | Max attack range |
-| 8 | AttackRangeMin | float32 | Min attack range (0 = no ranged) |
-| 9 | AttackFrontRange | float32 | Frontal attack range |
-| 10 | IndirectAttack | float32 | Secondary/splash attack strength |
-| 11 | DirectAttack | float32 | Primary attack strength |
-| 12 | Defense | float32 | Defense strength |
-| 13 | BaseWidth | float32 | Base troop size |
-| 14 | ResistMelee | int32 | Melee damage resistance |
-| 15 | ResistRanged | int32 | Ranged damage resistance |
-| 16 | ResistFrontal | int32 | Frontal damage resistance |
-| 17 | ResistExplosion | int32 | Explosion damage resistance |
-| 18 | ResistFire | int32 | Fire damage resistance |
-| 19 | ResistIce | int32 | Ice damage resistance |
-| 20 | ResistLightning | int32 | Lightning damage resistance |
-| 21 | ResistHoly | int32 | Holy damage resistance |
-| 22 | ResistCurse | int32 | Curse damage resistance |
-| 23 | ResistEarth | int32 | Earth/Poison damage resistance |
-| 24 | MaxUnitSpeedMultiplier | float32 | Unit speed multiplier |
-| 25 | DefaultUnitHP | float32 | Default HP per unit |
-| 26 | FormationRandom | int32 | Formation randomness |
-| 27 | DefaultUnitNumX | int32 | Formation width |
-| 28 | DefaultUnitNumY | int32 | Formation depth |
-| 29 | UnitHPLevUp | float32 | HP gain per level |
-| 30-31 | LevelUpData[0] | int32+float32 | Skill ID + per-level bonus |
-| 32-33 | LevelUpData[1] | int32+float32 | Skill ID + per-level bonus |
-| 34-35 | LevelUpData[2] | int32+float32 | Skill ID + per-level bonus |
-| 36 | DamageDistribution | float32 | Damage distribution factor |
+**Binary Reading Process** (from `ReadTroopInfoSOX` decompilation):
 
-**Damage Vulnerability Fields (14-23):**
-| Value | Meaning | Damage Multiplier |
-|-------|---------|-------------------|
-| 0 | Immune | 0% damage |
-| 50 | Resistant | 50% damage |
-| 100 | Normal | 100% damage |
-| -50 | Vulnerable | 150% damage |
-| -100 | Very Vulnerable | 200% damage |
-| 1000000+ | Instant death | (recon units) |
+1. `OpenSOXFile` (0x005e4870) opens `Data\SOX\troopinfo.sox` with `fopen("rb")`
+2. Reads 4-byte header marker (100), then 4-byte record count (43)
+3. Allocates three separate in-memory arrays per record:
+   - Array0: 0x60 (96) bytes — combat stats and resistances
+   - Array1: 0x14 (20) bytes — unit properties and name pointer
+   - Array2: 0x1c (28) bytes — level-up data
+4. Per record: bulk-reads 148 bytes via `_fread(&buffer, 0x94, 1, file)` — all 37 fields are **int32** in the file
+5. Distributes fields across the three arrays, applying type conversions (int→float casts and divisor scaling)
+6. After all records: opens localized file (e.g., `Data\SOX\ENG\ENG_troopinfo.sox`) via `OpenLocalizedSOXFile` (0x005e4930)
+7. Localized file per-record: 4-byte record index + 2-byte string length + string bytes → stored as null-terminated string pointer at Array1 offset 0x10
+
+**Divisor Constants** (confirmed from `.rdata` section of `Kuf2Main.exe`):
+
+| Address | Hex Value | Float | Applies To |
+|---------|-----------|-------|------------|
+| `DAT_006bba64` | `0x41200000` | **10.0** | MoveSpeed, MoveAccel, MoveDecel, MaxUnitSpeedMult, LevelUp bonuses |
+| `DAT_006bc014` | `0x447a0000` | **1000.0** | RotateRate only |
+| `DAT_006bb6dc` | `0x42c80000` | **100.0** | All 10 resistance fields, DamageDistribution |
+
+**Record Structure (148 bytes = 37 × int32 in file):**
+
+All fields are stored as **int32** in the SOX file. The game converts them during loading as noted in the Transform column.
+
+| Field | Name | File Type | Transform | Description |
+|-------|------|-----------|-----------|-------------|
+| 0 | Job | int32 | direct | Troop job type (K2JobDef.h) |
+| 1 | TypeID | int32 | direct | Troop type ID (K2TroopDef.h) |
+| 2 | MoveSpeed | int32 | ÷ 10.0 → float | Max move speed (e.g., 130 → 13.0) |
+| 3 | RotateRate | int32 | ÷ 1000.0 → float | Max rotate rate (e.g., 50 → 0.05) |
+| 4 | MoveAcceleration | int32 | ÷ 10.0 → float | Move acceleration (e.g., 150 → 15.0) |
+| 5 | MoveDeceleration | int32 | ÷ 10.0 → float | Move deceleration (e.g., 150 → 15.0) |
+| 6 | SightRange | int32 | cast → float | Visible range (e.g., 2000 → 2000.0) |
+| 7 | AttackRangeMax | int32 | cast → float | Max attack range |
+| 8 | AttackRangeMin | int32 | cast → float | Min attack range (0 = melee only) |
+| 9 | AttackFrontRange | int32 | cast → float | Frontal attack range |
+| 10 | DirectAttack | int32 | cast → float | Melee/frontal attack strength |
+| 11 | IndirectAttack | int32 | cast → float | Ranged attack strength |
+| 12 | Defense | int32 | cast → float | Defense strength |
+| 13 | BaseWidth | int32 | cast → float | Base troop size |
+| 14 | ResistMelee | int32 | ÷ 100.0 → float | Melee damage multiplier (100 = 1.0×) |
+| 15 | ResistRanged | int32 | ÷ 100.0 → float | Ranged damage multiplier |
+| 16 | ResistFrontal | int32 | ÷ 100.0 → float | Frontal damage multiplier |
+| 17 | ResistExplosion | int32 | ÷ 100.0 → float | Explosion damage multiplier |
+| 18 | ResistFire | int32 | ÷ 100.0 → float | Fire damage multiplier |
+| 19 | ResistIce | int32 | ÷ 100.0 → float | Ice damage multiplier |
+| 20 | ResistLightning | int32 | ÷ 100.0 → float | Lightning damage multiplier |
+| 21 | ResistHoly | int32 | ÷ 100.0 → float | Holy damage multiplier |
+| 22 | ResistCurse | int32 | ÷ 100.0 → float | Curse damage multiplier |
+| 23 | ResistEarth | int32 | ÷ 100.0 → float | Earth/Poison damage multiplier |
+| 24 | MaxUnitSpeedMultiplier | int32 | ÷ 10.0 → float | Unit speed multiplier cap (e.g., 15 → 1.5) |
+| 25 | DefaultUnitHP | int32 | cast → float | Default HP per unit |
+| 26 | FormationRandom | int32 | truncate → byte | Formation randomness |
+| 27 | DefaultUnitNumX | int32 | truncate → byte | Formation width |
+| 28 | DefaultUnitNumY | int32 | truncate → byte | Formation depth |
+| 29 | UnitHPLevUp | int32 | cast → float | HP gain per level |
+| 30 | LevelUpData[0].skillID | int32 | direct | Skill ID (-1 = none) |
+| 31 | LevelUpData[0].bonus | int32 | ÷ 10.0 → float | Per-level bonus (e.g., 2 → 0.2) |
+| 32 | LevelUpData[1].skillID | int32 | direct | Skill ID (-1 = none) |
+| 33 | LevelUpData[1].bonus | int32 | ÷ 10.0 → float | Per-level bonus |
+| 34 | LevelUpData[2].skillID | int32 | direct | Skill ID (-1 = none) |
+| 35 | LevelUpData[2].bonus | int32 | ÷ 10.0 → float | Per-level bonus |
+| 36 | DamageDistribution | int32 | ÷ 100.0 → float | Damage distribution factor |
+
+**Resistance Fields (14-23) — File Order vs Memory Order:**
+
+The SOX file stores resistance values in a different order than how they are arranged in memory. The game swaps consecutive pairs during loading to align with `ResistInfo.sox` ID order. This is confirmed in the decompiled binary where fields are read sequentially but written to non-sequential memory offsets.
+
+| SOX File Field | SOX File Name | → Memory Offset | Memory Name (ResistInfo ID) |
+|----------------|---------------|-----------------|----------------------------|
+| 14 | ResistMelee | 0x38 | ResistMelee (ID 0) |
+| 15 | ResistRanged | 0x3c | ResistRanged (ID 1) |
+| **16** | **ResistFrontal** | **0x44** | ResistFrontal (ID 3) — **swapped** |
+| **17** | **ResistExplosion** | **0x40** | ResistExplosion (ID 2) — **swapped** |
+| 18 | ResistFire | 0x48 | ResistFire (ID 4) |
+| **19** | **ResistIce** | **0x50** | ResistIce (ID 6) — **swapped** |
+| **20** | **ResistLightning** | **0x4c** | ResistLightning (ID 5) — **swapped** |
+| 21 | ResistHoly | 0x54 | ResistHoly (ID 7) |
+| **22** | **ResistCurse** | **0x5c** | ResistCurse (ID 9) — **swapped** |
+| **23** | **ResistEarth** | **0x58** | ResistPoison/Earth (ID 8) — **swapped** |
+
+The pattern: pairs (16,17), (19,20), (22,23) are swapped during loading. The SOX file order is: Melee, Ranged, **Frontal, Explosion**, Fire, **Ice, Lightning**, Holy, **Curse, Poison**. The in-memory order is: Melee, Ranged, **Explosion, Frontal**, Fire, **Lightning, Ice**, Holy, **Poison, Curse**.
+
+**Damage Multiplier Values (fields 14-23):**
+
+Values are divided by 100.0 to produce a damage multiplier in memory. Higher values = more damage taken.
+
+| File Value | In-Memory Float | Meaning |
+|------------|-----------------|---------|
+| 0 | 0.0 | Immune (0% damage) |
+| 50 | 0.5 | Resistant (50% damage) |
+| 100 | 1.0 | Normal (100% damage) |
+| 150 | 1.5 | Vulnerable (150% damage) |
+| 200 | 2.0 | Very vulnerable (200% damage) |
+| 250 | 2.5 | Extremely vulnerable (250% damage) |
+| 1000000+ | 10000.0+ | Instant death (recon units) |
 
 **Example - Flying Units (Storm Riders, Black Wyverns):**
-- Melee: 0 (file=100, normal - immunity is engine-enforced for flying units)
-- Ranged: -50 (file=150, vulnerable - archers can shoot them down)
-- Frontal: 0 (file=100, normal)
-- Explosion: -100 (file=200, very vulnerable - anti-air siege weapons)
-- All elemental: 0 (file=100, normal)
+- Melee: file=100 → 1.0× (normal — ground immunity is engine-enforced)
+- Ranged: file=150 → 1.5× (vulnerable — archers can shoot them down)
+- Frontal: file=100 → 1.0× (normal)
+- Explosion: file=200 → 2.0× (very vulnerable — anti-air siege weapons)
+- All elemental: file=100 → 1.0× (normal)
 
 **Damage Type Mapping:**
 | Field | Type | Notes |
@@ -382,18 +420,23 @@ Defines all troop/unit types with their combat statistics.
 | 0x0C | Earth |
 | 0x0D | Curse |
 
-**Notable Damage Resistances (UI values = 100 - file value):**
-| Unit | Normal (0) | Vulnerabilities (negative) |
-|------|------------|---------------------------|
-| Storm Riders | Melee, Frontal, All Magic | Ranged (-50), Explosion (-100) |
-| Black Wyverns | Melee, Frontal, All Magic | Ranged (-50), Explosion (-100) |
-| Ghoul | Earth (+100), Curse (+100) | Holy (-200), Ice (-100) |
-| Infantry | Melee, Frontal, Explosion, Fire, Holy | Ice (-150), Lightning (-20), Curse (-20), Earth (-50), Ranged (+20) |
-| Scout/Exp.Ghoul | None | All (file value 1M+) = instant death |
+**Notable Damage Resistances (file values → multipliers):**
+| Unit | Normal (100 → 1.0×) | Vulnerabilities (>100) |
+|------|----------------------|------------------------|
+| Storm Riders | Melee, Frontal, All Magic | Ranged (150 → 1.5×), Explosion (200 → 2.0×) |
+| Black Wyverns | Melee, Frontal, All Magic | Ranged (150 → 1.5×), Explosion (200 → 2.0×) |
+| Ghoul | Earth (0 → immune), Curse (0 → immune) | Holy (300 → 3.0×), Ice (200 → 2.0×) |
+| Infantry | Melee, Frontal, Explosion, Fire, Holy | Ice (250 → 2.5×), Lightning (120 → 1.2×), Curse (120 → 1.2×), Earth (150 → 1.5×), Ranged (80 → 0.8×) |
+| Scout/Exp.Ghoul | None | All (1000000+ → instant death) |
 
 **Note:** Flying units (Storm Riders, Wyverns, Dirigibles) cannot be hit by ground melee attacks - this is enforced by the game engine, not resistance values. Their melee resistance in the file is 100 (normal), not 0 (immune).
 
-**PC Port Bug (Patch 4):** The PC port's Patch 4 inverted resistance calculations. Positive resistances now INCREASE damage taken instead of reducing it. Workaround: use Steam console to download Patch 3 depot: `download_depot 1121420 1121421 4395673366137241035`
+**In-Memory Resistance Values:**
+TroopInfo resistance fields are stored as int32 in the SOX file and converted to float by dividing by 100.0 during loading. The resulting float is a damage multiplier (1.0 = normal, 0.5 = resistant, 2.5 = very vulnerable).
+
+Float resistance values found elsewhere in the game (from Discord):
+- `33 33 33 3F` = ~0.7 (70% damage taken = 30% resistance)
+- `9A 99 99 3E` = ~0.3 (30% damage taken = 70% resistance)
 
 **Resistance Sources:**
 - **Troop resistances**: Defined in TroopInfo.sox (fields 14-23). Includes all 10 damage types.
@@ -434,7 +477,7 @@ Defines all 15 skills available to heroes and troops.
 | Skill ID | int32 | 0-13, or -2 (0xFFFFFFFE) for "Any Elemental" |
 | Loc Key | uint16 + string | Localization key (e.g., "@(S_Melee)") |
 | Icon | uint16 + string | Icon path (e.g., "IL_SKL_Melee.tga") |
-| Slot Count | uint32 | Number of skill slots required (1 or 2) |
+| Skill Type | uint32 | 1=Combat, 2=Magic |
 | Max Level | uint32 | Maximum skill level |
 
 **All Skills:**
@@ -458,8 +501,8 @@ Defines all 15 skills available to heroes and troops.
 
 **Notes:**
 - Skill ID 12 is "Earth" in the localization but uses "@(S_Poison)" internally
-- Combat skills generally require 1 skill slot
-- Magic skills generally require 2 skill slots
+- Combat skills (type 1) generally take 1 skill slot
+- Magic skills (type 2) generally take 2 skill slots
 - Scouting has only 3 max levels (scout speed/range tiers)
 
 ---
@@ -844,6 +887,26 @@ Defines random generation configuration for custom battles (10 entries).
 
 ---
 
+## WorldMap_TroopInfo.sox Internal Structure
+
+From Discord community (user Keaton), this struct controls barracks equipment display and model advancement:
+
+```c
+struct _WORLDMAP_TROOPINFO {
+    int job;
+    char weaponmeshid;
+    char offhandid;
+    char offhandid2;
+    char offhandid3;
+    short armorid_start;
+    short armorid_end;
+}
+```
+
+Note: This is distinct from TroopInfo.sox. The char/short fields are padded to 4-byte alignment in the actual SOX file.
+
+---
+
 ## FontType.sox Format
 
 Defines font styling configurations for UI text (34 entries).
@@ -890,20 +953,3 @@ Font styles use a markup format with directives:
 | 89B3FF | Blue | Links, special text |
 | FF6A42 | Red | Warnings |
 | 878075 | Gray | Disabled/inactive |
-
----
-
-## Modding Resources
-
-| Resource | URL | Description |
-|----------|-----|-------------|
-| SOX Guide | https://steamcommunity.com/sharedfiles/filedetails/?id=2016205613 | Floyd's SOX file format guide |
-| STG Guide | https://steamcommunity.com/sharedfiles/filedetails/?id=3033606561 | Mission file editing guide |
-| Savegame Guide | https://steamcommunity.com/sharedfiles/filedetails/?id=2089344971 | Hex editing save files |
-| KUF Discord | https://discord.gg/kuf | Modding community (#🛠modding-chat) |
-
-## Known Limitations
-
-- **No authoritative struct definitions**: Original C header files for SOX record structures (TroopInfo, etc.) have not been found. Field layouts are reverse-engineered.
-- **PC Port Patch 4 resistance bug**: Resistance calculations are inverted. Use Patch 3 depot for correct behavior.
-- **Skill level cap**: Maximum 65535 enforced by executable. SkillPointTable.sox must be extended for levels beyond 99.

@@ -84,9 +84,13 @@ void SkillEditorTab::drawSkillDetails(size_t index) {
         document_->dirty = true;
     }
 
-    int slotCount = static_cast<int>(skill.slotCount);
-    if (ImGui::DragInt("Slot Count", &slotCount, 1, 1, 4)) {
-        skill.slotCount = static_cast<uint32_t>(std::clamp(slotCount, 1, 4));
+    const char* skillTypeLabels[] = { "Unknown", "Combat", "Magic" };
+    int skillType = static_cast<int>(skill.skillType);
+    if (skillType >= 1 && skillType <= 2) {
+        ImGui::Text("Skill Type: %s", skillTypeLabels[skillType]);
+    }
+    if (ImGui::DragInt("Skill Type", &skillType, 1, 1, 2)) {
+        skill.skillType = static_cast<uint32_t>(std::clamp(skillType, 1, 2));
         document_->dirty = true;
     }
 

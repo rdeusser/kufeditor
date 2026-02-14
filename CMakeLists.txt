@@ -127,6 +127,7 @@ add_executable(kufeditor
     src/formats/sox_text.cpp
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
+    src/formats/stg_script_catalog.cpp
     src/ui/views/home_view.cpp
     src/ui/views/validation_log.cpp
     src/ui/tabs/skill_editor_tab.cpp
@@ -176,6 +177,7 @@ add_executable(kufeditor_tests
     src/formats/sox_skill_info.cpp
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
+    src/formats/stg_script_catalog.cpp
 )
 target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain Iconv::Iconv)
 target_include_directories(kufeditor_tests PRIVATE src)

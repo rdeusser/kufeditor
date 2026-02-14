@@ -7,8 +7,9 @@
 
 namespace kuf {
 
-// SOX files use ASCII hex encoding - each logical byte is stored as 2 ASCII hex characters.
-// Example: uint32 value 100 (0x64) is stored as ASCII "64000000" (8 bytes in file).
+// SOX files use pure binary encoding. Earlier community documentation claimed ASCII hex
+// encoding but this was disproven by Ghidra decompilation. These functions remain as a
+// fallback for any non-standard files that may use hex encoding.
 
 // Decodes ASCII hex encoded SOX data to binary. Returns nullopt if the input is invalid.
 std::optional<std::vector<std::byte>> soxDecode(std::span<const std::byte> encoded);
