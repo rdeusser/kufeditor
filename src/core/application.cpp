@@ -164,37 +164,30 @@ void Application::saveActiveDocument() {
 }
 
 void Application::handleKeyboardShortcuts() {
-    ImGuiIO& io = ImGui::GetIO();
-
-    // Check for Ctrl/Cmd modifier.
-    bool cmdOrCtrl = io.KeyCtrl;
-#ifdef __APPLE__
-    cmdOrCtrl = io.KeySuper;
-#endif
-
     auto* activeTab = tabManager_->activeTab();
     auto* activeDoc = activeTab ? activeTab->document().get() : nullptr;
 
-    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-        if (activeDoc && activeDoc->undoStack) {
-            if (io.KeyShift) {
-                activeDoc->undoStack->redo();
-            } else {
-                activeDoc->undoStack->undo();
-            }
-        }
-    }
-    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) {
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal)) {
         if (activeDoc && activeDoc->undoStack) {
             activeDoc->undoStack->redo();
         }
     }
-    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) {
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal)) {
+        if (activeDoc && activeDoc->undoStack) {
+            activeDoc->undoStack->undo();
+        }
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, ImGuiInputFlags_RouteGlobal)) {
+        if (activeDoc && activeDoc->undoStack) {
+            activeDoc->undoStack->redo();
+        }
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, ImGuiInputFlags_RouteGlobal)) {
         if (auto path = FileDialog::openFile("*.sox;*.stg", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
             openFile(*path);
         }
     }
-    if (cmdOrCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal)) {
         saveActiveDocument();
     }
 }
@@ -279,10 +272,17 @@ void Application::drawMenuBar() {
                 redoLabel += " " + undoStack->redoDescription();
             }
 
-            if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, canUndo)) {
+#ifdef __APPLE__
+            constexpr const char* kUndoShortcut = "Cmd+Z";
+            constexpr const char* kRedoShortcut = "Cmd+Shift+Z";
+#else
+            constexpr const char* kUndoShortcut = "Ctrl+Z";
+            constexpr const char* kRedoShortcut = "Ctrl+Y";
+#endif
+            if (ImGui::MenuItem(undoLabel.c_str(), kUndoShortcut, false, canUndo)) {
                 undoStack->undo();
             }
-            if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, canRedo)) {
+            if (ImGui::MenuItem(redoLabel.c_str(), kRedoShortcut, false, canRedo)) {
                 undoStack->redo();
             }
             ImGui::Separator();
