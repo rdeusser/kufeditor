@@ -1,4 +1,4 @@
-.PHONY: all build run test clean configure rebuild
+.PHONY: all build run test clean configure rebuild generate
 
 BUILD_DIR := build
 BUILD_TYPE := Release
@@ -22,6 +22,10 @@ clean:
 	@rm -rf $(BUILD_DIR)
 
 rebuild: clean build
+
+# Generate C++ parsers from Kaitai Struct (.ksy) files
+generate:
+	@kaitai-struct-compiler --target cpp_stl --outdir src/parsers src/ksy/*.ksy
 
 # Debug build variants
 debug:
@@ -51,4 +55,5 @@ help:
 	@echo "  configure     - Run CMake configuration"
 	@echo "  build-verbose - Build with verbose output"
 	@echo "  test-only     - Run tests without rebuilding"
+	@echo "  generate      - Regenerate C++ from .ksy files"
 	@echo "  help          - Show this help message"

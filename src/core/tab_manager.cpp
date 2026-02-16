@@ -1,8 +1,10 @@
 #include "core/tab_manager.h"
+#include "ui/tabs/save_editor_tab.h"
 #include "ui/tabs/skill_editor_tab.h"
 #include "ui/tabs/troop_editor_tab.h"
 #include "ui/tabs/text_editor_tab.h"
 #include "ui/tabs/stg_editor_tab.h"
+#include "formats/save_format.h"
 #include "formats/sox_binary.h"
 #include "formats/sox_skill_info.h"
 #include "formats/sox_text.h"
@@ -89,6 +91,8 @@ void TabManager::saveDocument(OpenDocument* doc) {
         data = doc->textData->save();
     } else if (doc->stgData) {
         data = doc->stgData->save();
+    } else if (doc->saveData) {
+        data = doc->saveData->save();
     }
 
     if (!data.empty()) {
@@ -126,6 +130,22 @@ std::shared_ptr<OpenDocument> TabManager::loadDocument(const std::string& path) 
     file.read(reinterpret_cast<char*>(doc->rawData.data()), size);
 
     std::string ext = getFileExtension(path);
+
+    // Try save format if extension matches.
+    if (ext == ".sav") {
+        auto save = std::make_shared<SaveFormat>();
+        if (save->load(doc->rawData)) {
+            doc->saveData = save;
+            doc->undoStack->setOnChange([doc = doc.get()]() {
+                doc->dirty = true;
+            });
+
+            if (onDocumentOpened_) {
+                onDocumentOpened_(doc.get());
+            }
+            return doc;
+        }
+    }
 
     // Try STG format first if extension matches.
     if (ext == ".stg") {
@@ -219,7 +239,9 @@ EditorTab* TabManager::createTabForDocument(std::shared_ptr<OpenDocument> doc) {
 
     std::unique_ptr<EditorTab> tab;
 
-    if (doc->stgData) {
+    if (doc->saveData) {
+        tab = std::make_unique<SaveEditorTab>(std::move(doc));
+    } else if (doc->stgData) {
         tab = std::make_unique<StgEditorTab>(std::move(doc));
     } else if (doc->skillData) {
         tab = std::make_unique<SkillEditorTab>(std::move(doc));

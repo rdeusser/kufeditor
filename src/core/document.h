@@ -1,5 +1,6 @@
 #pragma once
 
+#include "formats/save_format.h"
 #include "formats/sox_binary.h"
 #include "formats/sox_skill_info.h"
 #include "formats/sox_text.h"
@@ -20,6 +21,7 @@ struct OpenDocument {
     std::shared_ptr<SoxSkillInfo> skillData;
     std::shared_ptr<SoxText> textData;
     std::shared_ptr<StgFormat> stgData;
+    std::shared_ptr<SaveFormat> saveData;
     std::vector<std::byte> rawData;
     bool isSoxEncoded = false;
     bool dirty = false;
@@ -31,7 +33,8 @@ struct OpenDocument {
     bool isSkill() const { return skillData != nullptr; }
     bool isText() const { return textData != nullptr; }
     bool isStg() const { return stgData != nullptr; }
-    bool hasData() const { return isBinary() || isSkill() || isText() || isStg(); }
+    bool isSave() const { return saveData != nullptr; }
+    bool hasData() const { return isBinary() || isSkill() || isText() || isStg() || isSave(); }
 };
 
 } // namespace kuf

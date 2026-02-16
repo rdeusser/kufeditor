@@ -11,6 +11,7 @@
 #include "ui/tabs/editor_tab.h"
 #include "ui/tabs/troop_editor_tab.h"
 #include "ui/tabs/stg_editor_tab.h"
+#include "formats/save_format.h"
 #include "formats/sox_binary.h"
 #include "formats/sox_text.h"
 #include "formats/stg_format.h"
@@ -183,7 +184,7 @@ void Application::handleKeyboardShortcuts() {
         }
     }
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, ImGuiInputFlags_RouteGlobal)) {
-        if (auto path = FileDialog::openFile("*.sox;*.stg", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
+        if (auto path = FileDialog::openFile("*.sox;*.stg;*.sav", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
             openFile(*path);
         }
     }
@@ -206,6 +207,8 @@ void Application::updateValidationLog() {
         validationLog_->setIssues(doc->textData->validate());
     } else if (doc->stgData) {
         validationLog_->setIssues(doc->stgData->validate());
+    } else if (doc->saveData) {
+        validationLog_->setIssues(doc->saveData->validate());
     } else {
         validationLog_->setIssues({});
     }
@@ -215,7 +218,7 @@ void Application::drawMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open File...", "Ctrl+O")) {
-                if (auto path = FileDialog::openFile("*.sox;*.stg", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
+                if (auto path = FileDialog::openFile("*.sox;*.stg;*.sav", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
                     openFile(*path);
                 }
             }
@@ -457,6 +460,15 @@ void Application::drawDockspace() {
                 doc->path.c_str(),
                 doc->dirty ? "*" : "",
                 doc->stgData->unitCount());
+        } else if (doc->saveData) {
+            static const char* sCampaigns[] = {"Hironeiden", "Vellond", "Ecclesia", "Dark Legion"};
+            int ci = doc->saveData->campaignIndex();
+            const char* cname = (ci >= 0 && ci <= 3) ? sCampaigns[ci] : "Unknown";
+            ImGui::Text("%s%s | Save Game | %s | %zu units",
+                doc->path.c_str(),
+                doc->dirty ? "*" : "",
+                cname,
+                doc->saveData->unitCount());
         } else {
             ImGui::Text("%s | Unknown format | %zu bytes",
                 doc->path.c_str(),

@@ -75,6 +75,15 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 FetchContent_MakeAvailable(miniz)
 unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
+# Kaitai Struct C++ runtime for generated parsers
+FetchContent_Declare(
+    kaitai_struct_cpp_stl_runtime
+    GIT_REPOSITORY https://github.com/kaitai-io/kaitai_struct_cpp_stl_runtime.git
+    GIT_TAG 0.11
+)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(kaitai_struct_cpp_stl_runtime)
+
 # ImGui library (manual setup required for imgui)
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -125,6 +134,7 @@ add_executable(kufeditor
     src/formats/sox_binary.cpp
     src/formats/sox_skill_info.cpp
     src/formats/sox_text.cpp
+    src/formats/save_format.cpp
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
     src/formats/stg_script_catalog.cpp
@@ -133,6 +143,7 @@ add_executable(kufeditor
     src/ui/tabs/skill_editor_tab.cpp
     src/ui/tabs/troop_editor_tab.cpp
     src/ui/tabs/text_editor_tab.cpp
+    src/ui/tabs/save_editor_tab.cpp
     src/ui/tabs/stg_editor_tab.cpp
     src/ui/dialogs/settings_dialog.cpp
     src/undo/undo_stack.cpp
@@ -141,6 +152,7 @@ add_executable(kufeditor
     src/mods/backup_manager.cpp
     src/mods/mod_manager.cpp
     src/ui/views/mod_manager_view.cpp
+    src/parsers/kuf_save.cpp
     ${PLATFORM_SOURCES}
 )
 target_link_libraries(kufeditor PRIVATE
@@ -149,6 +161,7 @@ target_link_libraries(kufeditor PRIVATE
     Iconv::Iconv
     ${LIBCONFIG_LINK_TARGET}
     miniz
+    kaitai_struct_cpp_stl_runtime
 )
 target_include_directories(kufeditor PRIVATE src)
 
@@ -168,18 +181,21 @@ endif()
 enable_testing()
 add_executable(kufeditor_tests
     test/main_test.cpp
+    test/save_format_test.cpp
     test/sox_binary_test.cpp
     test/sox_encoding_test.cpp
     test/sox_skill_info_test.cpp
     test/stg_format_test.cpp
     src/core/text_encoding.cpp
+    src/formats/save_format.cpp
     src/formats/sox_binary.cpp
     src/formats/sox_skill_info.cpp
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
     src/formats/stg_script_catalog.cpp
+    src/parsers/kuf_save.cpp
 )
-target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain Iconv::Iconv)
+target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain Iconv::Iconv kaitai_struct_cpp_stl_runtime)
 target_include_directories(kufeditor_tests PRIVATE src)
 include(CTest)
 include(Catch)
