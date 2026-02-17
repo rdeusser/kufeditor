@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 namespace kuf {
 
@@ -203,6 +204,24 @@ bool NameDictionary::load(const std::string& soxDir) {
         loadIndexedTextSox(charInfoPath.string(), charInfoNames_);
     }
 
+    // Load LeaderGeneration_ENG.sox — name pools for generated leaders.
+    // Each entry is a space-separated list of names keyed by troop info index.
+    fs::path leaderGenPath = engDir / "LeaderGeneration_ENG.sox";
+    if (fs::exists(leaderGenPath)) {
+        std::vector<std::string> rawPools;
+        if (loadIndexedTextSox(leaderGenPath.string(), rawPools)) {
+            leaderGenPools_.resize(rawPools.size());
+            for (size_t i = 0; i < rawPools.size(); ++i) {
+                if (rawPools[i].empty()) continue;
+                std::istringstream iss(rawPools[i]);
+                std::string name;
+                while (iss >> name) {
+                    leaderGenPools_[i].push_back(name);
+                }
+            }
+        }
+    }
+
     // Load SpecialNames paired format for prefix-match name resolution.
     fs::path specialSoxPath = base / "SpecialNames.sox";
     fs::path specialEngPath = engDir / "SpecialNames_ENG.sox";
@@ -224,6 +243,14 @@ bool NameDictionary::load(const std::string& soxDir) {
         }
     }
 
+    // Load equipment name data from Text/ and SOX/ENG/ directories.
+    fs::path textEngDir = base.parent_path() / "Text" / "ENG";
+    if (fs::is_directory(textEngDir)) {
+        loadWeaponNames(textEngDir.string());
+    }
+    loadItemAttInfo(engDir.string());
+    loadItemTypePrefixes(engDir.string());
+
     loaded_ = !troopInfoNames_.empty() || !charInfoNames_.empty() || !specialNames_.empty();
     return loaded_;
 }
@@ -240,6 +267,14 @@ const char* NameDictionary::charInfoName(uint8_t jobType) const {
         return charInfoNames_[jobType].c_str();
     }
     return nullptr;
+}
+
+const char* NameDictionary::leaderGenName(uint32_t poolIndex, int32_t nameIndex) const {
+    if (nameIndex < 0) return nullptr;
+    if (poolIndex >= leaderGenPools_.size()) return nullptr;
+    const auto& pool = leaderGenPools_[poolIndex];
+    if (static_cast<size_t>(nameIndex) >= pool.size()) return nullptr;
+    return pool[nameIndex].c_str();
 }
 
 std::string NameDictionary::translate(const std::string& korean) const {
@@ -265,6 +300,196 @@ std::string NameDictionary::translate(const std::string& korean) const {
     }
 
     return {};
+}
+
+bool NameDictionary::loadWeaponNames(const std::string& textEngDir) {
+    fs::path path = fs::path(textEngDir) / "WeaponNames_ENG.txt";
+    if (!fs::exists(path)) return false;
+
+    std::ifstream file(path);
+    if (!file) return false;
+
+    std::string line;
+    if (!std::getline(file, line)) return false;
+
+    int totalTypes = 0;
+    try { totalTypes = std::stoi(line); } catch (...) { return false; }
+    if (totalTypes <= 0) return false;
+
+    weaponNames_.resize(static_cast<size_t>(totalTypes));
+
+    for (int typeId = 0; typeId < totalTypes; ++typeId) {
+        // Skip blank lines.
+        while (std::getline(file, line)) {
+            if (!line.empty() && line.find_first_not_of(" \t\r\n") != std::string::npos)
+                break;
+        }
+        if (file.eof()) break;
+
+        // Parse variant count from header (before // comment or tab).
+        int variantCount = 0;
+        auto tabPos = line.find('\t');
+        auto slashPos = line.find("//");
+        std::string countStr = line.substr(0, std::min(tabPos, slashPos));
+        // Trim whitespace.
+        while (!countStr.empty() && (countStr.back() == ' ' || countStr.back() == '\t' || countStr.back() == '\r'))
+            countStr.pop_back();
+        try { variantCount = std::stoi(countStr); } catch (...) { continue; }
+
+        std::vector<WeaponVariant>& variants = weaponNames_[typeId];
+        for (int v = 0; v < variantCount; ++v) {
+            WeaponVariant wv;
+            if (!std::getline(file, line)) break;
+            // Trim trailing whitespace.
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                line.pop_back();
+            try { wv.id = std::stoi(line); } catch (...) { break; }
+
+            if (!std::getline(file, wv.shortName)) break;
+            while (!wv.shortName.empty() && (wv.shortName.back() == '\r' || wv.shortName.back() == '\n'))
+                wv.shortName.pop_back();
+
+            if (!std::getline(file, wv.longName)) break;
+            while (!wv.longName.empty() && (wv.longName.back() == '\r' || wv.longName.back() == '\n'))
+                wv.longName.pop_back();
+
+            variants.push_back(std::move(wv));
+        }
+    }
+
+    return !weaponNames_.empty();
+}
+
+bool NameDictionary::loadItemAttInfo(const std::string& soxEngDir) {
+    fs::path path = fs::path(soxEngDir) / "ItemAttInfo_ENG.sox";
+    auto data = readSoxFile(path.string());
+    if (data.size() < 8) return false;
+
+    uint32_t marker = readU32LE(data.data());
+    uint32_t count = readU32LE(data.data() + 4);
+    if (marker != 100 || count == 0) return false;
+
+    size_t offset = 8;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (offset + 6 > data.size()) break;
+
+        uint32_t recId = readU32LE(data.data() + offset);
+        offset += 4;
+
+        uint16_t nameLen = readU16LE(data.data() + offset);
+        offset += 2;
+        if (offset + nameLen > data.size()) break;
+        std::string name(reinterpret_cast<const char*>(data.data() + offset), nameLen);
+        offset += nameLen;
+
+        if (offset + 2 > data.size()) break;
+        uint16_t descLen = readU16LE(data.data() + offset);
+        offset += 2;
+        if (offset + descLen > data.size()) break;
+        std::string desc(reinterpret_cast<const char*>(data.data() + offset), descLen);
+        offset += descLen;
+
+        if (i >= itemAttNames_.size()) {
+            itemAttNames_.resize(i + 1);
+        }
+        itemAttNames_[i] = {std::move(name), std::move(desc)};
+    }
+
+    return !itemAttNames_.empty();
+}
+
+bool NameDictionary::loadItemTypePrefixes(const std::string& soxEngDir) {
+    fs::path path = fs::path(soxEngDir) / "ItemTypeInfo_ENG.sox";
+    auto data = readSoxFile(path.string());
+    if (data.size() < 8) return false;
+
+    uint32_t marker = readU32LE(data.data());
+    uint32_t count = readU32LE(data.data() + 4);
+    if (marker != 100 || count == 0) return false;
+
+    size_t offset = 8;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (offset + 4 > data.size()) break;
+
+        uint32_t recId = readU32LE(data.data() + offset);
+        offset += 4;
+
+        std::array<std::string, 3> tiers;
+        for (int t = 0; t < 3; ++t) {
+            if (offset + 2 > data.size()) break;
+            uint16_t strLen = readU16LE(data.data() + offset);
+            offset += 2;
+            if (offset + strLen > data.size()) break;
+            tiers[t] = std::string(reinterpret_cast<const char*>(data.data() + offset), strLen);
+            offset += strLen;
+        }
+
+        if (recId >= itemTypePrefixes_.size()) {
+            itemTypePrefixes_.resize(recId + 1);
+        }
+        itemTypePrefixes_[recId] = std::move(tiers);
+    }
+
+    return !itemTypePrefixes_.empty();
+}
+
+std::string NameDictionary::weaponName(int32_t itemTypeId, uint16_t variantIndex, int16_t enhancementTier) const {
+    if (itemTypeId < 0 || static_cast<size_t>(itemTypeId) >= weaponNames_.size())
+        return {};
+
+    const auto& variants = weaponNames_[itemTypeId];
+    if (variants.empty()) return {};
+
+    const WeaponVariant* variant = nullptr;
+    if (variantIndex < variants.size()) {
+        variant = &variants[variantIndex];
+    } else {
+        // Try matching by variant id.
+        for (const auto& v : variants) {
+            if (v.id == static_cast<int>(variantIndex) + 1) {
+                variant = &v;
+                break;
+            }
+        }
+        if (!variant) variant = &variants[0];
+    }
+
+    if (enhancementTier >= 0) {
+        if (static_cast<size_t>(itemTypeId) < itemTypePrefixes_.size()) {
+            const auto& tiers = itemTypePrefixes_[itemTypeId];
+            if (enhancementTier < 3 && !tiers[enhancementTier].empty()) {
+                const std::string& prefix = tiers[enhancementTier];
+                if (!prefix.empty() && prefix.back() != ' ')
+                    return prefix + " " + variant->shortName;
+                return prefix + variant->shortName;
+            }
+        }
+        return variant->shortName;
+    }
+
+    return variant->longName;
+}
+
+std::string NameDictionary::itemTypeBaseName(int32_t itemTypeId) const {
+    if (itemTypeId < 0 || static_cast<size_t>(itemTypeId) >= weaponNames_.size())
+        return {};
+    const auto& variants = weaponNames_[itemTypeId];
+    if (variants.empty()) return {};
+    return variants[0].shortName;
+}
+
+const char* NameDictionary::itemAttName(int32_t attrIndex) const {
+    if (attrIndex < 0 || static_cast<size_t>(attrIndex) >= itemAttNames_.size())
+        return nullptr;
+    if (itemAttNames_[attrIndex].name.empty()) return nullptr;
+    return itemAttNames_[attrIndex].name.c_str();
+}
+
+const char* NameDictionary::itemAttDescription(int32_t attrIndex) const {
+    if (attrIndex < 0 || static_cast<size_t>(attrIndex) >= itemAttNames_.size())
+        return nullptr;
+    if (itemAttNames_[attrIndex].description.empty()) return nullptr;
+    return itemAttNames_[attrIndex].description.c_str();
 }
 
 std::string findGameDirectory(const std::string& stgFilePath) {

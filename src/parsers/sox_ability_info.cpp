@@ -3,6 +3,45 @@
 
 namespace sox_ability_info {
 
+Lps Lps::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    Lps result;
+    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.length, buf + offset, 2);
+    offset += 2;
+    if (offset + result.length > len) throw std::runtime_error("buffer overflow");
+    result.value.assign(buf + offset, buf + offset + result.length);
+    offset += result.length;
+    return result;
+}
+
+std::string Lps::to_json() const {
+    std::string s = "{";
+    s += "\"length\":";
+    s += std::to_string(length);
+    s += ",";
+    s += "\"value\":";
+    s += "[";
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(value[i]);
+    }
+    s += "]";
+    s += "}";
+    return s;
+}
+
+std::vector<uint8_t> Lps::to_bytes() const {
+    std::vector<uint8_t> _buf;
+    {
+        uint16_t _tmp = static_cast<uint16_t>(value.size());
+        uint8_t _raw[2];
+        std::memcpy(_raw, &_tmp, 2);
+        _buf.insert(_buf.end(), _raw, _raw + 2);
+    }
+    _buf.insert(_buf.end(), value.begin(), value.end());
+    return _buf;
+}
+
 SoxHeader SoxHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
     SoxHeader result;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
@@ -42,45 +81,6 @@ std::vector<uint8_t> SoxHeader::to_bytes() const {
         std::memcpy(_raw, &_tmp, 4);
         _buf.insert(_buf.end(), _raw, _raw + 4);
     }
-    return _buf;
-}
-
-Lps Lps::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    Lps result;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.length, buf + offset, 2);
-    offset += 2;
-    if (offset + result.length > len) throw std::runtime_error("buffer overflow");
-    result.value.assign(buf + offset, buf + offset + result.length);
-    offset += result.length;
-    return result;
-}
-
-std::string Lps::to_json() const {
-    std::string s = "{";
-    s += "\"length\":";
-    s += std::to_string(length);
-    s += ",";
-    s += "\"value\":";
-    s += "[";
-    for (size_t i = 0; i < value.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(value[i]);
-    }
-    s += "]";
-    s += "}";
-    return s;
-}
-
-std::vector<uint8_t> Lps::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint16_t _tmp = static_cast<uint16_t>(value.size());
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    _buf.insert(_buf.end(), value.begin(), value.end());
     return _buf;
 }
 

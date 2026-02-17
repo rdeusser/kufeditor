@@ -38,8 +38,32 @@ struct SaveMainBlock {
     std::string skyEffects;
 };
 
+struct SaveEquipmentSlot {
+    uint32_t autoId = 0;
+    int32_t itemTypeId = -1;
+    uint16_t level = 0;
+    int16_t enhancementTier = -1;
+    uint16_t variantIndex = 0;
+    int16_t itemPower = 0;
+    uint16_t equippedFlag = 0;
+    uint16_t reserved = 0;
+    int32_t attribute1Index = -1;
+    int32_t attribute2Index = -1;
+    int32_t skillType1 = -1;
+    int32_t skillBonus1 = 0;
+    int32_t skillType2 = -1;
+    int32_t skillBonus2 = 0;
+    int32_t resistType1 = -1;
+    int32_t resistBonus1 = 0;
+    int32_t resistType2 = -1;
+    int32_t resistBonus2 = 0;
+    int32_t slotCategory = 0;
+
+    bool empty() const { return itemTypeId < 0; }
+};
+
 struct SaveUnit {
-    int32_t unknownIndex = 0;
+    int32_t leaderNameIndex = 0;
     int32_t troopInfoIndex = 0;
     uint32_t jobType = 0;
     uint32_t modelId = 0;
@@ -59,16 +83,17 @@ struct SaveUnit {
     uint32_t field60 = 0;
     uint32_t field64 = 0;
     uint32_t field68 = 0;
-    std::array<int32_t, 6> equipment{};
-    std::array<std::array<int32_t, 16>, 6> abilitySets{};
+    std::array<uint8_t, 24> equipmentRaw{};
+    SaveEquipmentSlot primaryWeapon;
+    SaveEquipmentSlot primaryAccessory;
+    SaveEquipmentSlot primaryArmor;
+    SaveEquipmentSlot secondaryWeapon;
+    SaveEquipmentSlot secondaryAccessory;
+    SaveEquipmentSlot secondaryArmor;
     uint32_t field504 = 0;
 
-    SaveUnit() {
-        equipment.fill(-1);
-        for (auto& set : abilitySets) {
-            set.fill(-1);
-        }
-    }
+    SaveEquipmentSlot* equipSlots() { return &primaryWeapon; }
+    const SaveEquipmentSlot* equipSlots() const { return &primaryWeapon; }
 };
 
 struct SaveRosterRecord {
@@ -94,6 +119,7 @@ public:
 
     int32_t campaignIndex() const { return campaignIndex_; }
     void setCampaignIndex(int32_t idx) { campaignIndex_ = idx; }
+    int32_t& campaignIndexRef() { return campaignIndex_; }
 
     const SaveMainBlock& mainBlock() const { return mainBlock_; }
     SaveMainBlock& mainBlock() { return mainBlock_; }
@@ -104,6 +130,7 @@ public:
 
     int32_t selectedUnit() const { return selectedUnit_; }
     void setSelectedUnit(int32_t idx) { selectedUnit_ = idx; }
+    int32_t& selectedUnitRef() { return selectedUnit_; }
 
     const std::vector<SaveRosterRecord>& roster() const { return roster_; }
     std::vector<SaveRosterRecord>& roster() { return roster_; }
@@ -116,6 +143,7 @@ public:
 
     int32_t currentMissionIndex() const { return currentMissionIndex_; }
     void setCurrentMissionIndex(int32_t idx) { currentMissionIndex_ = idx; }
+    int32_t& currentMissionIndexRef() { return currentMissionIndex_; }
 
 private:
     void parseContext(const std::byte* data);

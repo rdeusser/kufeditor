@@ -13,6 +13,22 @@ format SoxResistInfo {
     endian    = little;
 }
 
+// Resistance type IDs from ResistInfo.sox record indices.
+// Names derived from localization keys (@(R_Melee), @(R_Ranged), etc.).
+enum ResistType : i32 {
+    NONE      = -1;
+    Melee     = 0;
+    Ranged    = 1;
+    Explosion = 2;
+    Frontal   = 3;
+    Fire      = 4;
+    Lightning = 5;
+    Ice       = 6;
+    Holy      = 7;
+    Poison    = 8;
+    Curse     = 9;
+}
+
 // Variable-length: u32 + u32 + string + string.
 struct ResistInfoRecord {
 // Resistance type ID (0-9)

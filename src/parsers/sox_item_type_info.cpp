@@ -3,48 +3,6 @@
 
 namespace sox_item_type_info {
 
-SoxHeader SoxHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    SoxHeader result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.marker, buf + offset, 4);
-    offset += 4;
-    if (!((result.marker == 100))) {
-        throw std::runtime_error("SOX marker must be 100");
-    }
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.record_count, buf + offset, 4);
-    offset += 4;
-    return result;
-}
-
-std::string SoxHeader::to_json() const {
-    std::string s = "{";
-    s += "\"marker\":";
-    s += std::to_string(marker);
-    s += ",";
-    s += "\"record_count\":";
-    s += std::to_string(record_count);
-    s += "}";
-    return s;
-}
-
-std::vector<uint8_t> SoxHeader::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = marker;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = record_count;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
-}
-
 Lps Lps::parse(const uint8_t* buf, size_t len, size_t& offset) {
     Lps result;
     if (offset + 2 > len) throw std::runtime_error("buffer overflow");

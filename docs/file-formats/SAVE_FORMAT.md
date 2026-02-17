@@ -4,12 +4,14 @@ Save file format documentation for Kingdom Under Fire: The Crusaders (PC port). 
 
 ## Overview
 
-The game uses two distinct binary save formats, both written to `kuf.sav` at different points in the game lifecycle. Neither format is encrypted on the PC port (`EncryptSaveData_Noop` at `0x0042a2f0` returns 0 unconditionally).
+The game has one active save format on the PC port. A second format (Campaign Save) exists in the binary as dead code from the Xbox version — it is never written or read. Neither format is encrypted (`EncryptSaveData_Noop` at `0x0042a2f0` returns 0 unconditionally).
 
-| Format | Magic | Writer | Reader | Purpose |
-|--------|-------|--------|--------|---------|
-| World Map Save | `0x6E` (110) | `WriteSaveFile` (0x004c8be0) | `ReadSaveFile` (0x004c73e0) | In-progress game state (mid-campaign saves) |
-| Campaign Save | None | `WriteCampaignSave` (0x00626d60) | None (write-only) | Campaign transition snapshots |
+| Format | Magic | Writer | Reader | Status |
+|--------|-------|--------|--------|--------|
+| World Map Save | `0x6E` (110) | `WriteSaveFile` (0x004c8be0) | `ReadSaveFile` (0x004c73e0) | **Active** — all PC save files use this format |
+| Campaign Save | None | `WriteCampaignSave` (0x00626d60) | None | **Dead code on PC** — Xbox-only multi-phase battle checkpoint, never reached |
+
+`ReadSaveFile` validates the first 4 bytes against `0x6E` and rejects anything else. Since the campaign save has no magic number, even if one were somehow written it could never be read back.
 
 **Key characteristics:**
 - **Byte order**: Little-endian (x86)
@@ -100,36 +102,48 @@ Only present when `WriteSaveFile` is called with a save context (`param_1 != 0`)
 
 340 bytes of game state data copied from the game state object at offset 0xA4. Contains general gameplay state including current position, progress flags, and world map state.
 
-### Unit Array
+### Unit Array (Player Barracks)
 
 Written by `WriteUnitArray` (0x0055c860), read by `ReadUnitArray` (0x0055c5e0).
+
+**This is the player's barracks** — every unit the player has accumulated across the campaign is stored here. Units persist between missions; their stats, equipment, abilities, and officer assignments are preserved.
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
 | +0x00 | 4 | uint32 | Unit count |
 | +0x04 | 483×N | bytes | N × Per-Unit Data (see below) |
 
+**`char_id`** (save offset 32, runtime offset 0x20, from STG byte 0x56) is the universal linking field. It connects saved barracks units to mission unit slots, and is used for merge-on-load and deployment table matching.
+
+`ReadUnitArray` has two modes controlled by a `mergeMode` parameter:
+- **Mode 0 (fresh load)**: Frees the existing unit vector, creates new 0x508-byte unit objects from the save data.
+- **Mode 1 (merge-by-char_id)**: Reads saved units and matches each against existing units by `char_id`. If a match is found, the entire 0x508-byte object is overwritten with the saved data. Unmatched units are appended. This preserves player upgrades when re-entering a previously visited mission.
+
 ### Selected Unit Reference
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| +0x00 | 4 | uint32 | Index or ID of the currently selected unit. During load, resolved by matching against roster records |
+| +0x00 | 4 | uint32 | Currently selected unit. Matched against the first uint32 of each world map node record during load |
 
-### Roster State
+### World Map Node State
 
-| Offset | Size | Type | Description |
-|--------|------|------|-------------|
-| +0x00 | 4 | uint32 | Roster count (derived from `(vec.end - vec.begin) / 0x7C`) |
-
-Per roster entry (8 bytes):
+Despite the name "Roster State" in earlier documentation, these are **world map node records** (0x7C bytes each in memory), NOT unit roster entries. Each record represents a location on the world map (castle, town, checkpoint). Populated by `ReadWorldMapBlockData` (0x004c7970) from `WMBLOCKINFO` blocks.
 
 | Offset | Size | Type | Description |
 |--------|------|------|-------------|
-| +0x00 | 1 | byte | Field at record+0x61 |
-| +0x01 | 1 | byte | Field at record+0x60 |
-| +0x02 | 1 | byte | Field at record+0x62 |
-| +0x03 | 1 | byte | Field at record+0x63 |
-| +0x04 | 4 | uint32 | Field at record+0x64 |
+| +0x00 | 4 | uint32 | Node count (derived from `(vec.end - vec.begin) / 0x7C`) |
+
+Per node entry in the save (8 bytes of state data):
+
+| Offset | Size | Type | Description |
+|--------|------|------|-------------|
+| +0x00 | 1 | byte | Node field at record+0x61 |
+| +0x01 | 1 | byte | Node field at record+0x60 |
+| +0x02 | 1 | byte | Node field at record+0x62 (if non-zero and record+0x10 == 0, triggers unit spawn) |
+| +0x03 | 1 | byte | Node field at record+0x63 |
+| +0x04 | 4 | uint32 | Node field at record+0x64 |
+
+For each active node (offset 0x10 != 0), `LoadWorldMapCastleSTGs` (0x004c5fe0) loads a `WorldmapCastle%04d_{H/V/E/X}.stg` file to initialize that node's mission data.
 
 ### Second Array
 
@@ -248,9 +262,15 @@ The stream is zero-padded to exactly 0x8000 (32,768) bytes — an Xbox memory un
 
 ---
 
-## Format 2: Campaign Save
+## Format 2: Campaign Save (Dead Code on PC)
 
-Written during mission transitions by `WriteCampaignSave` (0x00626d60). This format captures the campaign-level unit roster across all 4 campaigns. It is a **write-only format** — the game does not have a dedicated reader. Campaign data is loaded exclusively through the World Map Save format.
+> **This entire format is unreachable on the PC port.** The code path that triggers `WriteCampaignSave` requires the `Kuf2GameMenuManager` to show an Xbox memory unit save slot picker (vtable[2] code `0x1a`), which allocates a 0x100-byte data buffer. On PC, code `0x1a` is a no-op in all three vtable variants — `MenuMgrHandleSystemMessage` (0x00577f20) only handles codes 0x18/0x19. The buffer is never allocated, `SetCampaignSlotValue` would crash on the null pointer, and the state 0x13 path (`GameplayLoopCrusaders` returning 0x10) is never triggered. Documented here for completeness of the binary analysis.
+
+On Xbox, this would have been written during **multi-phase Crusaders battle transitions** by `WriteCampaignSave` (0x00626d60). It captures the campaign-level unit roster across all 4 campaigns during mid-battle phase changes. It is a **write-only format** with no dedicated reader. Even on Xbox, the file would be written to `kuf.sav` and overwritten by the World Map Save when the player returns to the world map.
+
+**Intended trigger (Xbox only)**: `GameplayLoopCrusaders` returns 0x10 → `GameMainFinalize` → state 0x13 → `RunGameMainPreInit(1)` → `SetCampaignSlotValue` + `WriteCampaignSave`. Only occurs in Crusaders mode (game_state+0x52 != 0).
+
+The header's first 0x10 bytes contain the save slot directory name (e.g., "SAVE GAME 1") which is also used as the path for `CreateSaveFileForWrite`.
 
 ### File Structure
 
@@ -302,19 +322,19 @@ Each slot represents one campaign (Hironeiden, Vellond, Ecclesia, Dark Legion):
 
 ### In-Memory Data Structure
 
-The campaign save data is managed through a 0x3c-byte wrapper object:
+The campaign save data is managed through a 0x3c-byte wrapper object created by `CampaignSaveInit` (0x00626b60):
 
 | Wrapper Offset | Type | Description |
 |----------------|------|-------------|
-| 0x00 | ptr | Pointer to 0x100-byte data buffer (null if uninitialized) |
+| 0x00 | ptr | Pointer to 0x100-byte data buffer (**always NULL on PC** — never allocated) |
 | 0x04 | byte | Unknown flag |
 | 0x14 | int32 | Active campaign index (-1 if none) |
-| 0x18 | int32 | Unknown |
-| 0x1C | int32 | Unknown |
-| 0x20 | int32 | Unknown |
-| 0x24-0x30 | float[4] | Vector/quaternion (initialized from global) |
+| 0x18 | ptr | STG unit block vector begin |
+| 0x1C | ptr | STG unit block vector end |
+| 0x20 | ptr | STG unit block vector capacity |
+| 0x24-0x30 | raw | Zero-initialized constants (from `0x006bd570`) |
 
-The 0x100-byte data buffer layout:
+The 0x100-byte data buffer layout (never allocated on PC):
 
 | Buffer Offset | Size | Description |
 |---------------|------|-------------|
@@ -478,38 +498,79 @@ SaveGameState (0x004c9110)
 ### Load Flow (ReadSaveFile)
 
 ```
-LoadWorldMapSave (0x004c6ef0) or LoadKufSav (0x004c8ac0)
-  └─ ReadSaveFile (0x004c73e0)
-      ├─ BBufferStream_Create(0x20000)
-      ├─ Validate magic == 0x6E
-      ├─ Read save context (if present)
-      ├─ Read campaign index
-      ├─ Read main save block (0x154 bytes)
-      ├─ ReadUnitArray
-      │   ├─ Allocate 0x508-byte objects
-      │   ├─ ReadUnitSaveData (483 bytes each)
-      │   └─ Resolve display names
-      ├─ Read + resolve selected unit ref
-      ├─ Read roster state
-      ├─ Read second array
-      ├─ ReadMissionCompletionData
-      ├─ Read current mission index
-      ├─ ReadMissionStateData
-      ├─ Read mission slot index
-      ├─ Per-mission array
-      ├─ ReadCampaignSpecificData
-      └─ ReadScriptObjectArray
+LoadWorldMapSave (0x004c6ef0)
+  ├─ Open save file
+  ├─ ReadWorldMapBlockData (0x004c7970)
+  │   └─ Read WMBLOCKINFO_{HN/VL/EL/HT} blocks → 0x7C-byte node records
+  ├─ LoadWorldMapCastleSTGs (0x004c5fe0)
+  │   └─ For each active node: ReadSTGFile("WorldmapCastle%04d_{H/V/E/X}.stg")
+  └─ LoadKufSav (0x004c8ac0)
+      └─ ReadSaveFile (0x004c73e0)
+          ├─ BBufferStream_Create(0x20000)
+          ├─ Validate magic == 0x6E
+          ├─ Read save context (if present)
+          ├─ Read campaign index
+          ├─ Read main save block (0x154 bytes)
+          ├─ ReadUnitArray (mode 0: fresh load)
+          │   ├─ Free existing unit vector
+          │   ├─ Allocate 0x508-byte objects
+          │   ├─ ReadUnitSaveData (483 bytes each)
+          │   └─ Resolve display names
+          ├─ Read + resolve selected unit ref (match against node records)
+          ├─ Read world map node state (8 bytes per node)
+          ├─ Read second array
+          ├─ ReadMissionCompletionData
+          ├─ Read current mission index
+          ├─ ReadMissionStateData
+          ├─ Read mission slot index
+          ├─ Per-mission array
+          ├─ ReadCampaignSpecificData
+          └─ ReadScriptObjectArray
 ```
 
-### Campaign Save Flow
+### Save → Briefing → Battle Flow
+
+After loading a save, the player enters the world map and selects a mission. The **deployment table** at `DAT_00746894+4 → +0x14` connects barracks units (from the save) to mission unit slots (from the STG file). Each deployment table entry is 8 bytes containing two `int16` char_id values: one identifying the STG mission slot, the other identifying the saved barracks unit.
 
 ```
-GameMainPreInit (0x0054f4a0)
-  ├─ CampaignSaveInit (0x00626b60)    ← creates wrapper object
+World Map → Briefing → GameMainInit (0x0054fb60)
+  ├─ BriefingGetResult (0x0054e670)
+  │   ├─ Load mission STG via AllocAndReadSTG
+  │   └─ Determine campaign from player hero's job_type
+  ├─ ApplyBriefingResult (0x0055c8b0)
+  │   ├─ Iterate deployment table (8-byte entries):
+  │   │   ├─ entry[0] (int16): char_id of STG mission unit slot
+  │   │   ├─ entry[1] (int16): char_id of saved barracks unit
+  │   │   ├─ Find STG unit block where offset 0x20 == entry[0]
+  │   │   ├─ Find saved unit where char_id == entry[1]
+  │   │   └─ PopulateUnitFromSaveData (0x0055bda0)
+  │   │       ├─ ApplyTroopInfoToUnit (combat stats from TroopInfo.sox)
+  │   │       ├─ Resolve name (SpecialNames → CharInfo → WorldMap_CharInfo)
+  │   │       ├─ Set faction via GetFactionFromJobType
+  │   │       ├─ Copy job_type, sub_type, char_id, formation
+  │   │       ├─ Copy 6 equipment items (uint16 pairs → int32)
+  │   │       └─ Copy ability sets (6 × 64 bytes)
+  │   └─ Assign up to 2 officers (UCD=1 or 2) with equipment
+  ├─ CreateUnitsFromSTGBlocks (0x0055c290)
+  │   └─ Create runtime unit objects from populated STG blocks
+  └─ LoadWorldAndTroops (0x0054e930)
+      └─ Create World, WorldView, load terrain/characters
+```
+
+The `char_id` field is the critical link at every stage: save ↔ deployment table ↔ STG mission slots ↔ runtime troop objects.
+
+### Campaign Save Flow (Dead Code on PC)
+
+The campaign save flow exists in the binary but is never executed on PC. The code path requires `GameplayLoopCrusaders` to return 0x10, which triggers state 0x13 → `RunGameMainPreInit(1)`. On PC, `GameplayLoopCrusaders` never returns this value. Additionally, `Kuf2GameMenuManager::vtable[2]` code 0x1a (called in param_2==0 path) is a no-op on PC, so the 0x100-byte data buffer that `SetCampaignSlotValue` dereferences without a null check is never allocated.
+
+```
+GameMainPreInit (0x0054f4a0)                    ← DEAD CODE ON PC
+  ├─ CampaignSaveInit (0x00626b60)    ← creates wrapper, sets data_ptr = NULL
   ├─ LoadSOXPrimaryData               ← loads global data
   ├─ LoadSOXSecondaryData
+  ├─ vtable[2](0x1a)                  ← NO-OP on PC (Xbox: shows save slot picker, allocates buffer)
   ├─ If resuming (param_2 == 1 or 2):
-  │   ├─ SetCampaignSlotValue (0x00627020)
+  │   ├─ SetCampaignSlotValue (0x00627020)  ← would crash: dereferences NULL data_ptr
   │   └─ WriteCampaignSave (0x00626d60)
   │       ├─ BBufferStream_Create(0x20000)
   │       ├─ Write 0x10 header
@@ -539,7 +600,9 @@ GameMainPreInit (0x0054f4a0)
 | 0x004c8ac0 | `LoadKufSav` | | Wrapper: `ReadSaveFile("kuf.sav")` |
 | 0x004c8b10 | `QuickSaveToFile` | | Wrapper: `WriteSaveFile("kuf.sav")` |
 | 0x00626d60 | `WriteCampaignSave` | 692 | Campaign snapshot writer (write-only) |
-| 0x004c6ef0 | `LoadWorldMapSave` | | World map save loader with block data |
+| 0x004c6ef0 | `LoadWorldMapSave` | | World map save loader with block data and castle STGs |
+| 0x004c5fe0 | `LoadWorldMapCastleSTGs` | | Loads WorldmapCastle STGs for active world map nodes |
+| 0x004c7970 | `ReadWorldMapBlockData` | | Reads WMBLOCKINFO blocks into 0x7C-byte node records |
 
 ### Unit Data Functions
 
@@ -549,7 +612,9 @@ GameMainPreInit (0x0054f4a0)
 | 0x0058e780 | `ReadUnitSaveData` | | Reads 483 bytes per unit |
 | 0x0058e4c0 | `UnitSaveObjectInit` | | Constructor for 0x508-byte unit object |
 | 0x0055c860 | `WriteUnitArray` | | Writes count + N × units |
-| 0x0055c5e0 | `ReadUnitArray` | | Reads count + N × units, resolves names |
+| 0x0055c5e0 | `ReadUnitArray` | | Reads count + N × units; mode 0=fresh, mode 1=merge-by-char_id |
+| 0x0055c8b0 | `ApplyBriefingResult` | | Merges barracks units into STG slots via deployment table |
+| 0x0055bda0 | `PopulateUnitFromSaveData` | | Applies TroopInfo stats, name, faction, equipment to STG unit |
 | 0x0058ebe0 | `InitAbilitySlot` | | Initializes 64-byte ability slot |
 
 ### Mission State Functions
@@ -618,6 +683,7 @@ GameMainPreInit (0x0054f4a0)
 2. **Memory card path**: The save system has two code paths — file-based (PC) and memory card (Xbox). The PC port uses the file path but retains the memory card infrastructure
 3. **Save slot system**: The 0x740-byte per-slot structure with wide-string names comes from the Xbox memory card UI
 4. **4-byte size prefix**: Memory card saves use a size prefix for integrity validation
+5. **Campaign Save format**: The entire `WriteCampaignSave` system is dead code — the `Kuf2GameMenuManager` never shows the Xbox memory unit save slot picker (code 0x1a is a no-op on PC), so the 0x100-byte data buffer is never allocated and the code path is never reached
 
 ### Parsing Limitations
 
@@ -629,5 +695,8 @@ GameMainPreInit (0x0054f4a0)
 
 1. **Save editing**: Since saves are unencrypted, direct hex editing is possible. The 32KB padding ensures fixed file size.
 2. **Unit modification**: Change unit stats at known offsets within the 483-byte per-unit blocks. Key fields: job_type (offset 8), skill_level (offset 52), equipment (offset 71).
-3. **Campaign index**: At a fixed offset after the magic number (and optional context), the campaign index determines which world map and mission set to load.
-4. **Backup save**: `kuf2.sav` is written as an automatic backup of the campaign save format only.
+3. **`char_id` is the universal link**: The `char_id` field (save offset 32) connects barracks units to mission slots. When editing saves, preserve char_id values — changing them breaks the deployment table matching and the unit won't be recognized during briefing/battle transitions.
+4. **Unit array IS the barracks**: All units in the save file's unit array are the player's accumulated barracks. Adding units to this array adds them to the barracks; removing units removes them. The merge-by-char_id mode (mode 1) ensures that returning to a previously visited mission preserves player upgrades.
+5. **Campaign index**: At a fixed offset after the magic number (and optional context), the campaign index determines which world map and mission set to load.
+6. **Only one format matters**: On the PC port, all save files use the World Map Save format (magic `0x6E`). The Campaign Save format is dead code and can be ignored for modding purposes.
+7. **`kuf2.sav`**: Only written by the dead campaign save path. On PC, only `kuf.sav` is ever written (by `WriteSaveFile`).

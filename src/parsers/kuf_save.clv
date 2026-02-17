@@ -1,6 +1,16 @@
 package kuf_save;
 
+import "sox_item_type_info.clv";
+import "sox_item_att_info.clv";
+import "sox_skill_info.clv";
+import "sox_resist_info.clv";
+
 // Save file format for Kingdom Under Fire: The Crusaders (PC port).
+// This is the ONLY save format used on PC. The binary also contains a
+// "Campaign Save" format (WriteCampaignSave, 0x00626d60) but it is
+// dead code — the Xbox memory unit UI that allocates its data buffer
+// was never implemented for PC. See SAVE_FORMAT.md for details.
+//
 // Saves are created from the world map between missions.
 // The file uses a 4-byte size prefix (Xbox memory card remnant)
 // and is zero-padded to 32KB (0x8000 bytes of stream data).
@@ -11,10 +21,45 @@ format KufSave {
     endian    = little;
 }
 
+enum UCD : u32 {
+    Player  = 0;
+    Enemy   = 1;
+    Ally    = 2;
+    Neutral = 3;
+}
+
+// 64-byte equipment/ability slot. Each unit has 6 slots:
+// leader weapon, leader accessory, leader armor,
+// troop weapon, troop accessory, troop armor.
+struct EquipmentSlot {
+    auto_id          u32;
+    item_type_id     i32  [ref = ItemTypeInfoRecord.field_00];
+    level            u16;
+    enhancement_tier i16;
+    variant_index    u16;
+    item_power       i16;
+    equipped_flag    u16;
+    reserved         u16;
+    attribute1_index i32  [ref = ItemAttInfoRecord.attribute_id];
+    attribute2_index i32  [ref = ItemAttInfoRecord.attribute_id];
+    skill_type_1     SkillType;
+    skill_bonus_1    i32;
+    skill_type_2     SkillType;
+    skill_bonus_2    i32;
+    resist_type_1    ResistType;
+    resist_bonus_1   i32;
+    resist_type_2    ResistType;
+    resist_bonus_2   i32;
+    slot_category    i32;
+}
+
 // Per-unit save data. 483 bytes per unit.
 struct UnitSaveData {
-// Runtime 0x24, default -1
-    unknown_index         u32;
+// Runtime 0x24, default -1. Name resolution discriminator:
+//   < 0 → hero/story character (name from CharInfo.sox via GetCharInfoName)
+//   >= 0 → generated leader (name from LeaderGeneration_ENG.sox via GetLeaderGenName,
+//           indexed by [troop_info_index][leader_name_index])
+    leader_name_index     i32;
 // Runtime 0x28
     troop_info_index      u32;
 // Runtime 0x2C. K2_JOB_TYPE enum or CharInfo index (>=43)
@@ -29,12 +74,14 @@ struct UnitSaveData {
     stg_field_194         u32;
 // Runtime 0x40
     stg_field_198         u32;
-// Runtime 0x20, unit identity from STG byte 0x56
+// Runtime 0x20, unit identity from STG byte 0x56.
+// Universal linking field: connects barracks units to mission slots via the
+// deployment table (built during briefing, 8-byte entries with two int16 char_ids).
     char_id               u32;
 // Runtime 0x48, from STG offset 0x1C0
     troop_info_index_2    u32;
-// Runtime 0x4C. 0=Player, 1=Enemy, 2=Ally, 3=Neutral
-    ucd                   u32;
+// Runtime 0x4C
+    ucd                   UCD;
 // Runtime 0x44 (written out of sequential order)
     formation_type        u32;
 // Runtime 0x50
@@ -50,18 +97,23 @@ struct UnitSaveData {
     field_60              u32;
     field_64              u32;
     field_68              u32;
-// 6 equipment slots, 4 bytes each
-    equipment             bytes[24];
-    leader_abilities_1    bytes[64];
-    officer1_abilities_1  bytes[64];
-    officer2_abilities_1  bytes[64];
-    leader_abilities_2    bytes[64];
-    officer1_abilities_2  bytes[64];
-    officer2_abilities_2  bytes[64];
+// Unit skill profile: 4 entries × 6 bytes (skill_type i16, skill_bonus i16, padding i16).
+// Accumulated from leader equipment during deployment via CopyEquipmentToDeployment.
+    skill_data            bytes[24];
+// Leader's personal equipment (weapon, accessory, armor)
+    leader_weapon         EquipmentSlot;
+    leader_accessory      EquipmentSlot;
+    leader_armor          EquipmentSlot;
+// Troop soldiers' equipment (weapon, accessory, armor)
+    troop_weapon          EquipmentSlot;
+    troop_accessory       EquipmentSlot;
+    troop_armor           EquipmentSlot;
     field_504             u32;
 }
 
-struct RosterEntry {
+// World map node state entry (8 bytes saved from 0x7C-byte in-memory records).
+// Each represents a map location (castle, town, checkpoint), NOT a unit.
+struct WorldMapNodeState {
     byte_61  u8;
     byte_60  u8;
     byte_62  u8;
@@ -93,12 +145,15 @@ struct File {
     ];
 // Main save data block (340 bytes from game state object at +0xA4)
     main_save_block       bytes[0x154];
+// The unit array IS the player's barracks — all accumulated units across the campaign.
     unit_count            u32;
     units                 UnitSaveData[unit_count];
-// Index of selected/active unit
+// Matched against world map node records during load (NOT a unit index).
     selected_unit_ref     u32;
+// World map node state. These are map locations (0x7C bytes each in memory),
+// NOT unit roster entries. Populated from WMBLOCKINFO blocks by ReadWorldMapBlockData.
     roster_count          u32;
-    roster_entries        RosterEntry[roster_count];
+    roster_entries        WorldMapNodeState[roster_count];
     second_array_count    u32;
 // Hash-map key references
     second_array          u32[second_array_count];

@@ -11,6 +11,27 @@ format SoxSkillInfo {
     endian    = little;
 }
 
+// Skill type IDs from SkillInfo.sox record indices.
+// Names derived from localization keys (@(S_Melee), @(S_Range), etc.).
+enum SkillType : i32 {
+    NONE      = -1;
+    Melee     = 0;
+    Range     = 1;
+    Frontal   = 2;
+    Riding    = 3;
+    Teamwork  = 4;
+    Scout     = 5;
+    Gunpowder = 6;
+    Taming    = 7;
+    Fire      = 8;
+    Lightning = 9;
+    Ice       = 10;
+    Holy      = 11;
+    Earth     = 12;
+    Curse     = 13;
+    Elemental = 14;
+}
+
 // Variable-length record: i32 + string + string + u32 + u32.
 // Skill ID -2 (0xFFFFFFFE) represents "Any Elemental".
 struct SkillInfoRecord {

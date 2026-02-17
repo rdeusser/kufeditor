@@ -18,15 +18,6 @@ struct SoxHeader {
     std::vector<uint8_t> to_bytes() const;
 };
 
-struct Lps {
-    uint16_t length;
-    std::vector<uint8_t> value;
-
-    static Lps parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
-};
-
 struct AbilityByJobRecord {
     uint32_t job_id;
     std::vector<int32_t> ability_slots;

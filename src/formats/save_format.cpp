@@ -51,16 +51,57 @@ void writeFixedString(std::byte* data, size_t maxLen, const std::string& str) {
     std::memcpy(data, str.data(), copyLen);
 }
 
-template<size_t N>
-std::array<int32_t, N> bytesToInt32Array(const uint8_t* bytes) {
-    std::array<int32_t, N> result{};
-    std::memcpy(result.data(), bytes, N * sizeof(int32_t));
-    return result;
+SaveEquipmentSlot wireToSlot(const kuf_save::EquipmentSlot& w) {
+    SaveEquipmentSlot s;
+    s.autoId = w.auto_id;
+    s.itemTypeId = w.item_type_id;
+    s.level = w.level;
+    s.enhancementTier = w.enhancement_tier;
+    s.variantIndex = w.variant_index;
+    s.itemPower = w.item_power;
+    s.equippedFlag = w.equipped_flag;
+    s.reserved = w.reserved;
+    s.attribute1Index = w.attribute1_index;
+    s.attribute2Index = w.attribute2_index;
+    s.skillType1 = static_cast<int32_t>(w.skill_type_1);
+    s.skillBonus1 = w.skill_bonus_1;
+    s.skillType2 = static_cast<int32_t>(w.skill_type_2);
+    s.skillBonus2 = w.skill_bonus_2;
+    s.resistType1 = static_cast<int32_t>(w.resist_type_1);
+    s.resistBonus1 = w.resist_bonus_1;
+    s.resistType2 = static_cast<int32_t>(w.resist_type_2);
+    s.resistBonus2 = w.resist_bonus_2;
+    s.slotCategory = w.slot_category;
+    return s;
+}
+
+kuf_save::EquipmentSlot slotToWire(const SaveEquipmentSlot& s) {
+    kuf_save::EquipmentSlot w{};
+    w.auto_id = s.autoId;
+    w.item_type_id = s.itemTypeId;
+    w.level = s.level;
+    w.enhancement_tier = s.enhancementTier;
+    w.variant_index = s.variantIndex;
+    w.item_power = s.itemPower;
+    w.equipped_flag = s.equippedFlag;
+    w.reserved = s.reserved;
+    w.attribute1_index = s.attribute1Index;
+    w.attribute2_index = s.attribute2Index;
+    w.skill_type_1 = static_cast<kuf_save::SkillType>(s.skillType1);
+    w.skill_bonus_1 = s.skillBonus1;
+    w.skill_type_2 = static_cast<kuf_save::SkillType>(s.skillType2);
+    w.skill_bonus_2 = s.skillBonus2;
+    w.resist_type_1 = static_cast<kuf_save::ResistType>(s.resistType1);
+    w.resist_bonus_1 = s.resistBonus1;
+    w.resist_type_2 = static_cast<kuf_save::ResistType>(s.resistType2);
+    w.resist_bonus_2 = s.resistBonus2;
+    w.slot_category = s.slotCategory;
+    return w;
 }
 
 kuf_save::UnitSaveData unitToWire(const SaveUnit& u) {
     kuf_save::UnitSaveData w{};
-    w.unknown_index = static_cast<uint32_t>(u.unknownIndex);
+    w.leader_name_index = u.leaderNameIndex;
     w.troop_info_index = static_cast<uint32_t>(u.troopInfoIndex);
     w.job_type = u.jobType;
     w.model_id = u.modelId;
@@ -70,7 +111,7 @@ kuf_save::UnitSaveData unitToWire(const SaveUnit& u) {
     w.stg_field_198 = u.stgField40;
     w.char_id = static_cast<uint32_t>(u.charId);
     w.troop_info_index_2 = static_cast<uint32_t>(u.troopInfoIndex2);
-    w.ucd = u.ucd;
+    w.ucd = static_cast<kuf_save::UCD>(u.ucd);
     w.formation_type = u.formationType;
     w.grid_config = u.gridConfig;
     w.skill_level = u.skillLevel;
@@ -80,19 +121,19 @@ kuf_save::UnitSaveData unitToWire(const SaveUnit& u) {
     w.field_60 = u.field60;
     w.field_64 = u.field64;
     w.field_68 = u.field68;
-    std::memcpy(w.equipment, u.equipment.data(), 24);
-    std::memcpy(w.leader_abilities_1, u.abilitySets[0].data(), 64);
-    std::memcpy(w.officer1_abilities_1, u.abilitySets[1].data(), 64);
-    std::memcpy(w.officer2_abilities_1, u.abilitySets[2].data(), 64);
-    std::memcpy(w.leader_abilities_2, u.abilitySets[3].data(), 64);
-    std::memcpy(w.officer1_abilities_2, u.abilitySets[4].data(), 64);
-    std::memcpy(w.officer2_abilities_2, u.abilitySets[5].data(), 64);
+    std::memcpy(w.skill_data, u.equipmentRaw.data(), 24);
+    w.leader_weapon = slotToWire(u.primaryWeapon);
+    w.leader_accessory = slotToWire(u.primaryAccessory);
+    w.leader_armor = slotToWire(u.primaryArmor);
+    w.troop_weapon = slotToWire(u.secondaryWeapon);
+    w.troop_accessory = slotToWire(u.secondaryAccessory);
+    w.troop_armor = slotToWire(u.secondaryArmor);
     w.field_504 = u.field504;
     return w;
 }
 
-kuf_save::RosterEntry rosterToWire(const SaveRosterRecord& r) {
-    kuf_save::RosterEntry w{};
+kuf_save::WorldMapNodeState rosterToWire(const SaveRosterRecord& r) {
+    kuf_save::WorldMapNodeState w{};
     w.byte_61 = r.byte61;
     w.byte_60 = r.byte60;
     w.byte_62 = r.byte62;
@@ -345,7 +386,7 @@ bool SaveFormat::load(std::span<const std::byte> data) {
             const auto& ku = parsed.units[i];
             SaveUnit& unit = units_[i];
 
-            unit.unknownIndex = static_cast<int32_t>(ku.unknown_index);
+            unit.leaderNameIndex = ku.leader_name_index;
             unit.troopInfoIndex = static_cast<int32_t>(ku.troop_info_index);
             unit.jobType = ku.job_type;
             unit.modelId = ku.model_id;
@@ -355,7 +396,7 @@ bool SaveFormat::load(std::span<const std::byte> data) {
             unit.stgField40 = ku.stg_field_198;
             unit.charId = static_cast<int32_t>(ku.char_id);
             unit.troopInfoIndex2 = static_cast<int32_t>(ku.troop_info_index_2);
-            unit.ucd = ku.ucd;
+            unit.ucd = static_cast<uint32_t>(ku.ucd);
             unit.formationType = ku.formation_type;
             unit.gridConfig = ku.grid_config;
             unit.skillLevel = ku.skill_level;
@@ -366,14 +407,14 @@ bool SaveFormat::load(std::span<const std::byte> data) {
             unit.field64 = ku.field_64;
             unit.field68 = ku.field_68;
 
-            unit.equipment = bytesToInt32Array<6>(ku.equipment);
+            std::memcpy(unit.equipmentRaw.data(), ku.skill_data, 24);
 
-            unit.abilitySets[0] = bytesToInt32Array<16>(ku.leader_abilities_1);
-            unit.abilitySets[1] = bytesToInt32Array<16>(ku.officer1_abilities_1);
-            unit.abilitySets[2] = bytesToInt32Array<16>(ku.officer2_abilities_1);
-            unit.abilitySets[3] = bytesToInt32Array<16>(ku.leader_abilities_2);
-            unit.abilitySets[4] = bytesToInt32Array<16>(ku.officer1_abilities_2);
-            unit.abilitySets[5] = bytesToInt32Array<16>(ku.officer2_abilities_2);
+            unit.primaryWeapon = wireToSlot(ku.leader_weapon);
+            unit.primaryAccessory = wireToSlot(ku.leader_accessory);
+            unit.primaryArmor = wireToSlot(ku.leader_armor);
+            unit.secondaryWeapon = wireToSlot(ku.troop_weapon);
+            unit.secondaryAccessory = wireToSlot(ku.troop_accessory);
+            unit.secondaryArmor = wireToSlot(ku.troop_armor);
 
             unit.field504 = ku.field_504;
         }

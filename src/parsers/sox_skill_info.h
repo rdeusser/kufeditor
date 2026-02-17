@@ -9,13 +9,23 @@
 
 namespace sox_skill_info {
 
-struct SoxHeader {
-    uint32_t marker;
-    uint32_t record_count;
-
-    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+enum class SkillType : int32_t {
+    NONE = -1,
+    Melee = 0,
+    Range = 1,
+    Frontal = 2,
+    Riding = 3,
+    Teamwork = 4,
+    Scout = 5,
+    Gunpowder = 6,
+    Taming = 7,
+    Fire = 8,
+    Lightning = 9,
+    Ice = 10,
+    Holy = 11,
+    Earth = 12,
+    Curse = 13,
+    Elemental = 14,
 };
 
 struct Lps {
@@ -23,6 +33,15 @@ struct Lps {
     std::vector<uint8_t> value;
 
     static Lps parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
+};
+
+struct SoxHeader {
+    uint32_t marker;
+    uint32_t record_count;
+
+    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
     std::string to_json() const;
     std::vector<uint8_t> to_bytes() const;
 };

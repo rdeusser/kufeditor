@@ -23,8 +23,43 @@ void appendU8(std::vector<std::byte>& v, uint8_t val) {
     v.push_back(static_cast<std::byte>(val));
 }
 
+void appendU16(std::vector<std::byte>& v, uint16_t val) {
+    size_t pos = v.size();
+    v.resize(pos + 2);
+    std::memcpy(v.data() + pos, &val, 2);
+}
+
+void appendI16(std::vector<std::byte>& v, int16_t val) {
+    size_t pos = v.size();
+    v.resize(pos + 2);
+    std::memcpy(v.data() + pos, &val, 2);
+}
+
 void appendZeros(std::vector<std::byte>& v, size_t count) {
     v.resize(v.size() + count, std::byte{0});
+}
+
+// Write an empty EquipmentSlot (64 bytes) with item_type_id = -1.
+void appendEmptyEquipmentSlot(std::vector<std::byte>& v) {
+    appendU32(v, 0);           // auto_id
+    appendI32(v, -1);          // item_type_id
+    appendU16(v, 0);           // level
+    appendI16(v, -1);          // enhancement_tier
+    appendU16(v, 0);           // variant_index
+    appendI16(v, 0);           // item_power
+    appendU16(v, 0);           // equipped_flag
+    appendU16(v, 0);           // reserved
+    appendI32(v, -1);          // attribute1_index
+    appendI32(v, -1);          // attribute2_index
+    appendI32(v, -1);          // skill_type_1
+    appendI32(v, 0);           // skill_bonus_1
+    appendI32(v, -1);          // skill_type_2
+    appendI32(v, 0);           // skill_bonus_2
+    appendI32(v, -1);          // resist_type_1
+    appendI32(v, 0);           // resist_bonus_1
+    appendI32(v, -1);          // resist_type_2
+    appendI32(v, 0);           // resist_bonus_2
+    appendI32(v, 0);           // slot_category
 }
 
 // Build a unit save data block (483 bytes).
@@ -32,7 +67,7 @@ void appendUnit(std::vector<std::byte>& v, int32_t troopIdx, uint32_t jobType,
                 int32_t charId, uint32_t ucd, uint32_t skillLevel, uint8_t isHero) {
     size_t start = v.size();
 
-    appendI32(v, 0);           // unknown_index
+    appendI32(v, 0);           // leader_name_index
     appendI32(v, troopIdx);    // troop_info_index
     appendU32(v, jobType);     // job_type
     appendU32(v, 0);           // model_id
@@ -53,14 +88,12 @@ void appendUnit(std::vector<std::byte>& v, int32_t troopIdx, uint32_t jobType,
     appendU32(v, 0);           // field_64
     appendU32(v, 0);           // field_68
 
-    // Equipment: 6 × i32 = 24 bytes, all -1.
-    for (int i = 0; i < 6; ++i) {
-        appendI32(v, -1);
-    }
+    // Equipment raw: 24 zero bytes.
+    appendZeros(v, 24);
 
-    // Ability sets: 6 × 16 × i32 = 384 bytes, all -1.
-    for (int i = 0; i < 96; ++i) {
-        appendI32(v, -1);
+    // 6 × EquipmentSlot (64 bytes each = 384 bytes).
+    for (int i = 0; i < 6; ++i) {
+        appendEmptyEquipmentSlot(v);
     }
 
     // field_504.
@@ -169,16 +202,10 @@ TEST_CASE("SaveFormat parses unit fields correctly", "[save]") {
     REQUIRE(unit.skillLevel == 5);
     REQUIRE(unit.isHero == 0);
 
-    // Equipment should be all -1.
+    // All equipment slots should be empty.
     for (int i = 0; i < 6; ++i) {
-        REQUIRE(unit.equipment[i] == -1);
-    }
-
-    // Abilities should be all -1.
-    for (int s = 0; s < 6; ++s) {
-        for (int a = 0; a < 16; ++a) {
-            REQUIRE(unit.abilitySets[s][a] == -1);
-        }
+        REQUIRE(unit.equipSlots()[i].empty());
+        REQUIRE(unit.equipSlots()[i].itemTypeId == -1);
     }
 }
 

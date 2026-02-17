@@ -9,13 +9,18 @@
 
 namespace sox_resist_info {
 
-struct SoxHeader {
-    uint32_t marker;
-    uint32_t record_count;
-
-    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+enum class ResistType : int32_t {
+    NONE = -1,
+    Melee = 0,
+    Ranged = 1,
+    Explosion = 2,
+    Frontal = 3,
+    Fire = 4,
+    Lightning = 5,
+    Ice = 6,
+    Holy = 7,
+    Poison = 8,
+    Curse = 9,
 };
 
 struct Lps {
@@ -23,6 +28,15 @@ struct Lps {
     std::vector<uint8_t> value;
 
     static Lps parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
+};
+
+struct SoxHeader {
+    uint32_t marker;
+    uint32_t record_count;
+
+    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
     std::string to_json() const;
     std::vector<uint8_t> to_bytes() const;
 };
