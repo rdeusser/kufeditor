@@ -1,6 +1,5 @@
 #include "formats/save_format.h"
 
-#include "kaitai/kaitaistream.h"
 #include "parsers/kuf_save.h"
 
 #include <algorithm>
@@ -40,10 +39,6 @@ void appendBytes(std::vector<std::byte>& out, const void* data, size_t len) {
     std::memcpy(out.data() + pos, data, len);
 }
 
-void appendByte(std::vector<std::byte>& out, uint8_t value) {
-    out.push_back(static_cast<std::byte>(value));
-}
-
 std::string readFixedString(const std::byte* data, size_t maxLen) {
     const char* str = reinterpret_cast<const char*>(data);
     size_t len = strnlen(str, maxLen);
@@ -57,19 +52,62 @@ void writeFixedString(std::byte* data, size_t maxLen, const std::string& str) {
 }
 
 template<size_t N>
-std::array<int32_t, N> bytesToInt32Array(const std::string& bytes) {
+std::array<int32_t, N> bytesToInt32Array(const uint8_t* bytes) {
     std::array<int32_t, N> result{};
-    std::memcpy(result.data(), bytes.data(), N * sizeof(int32_t));
+    std::memcpy(result.data(), bytes, N * sizeof(int32_t));
     return result;
 }
 
+kuf_save::UnitSaveData unitToWire(const SaveUnit& u) {
+    kuf_save::UnitSaveData w{};
+    w.unknown_index = static_cast<uint32_t>(u.unknownIndex);
+    w.troop_info_index = static_cast<uint32_t>(u.troopInfoIndex);
+    w.job_type = u.jobType;
+    w.model_id = u.modelId;
+    w.stg_field_190 = u.stgField34;
+    w.stg_field_192 = u.stgField38;
+    w.stg_field_194 = u.stgField3c;
+    w.stg_field_198 = u.stgField40;
+    w.char_id = static_cast<uint32_t>(u.charId);
+    w.troop_info_index_2 = static_cast<uint32_t>(u.troopInfoIndex2);
+    w.ucd = u.ucd;
+    w.formation_type = u.formationType;
+    w.grid_config = u.gridConfig;
+    w.skill_level = u.skillLevel;
+    w.byte_58 = u.byte58;
+    w.hero_flag = u.isHero;
+    w.byte_5a = u.byte5a;
+    w.field_60 = u.field60;
+    w.field_64 = u.field64;
+    w.field_68 = u.field68;
+    std::memcpy(w.equipment, u.equipment.data(), 24);
+    std::memcpy(w.leader_abilities_1, u.abilitySets[0].data(), 64);
+    std::memcpy(w.officer1_abilities_1, u.abilitySets[1].data(), 64);
+    std::memcpy(w.officer2_abilities_1, u.abilitySets[2].data(), 64);
+    std::memcpy(w.leader_abilities_2, u.abilitySets[3].data(), 64);
+    std::memcpy(w.officer1_abilities_2, u.abilitySets[4].data(), 64);
+    std::memcpy(w.officer2_abilities_2, u.abilitySets[5].data(), 64);
+    w.field_504 = u.field504;
+    return w;
+}
+
+kuf_save::RosterEntry rosterToWire(const SaveRosterRecord& r) {
+    kuf_save::RosterEntry w{};
+    w.byte_61 = r.byte61;
+    w.byte_60 = r.byte60;
+    w.byte_62 = r.byte62;
+    w.byte_63 = r.byte63;
+    w.uint_64 = r.value64;
+    return w;
+}
+
 struct NormalizedSave {
-    std::string buffer;
+    std::vector<uint8_t> buffer;
     bool hadSizePrefix = false;
     bool hadContext = false;
 };
 
-NormalizedSave normalizeForKaitai(std::span<const std::byte> data) {
+NormalizedSave normalizeForParsing(std::span<const std::byte> data) {
     NormalizedSave result;
 
     if (data.size() < 8) return result;
@@ -103,20 +141,23 @@ NormalizedSave normalizeForKaitai(std::span<const std::byte> data) {
     }
 
     // Build canonical buffer: size_prefix(4) + magic(4) + context(0x438) + rest.
-    std::string buf;
-    buf.append(4, '\0'); // size prefix placeholder
+    std::vector<uint8_t> buf;
+    buf.resize(4, 0); // size prefix placeholder
 
-    buf.append(reinterpret_cast<const char*>(&magic), 4);
+    const auto* raw = reinterpret_cast<const uint8_t*>(&magic);
+    buf.insert(buf.end(), raw, raw + 4);
 
     if (result.hadContext) {
-        buf.append(reinterpret_cast<const char*>(data.data() + pos), kSaveContextSize);
+        const auto* ctx = reinterpret_cast<const uint8_t*>(data.data() + pos);
+        buf.insert(buf.end(), ctx, ctx + kSaveContextSize);
         pos += kSaveContextSize;
     } else {
-        buf.append(kSaveContextSize, '\0');
+        buf.resize(buf.size() + kSaveContextSize, 0);
     }
 
     if (pos < data.size()) {
-        buf.append(reinterpret_cast<const char*>(data.data() + pos), data.size() - pos);
+        const auto* rest = reinterpret_cast<const uint8_t*>(data.data() + pos);
+        buf.insert(buf.end(), rest, rest + (data.size() - pos));
     }
 
     // Patch size prefix to match total buffer size.
@@ -275,110 +316,100 @@ void SaveFormat::patchMainBlock() const {
 bool SaveFormat::load(std::span<const std::byte> data) {
     if (data.size() < 8) return false;
 
-    auto normalized = normalizeForKaitai(data);
+    auto normalized = normalizeForParsing(data);
     if (normalized.buffer.empty()) return false;
 
     hasSizePrefix_ = normalized.hadSizePrefix;
     hasContext_ = normalized.hadContext;
 
     try {
-        kaitai::kstream ks(normalized.buffer);
-        kuf_save_t parsed(&ks);
+        size_t offset = 0;
+        auto parsed = kuf_save::File::parse(
+            normalized.buffer.data(), normalized.buffer.size(), offset);
 
         // Context.
         if (hasContext_) {
-            const auto& ctxBytes = parsed.context_data();
-            parseContext(reinterpret_cast<const std::byte*>(ctxBytes.data()));
+            parseContext(reinterpret_cast<const std::byte*>(parsed.context_data));
         }
 
         // Campaign index.
-        campaignIndex_ = static_cast<int32_t>(parsed.campaign_index());
+        campaignIndex_ = static_cast<int32_t>(parsed.campaign_index);
 
         // Main block.
-        const auto& mainBytes = parsed.main_save_block();
-        parseMainBlock(reinterpret_cast<const std::byte*>(mainBytes.data()));
+        parseMainBlock(reinterpret_cast<const std::byte*>(parsed.main_save_block));
 
         // Units.
         units_.clear();
-        if (parsed.units()) {
-            units_.resize(parsed.units()->size());
-            for (size_t i = 0; i < parsed.units()->size(); ++i) {
-                const auto* ku = (*parsed.units())[i];
-                SaveUnit& unit = units_[i];
+        units_.resize(parsed.units.size());
+        for (size_t i = 0; i < parsed.units.size(); ++i) {
+            const auto& ku = parsed.units[i];
+            SaveUnit& unit = units_[i];
 
-                unit.unknownIndex = static_cast<int32_t>(ku->unknown_index());
-                unit.troopInfoIndex = static_cast<int32_t>(ku->troop_info_index());
-                unit.jobType = ku->job_type();
-                unit.modelId = ku->model_id();
-                unit.stgField34 = ku->stg_field_190();
-                unit.stgField38 = ku->stg_field_192();
-                unit.stgField3c = ku->stg_field_194();
-                unit.stgField40 = ku->stg_field_198();
-                unit.charId = static_cast<int32_t>(ku->char_id());
-                unit.troopInfoIndex2 = static_cast<int32_t>(ku->troop_info_index_2());
-                unit.ucd = ku->ucd();
-                unit.formationType = ku->formation_type();
-                unit.gridConfig = ku->grid_config();
-                unit.skillLevel = ku->skill_level();
-                unit.byte58 = ku->byte_58();
-                unit.isHero = ku->hero_flag();
-                unit.byte5a = ku->byte_5a();
-                unit.field60 = ku->field_60();
-                unit.field64 = ku->field_64();
-                unit.field68 = ku->field_68();
+            unit.unknownIndex = static_cast<int32_t>(ku.unknown_index);
+            unit.troopInfoIndex = static_cast<int32_t>(ku.troop_info_index);
+            unit.jobType = ku.job_type;
+            unit.modelId = ku.model_id;
+            unit.stgField34 = ku.stg_field_190;
+            unit.stgField38 = ku.stg_field_192;
+            unit.stgField3c = ku.stg_field_194;
+            unit.stgField40 = ku.stg_field_198;
+            unit.charId = static_cast<int32_t>(ku.char_id);
+            unit.troopInfoIndex2 = static_cast<int32_t>(ku.troop_info_index_2);
+            unit.ucd = ku.ucd;
+            unit.formationType = ku.formation_type;
+            unit.gridConfig = ku.grid_config;
+            unit.skillLevel = ku.skill_level;
+            unit.byte58 = ku.byte_58;
+            unit.isHero = ku.hero_flag;
+            unit.byte5a = ku.byte_5a;
+            unit.field60 = ku.field_60;
+            unit.field64 = ku.field_64;
+            unit.field68 = ku.field_68;
 
-                unit.equipment = bytesToInt32Array<6>(ku->equipment());
+            unit.equipment = bytesToInt32Array<6>(ku.equipment);
 
-                unit.abilitySets[0] = bytesToInt32Array<16>(ku->leader_abilities_1());
-                unit.abilitySets[1] = bytesToInt32Array<16>(ku->officer1_abilities_1());
-                unit.abilitySets[2] = bytesToInt32Array<16>(ku->officer2_abilities_1());
-                unit.abilitySets[3] = bytesToInt32Array<16>(ku->leader_abilities_2());
-                unit.abilitySets[4] = bytesToInt32Array<16>(ku->officer1_abilities_2());
-                unit.abilitySets[5] = bytesToInt32Array<16>(ku->officer2_abilities_2());
+            unit.abilitySets[0] = bytesToInt32Array<16>(ku.leader_abilities_1);
+            unit.abilitySets[1] = bytesToInt32Array<16>(ku.officer1_abilities_1);
+            unit.abilitySets[2] = bytesToInt32Array<16>(ku.officer2_abilities_1);
+            unit.abilitySets[3] = bytesToInt32Array<16>(ku.leader_abilities_2);
+            unit.abilitySets[4] = bytesToInt32Array<16>(ku.officer1_abilities_2);
+            unit.abilitySets[5] = bytesToInt32Array<16>(ku.officer2_abilities_2);
 
-                unit.field504 = ku->field_504();
-            }
+            unit.field504 = ku.field_504;
         }
 
         // Selected unit.
-        selectedUnit_ = static_cast<int32_t>(parsed.selected_unit_ref());
+        selectedUnit_ = static_cast<int32_t>(parsed.selected_unit_ref);
 
         // Roster.
         roster_.clear();
-        if (parsed.roster_entries()) {
-            roster_.resize(parsed.roster_entries()->size());
-            for (size_t i = 0; i < parsed.roster_entries()->size(); ++i) {
-                const auto* kr = (*parsed.roster_entries())[i];
-                roster_[i].byte61 = kr->byte_61();
-                roster_[i].byte60 = kr->byte_60();
-                roster_[i].byte62 = kr->byte_62();
-                roster_[i].byte63 = kr->byte_63();
-                roster_[i].value64 = kr->uint_64();
-            }
+        roster_.resize(parsed.roster_entries.size());
+        for (size_t i = 0; i < parsed.roster_entries.size(); ++i) {
+            const auto& kr = parsed.roster_entries[i];
+            roster_[i].byte61 = kr.byte_61;
+            roster_[i].byte60 = kr.byte_60;
+            roster_[i].byte62 = kr.byte_62;
+            roster_[i].byte63 = kr.byte_63;
+            roster_[i].value64 = kr.uint_64;
         }
 
         // Second array.
         secondArray_.clear();
-        if (parsed.second_array()) {
-            secondArray_ = *parsed.second_array();
-        }
+        secondArray_ = parsed.second_array;
 
         // Mission completion.
-        if (parsed.mission_completion()) {
-            for (size_t i = 0; i < kSaveMissionSlots && i < parsed.mission_completion()->size(); ++i) {
-                missionCompletion_[i] = static_cast<int32_t>((*parsed.mission_completion())[i]);
-            }
+        for (size_t i = 0; i < kSaveMissionSlots && i < parsed.mission_completion.size(); ++i) {
+            missionCompletion_[i] = static_cast<int32_t>(parsed.mission_completion[i]);
         }
 
         // Current mission index.
-        currentMissionIndex_ = static_cast<int32_t>(parsed.current_mission_slot());
+        currentMissionIndex_ = static_cast<int32_t>(parsed.current_mission_slot);
 
         // Remaining bytes for round-trip preservation.
-        const auto& tail = parsed.tail_data();
         rawTail_.clear();
-        if (!tail.empty()) {
-            rawTail_.resize(tail.size());
-            std::memcpy(rawTail_.data(), tail.data(), tail.size());
+        if (!parsed.tail_data.empty()) {
+            rawTail_.resize(parsed.tail_data.size());
+            std::memcpy(rawTail_.data(), parsed.tail_data.data(), parsed.tail_data.size());
         }
 
     } catch (const std::exception&) {
@@ -417,38 +448,10 @@ std::vector<std::byte> SaveFormat::save() const {
     appendLE(data, static_cast<uint32_t>(units_.size()));
 
     for (const auto& unit : units_) {
-        appendLE(data, unit.unknownIndex);
-        appendLE(data, unit.troopInfoIndex);
-        appendLE(data, unit.jobType);
-        appendLE(data, unit.modelId);
-        appendLE(data, unit.stgField34);
-        appendLE(data, unit.stgField38);
-        appendLE(data, unit.stgField3c);
-        appendLE(data, unit.stgField40);
-        appendLE(data, unit.charId);
-        appendLE(data, unit.troopInfoIndex2);
-        appendLE(data, unit.ucd);
-        appendLE(data, unit.formationType);
-        appendLE(data, unit.gridConfig);
-        appendLE(data, unit.skillLevel);
-        appendByte(data, unit.byte58);
-        appendByte(data, unit.isHero);
-        appendByte(data, unit.byte5a);
-        appendLE(data, unit.field60);
-        appendLE(data, unit.field64);
-        appendLE(data, unit.field68);
-
-        for (int e = 0; e < 6; ++e) {
-            appendLE(data, unit.equipment[e]);
-        }
-
-        for (int s = 0; s < 6; ++s) {
-            for (int a = 0; a < 16; ++a) {
-                appendLE(data, unit.abilitySets[s][a]);
-            }
-        }
-
-        appendLE(data, unit.field504);
+        auto wireBytes = unitToWire(unit).to_bytes();
+        data.insert(data.end(),
+            reinterpret_cast<const std::byte*>(wireBytes.data()),
+            reinterpret_cast<const std::byte*>(wireBytes.data() + wireBytes.size()));
     }
 
     // Selected unit.
@@ -457,11 +460,10 @@ std::vector<std::byte> SaveFormat::save() const {
     // Roster count + roster records.
     appendLE(data, static_cast<uint32_t>(roster_.size()));
     for (const auto& rec : roster_) {
-        appendByte(data, rec.byte61);
-        appendByte(data, rec.byte60);
-        appendByte(data, rec.byte62);
-        appendByte(data, rec.byte63);
-        appendLE(data, rec.value64);
+        auto wireBytes = rosterToWire(rec).to_bytes();
+        data.insert(data.end(),
+            reinterpret_cast<const std::byte*>(wireBytes.data()),
+            reinterpret_cast<const std::byte*>(wireBytes.data() + wireBytes.size()));
     }
 
     // Second array count + values.

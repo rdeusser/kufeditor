@@ -1,0 +1,98 @@
+package sox_troop_info;
+
+import "common.clv";
+
+// Troop/unit type definitions. 43 records of combat stats, resistances,
+// formations, and level-up data. All fields are stored as int32 in the
+// file; the game converts them to floats with divisor constants during loading.
+format SoxTroopInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - TroopInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 148 bytes per record: 37 x i32.
+struct TroopInfoRecord {
+// Troop job type (K2JobDef.h enum)
+    job                        i32;
+// Troop type ID (K2TroopDef.h)
+    type_id                    i32;
+// Max move speed (divide by 10.0 at runtime)
+    move_speed                 i32;
+// Max rotate rate (divide by 1000.0 at runtime)
+    rotate_rate                i32;
+// Move acceleration (divide by 10.0)
+    move_acceleration          i32;
+// Move deceleration (divide by 10.0)
+    move_deceleration          i32;
+// Visible range (cast to float)
+    sight_range                i32;
+// Max attack range
+    attack_range_max           i32;
+// Min attack range (0 = melee only)
+    attack_range_min           i32;
+// Frontal attack range
+    attack_front_range         i32;
+// Melee/frontal attack strength
+    direct_attack              i32;
+// Ranged attack strength
+    indirect_attack            i32;
+// Defense strength
+    defense                    i32;
+// Base troop size
+    base_width                 i32;
+// Melee damage multiplier (divide by 100.0; 100 = 1.0x normal)
+    resist_melee               i32;
+// Ranged damage multiplier (divide by 100.0)
+    resist_ranged              i32;
+// Frontal damage multiplier (divide by 100.0). Swapped with resist_explosion in memory.
+    resist_frontal             i32;
+// Explosion damage multiplier (divide by 100.0). Swapped with resist_frontal in memory.
+    resist_explosion           i32;
+// Fire damage multiplier (divide by 100.0)
+    resist_fire                i32;
+// Ice damage multiplier (divide by 100.0). Swapped with resist_lightning in memory.
+    resist_ice                 i32;
+// Lightning damage multiplier (divide by 100.0). Swapped with resist_ice in memory.
+    resist_lightning           i32;
+// Holy damage multiplier (divide by 100.0)
+    resist_holy                i32;
+// Curse damage multiplier (divide by 100.0). Swapped with resist_earth in memory.
+    resist_curse               i32;
+// Earth/Poison damage multiplier (divide by 100.0). Swapped with resist_curse in memory.
+    resist_earth               i32;
+// Unit speed multiplier cap (divide by 10.0)
+    max_unit_speed_multiplier  i32;
+// Default HP per unit (cast to float)
+    default_unit_hp            i32;
+// Formation randomness (truncated to byte at runtime)
+    formation_random           i32;
+// Formation width (truncated to byte at runtime)
+    default_unit_num_x         i32;
+// Formation depth (truncated to byte at runtime)
+    default_unit_num_y         i32;
+// HP gain per level (cast to float)
+    unit_hp_level_up           i32;
+// Level-up skill 0 ID (-1 = none)
+    level_up_0_skill_id        i32;
+// Level-up skill 0 per-level bonus (divide by 10.0)
+    level_up_0_bonus           i32;
+// Level-up skill 1 ID (-1 = none)
+    level_up_1_skill_id        i32;
+// Level-up skill 1 per-level bonus (divide by 10.0)
+    level_up_1_bonus           i32;
+// Level-up skill 2 ID (-1 = none)
+    level_up_2_skill_id        i32;
+// Level-up skill 2 per-level bonus (divide by 10.0)
+    level_up_2_bonus           i32;
+// Damage distribution factor (divide by 100.0)
+    damage_distribution        i32;
+}
+
+struct File {
+    header   SoxHeader;
+    records  TroopInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

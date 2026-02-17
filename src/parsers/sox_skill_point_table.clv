@@ -1,0 +1,27 @@
+package sox_skill_point_table;
+
+import "common.clv";
+
+// XP progression table. 100 records mapping level to cumulative XP
+// required. Max XP per level is 65535 (uint16 limit in the executable).
+format SoxSkillPointTable {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - SkillPointTable.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 8 bytes per record: level + cumulative XP.
+struct SkillPointRecord {
+// Level number (1-100)
+    level          u32;
+// Total XP required to reach this level
+    cumulative_xp  u32;
+}
+
+struct File {
+    header   SoxHeader;
+    records  SkillPointRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

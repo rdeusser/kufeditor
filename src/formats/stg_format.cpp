@@ -1,650 +1,479 @@
 #include "formats/stg_format.h"
 
 #include "core/text_encoding.h"
+#include "parsers/kuf_stg.h"
 
-#include <algorithm>
 #include <cstring>
 
 namespace kuf {
 
 namespace {
 
-template<typename T>
-T readLE(const std::byte* data) {
-    T value;
-    std::memcpy(&value, data, sizeof(T));
-    return value;
+StgParamValue wireToParam(const kuf_stg::StgParamValue& wp) {
+    StgParamValue p;
+    p.type = static_cast<StgParamType>(wp.type_tag);
+    if (wp.type_tag == 0 || wp.type_tag == 3) {
+        p.intValue = std::get<int32_t>(wp.value);
+    } else if (wp.type_tag == 1) {
+        p.floatValue = std::get<float>(wp.value);
+    } else if (wp.type_tag == 2) {
+        const auto& sp = std::get<kuf_stg::StgStringParam>(wp.value);
+        p.stringValue.assign(sp.value.begin(), sp.value.end());
+    }
+    return p;
 }
 
-template<typename T>
-void writeLE(std::byte* data, T value) {
-    std::memcpy(data, &value, sizeof(T));
+StgScriptEntry wireToScript(const kuf_stg::StgCondition& wc) {
+    StgScriptEntry entry;
+    entry.typeId = wc.type_id;
+    entry.params.reserve(wc.params.size());
+    for (const auto& wp : wc.params) {
+        entry.params.push_back(wireToParam(wp));
+    }
+    return entry;
 }
 
-void appendLE(std::vector<std::byte>& out, uint32_t value) {
-    size_t pos = out.size();
-    out.resize(pos + 4);
-    std::memcpy(out.data() + pos, &value, 4);
+StgScriptEntry wireToScript(const kuf_stg::StgAction& wa) {
+    StgScriptEntry entry;
+    entry.typeId = wa.type_id;
+    entry.params.reserve(wa.params.size());
+    for (const auto& wp : wa.params) {
+        entry.params.push_back(wireToParam(wp));
+    }
+    return entry;
 }
 
-void appendLE(std::vector<std::byte>& out, int32_t value) {
-    size_t pos = out.size();
-    out.resize(pos + 4);
-    std::memcpy(out.data() + pos, &value, 4);
+kuf_stg::StgHeader headerToWire(const StgHeader& h) {
+    kuf_stg::StgHeader w = h.wire_;
+    w.map_filename = h.mapFile;
+    w.bitmap_filename = h.bitmapFile;
+    w.default_camera = h.defaultCameraFile;
+    w.user_camera = h.userCameraFile;
+    w.settings_file = h.settingsFile;
+    w.sky_effects = h.skyCloudEffects;
+    w.ai_script = h.aiScriptFile;
+    w.cubemap_texture = h.cubemapTexture;
+    return w;
 }
 
-void appendLE(std::vector<std::byte>& out, float value) {
-    size_t pos = out.size();
-    out.resize(pos + 4);
-    std::memcpy(out.data() + pos, &value, 4);
+kuf_stg::UnitBlock unitToWire(const StgUnit& u) {
+    kuf_stg::UnitBlock w = u.wire_;
+    w.name = utf8ToCp949(u.unitName);
+    w.unique_id = u.uniqueId;
+    w.ucd = static_cast<uint8_t>(u.ucd);
+    w.is_hero = u.isHero;
+    w.is_enabled = u.isEnabled;
+    w.leader_hp_override = u.leaderHpOverride;
+    w.unit_hp_override = u.unitHpOverride;
+    w.pos_x = u.positionX;
+    w.pos_y = u.positionY;
+    w.facing_direction = static_cast<uint8_t>(u.direction);
+
+    w.leader_job_type = u.leaderJobType;
+    w.leader_model_id = u.leaderModelId;
+    w.leader_worldmap_id = u.leaderWorldmapId;
+    w.leader_level = u.leaderLevel;
+    for (int i = 0; i < 4; ++i) {
+        w.leader_skills[i * 2] = u.leaderSkills[i].skillId;
+        w.leader_skills[i * 2 + 1] = u.leaderSkills[i].level;
+    }
+    w.leader_abilities.assign(u.leaderAbilities.begin(), u.leaderAbilities.end());
+
+    w.officer_count = u.officerCount;
+
+    w.officer1_job_type = u.officer1.jobType;
+    w.officer1_model_id = u.officer1.modelId;
+    w.officer1_worldmap_id = u.officer1.worldmapId;
+    w.officer1_level = u.officer1.level;
+    for (int i = 0; i < 4; ++i) {
+        w.officer1_data[i * 2] = u.officer1.skills[i].skillId;
+        w.officer1_data[i * 2 + 1] = u.officer1.skills[i].level;
+    }
+    for (int i = 0; i < 23; ++i) {
+        std::memcpy(w.officer1_data + 8 + i * 4, &u.officer1.abilities[i], 4);
+    }
+
+    w.officer2_job_type = u.officer2.jobType;
+    w.officer2_model_id = u.officer2.modelId;
+    w.officer2_worldmap_id = u.officer2.worldmapId;
+    w.officer2_level = u.officer2.level;
+    for (int i = 0; i < 4; ++i) {
+        w.officer2_data[i * 2] = u.officer2.skills[i].skillId;
+        w.officer2_data[i * 2 + 1] = u.officer2.skills[i].level;
+    }
+    for (int i = 0; i < 19; ++i) {
+        std::memcpy(w.officer2_data + 8 + i * 4, &u.officer2.abilities[i], 4);
+    }
+
+    w.animation_config = u.unitAnimConfig;
+    w.grid_x = u.gridX;
+    w.grid_y = u.gridY;
+    w.troop_info_index = u.troopInfoIndex;
+    w.formation_type = u.formationType;
+    w.stat_overrides.assign(u.statOverrides.begin(), u.statOverrides.end());
+
+    return w;
 }
 
-void appendBytes(std::vector<std::byte>& out, const void* data, size_t len) {
-    size_t pos = out.size();
-    out.resize(pos + len);
-    std::memcpy(out.data() + pos, data, len);
+kuf_stg::AreaEntry areaToWire(const StgArea& a) {
+    kuf_stg::AreaEntry w = a.wire_;
+    w.description = a.description;
+    w.area_id = a.areaId;
+    w.bound_x1 = a.boundX1;
+    w.bound_y1 = a.boundY1;
+    w.bound_x2 = a.boundX2;
+    w.bound_y2 = a.boundY2;
+    return w;
 }
 
-void appendZeros(std::vector<std::byte>& out, size_t count) {
-    out.resize(out.size() + count, std::byte{0});
+kuf_stg::StgParamValue domainParamToWire(const StgParamValue& p) {
+    kuf_stg::StgParamValue w;
+    w.type_tag = static_cast<uint32_t>(p.type);
+    if (p.type == StgParamType::String) {
+        kuf_stg::StgStringParam sp;
+        sp.length = static_cast<uint32_t>(p.stringValue.size());
+        sp.value.assign(p.stringValue.begin(), p.stringValue.end());
+        w.value = sp;
+    } else if (p.type == StgParamType::Float) {
+        w.value = p.floatValue;
+    } else {
+        w.value = p.intValue;
+    }
+    return w;
 }
 
-std::string readFixedString(const std::byte* data, size_t maxLen) {
-    const char* str = reinterpret_cast<const char*>(data);
-    size_t len = strnlen(str, maxLen);
-    return std::string(str, len);
-}
-
-void writeFixedString(std::byte* data, size_t maxLen, const std::string& str) {
-    std::memset(data, 0, maxLen);
-    size_t copyLen = std::min(str.size(), maxLen - 1);
-    std::memcpy(data, str.data(), copyLen);
+kuf_stg::StgEvent eventToWire(const StgEvent& e) {
+    kuf_stg::StgEvent w;
+    w.description = e.description;
+    w.event_id = e.eventId;
+    w.condition_count = static_cast<uint32_t>(e.conditions.size());
+    for (const auto& cond : e.conditions) {
+        kuf_stg::StgCondition wc;
+        wc.type_id = cond.typeId;
+        wc.param_count = static_cast<uint32_t>(cond.params.size());
+        for (const auto& p : cond.params) {
+            wc.params.push_back(domainParamToWire(p));
+        }
+        w.conditions.push_back(std::move(wc));
+    }
+    w.action_count = static_cast<uint32_t>(e.actions.size());
+    for (const auto& act : e.actions) {
+        kuf_stg::StgAction wa;
+        wa.type_id = act.typeId;
+        wa.param_count = static_cast<uint32_t>(act.params.size());
+        for (const auto& p : act.params) {
+            wa.params.push_back(domainParamToWire(p));
+        }
+        w.actions.push_back(std::move(wa));
+    }
+    return w;
 }
 
 } // namespace
 
-void StgFormat::parseHeader(const std::byte* data) {
-    std::memcpy(header_.rawData.data(), data, kStgHeaderSize);
-
-    header_.formatMagic = readLE<uint32_t>(data + 0x000);
-    header_.mapFile = readFixedString(data + 0x048, 64);
-    header_.bitmapFile = readFixedString(data + 0x088, 64);
-    header_.defaultCameraFile = readFixedString(data + 0x0C8, 64);
-    header_.userCameraFile = readFixedString(data + 0x108, 64);
-    header_.settingsFile = readFixedString(data + 0x148, 64);
-    header_.skyCloudEffects = readFixedString(data + 0x188, 64);
-    header_.aiScriptFile = readFixedString(data + 0x1C8, 64);
-    header_.cubemapTexture = readFixedString(data + 0x20C, 64);
-    header_.unitCount = readLE<uint32_t>(data + 0x270);
-}
-
-void StgFormat::patchHeader() const {
-    std::byte* raw = const_cast<std::byte*>(header_.rawData.data());
-
-    writeLE(raw + 0x000, header_.formatMagic);
-    writeFixedString(raw + 0x048, 64, header_.mapFile);
-    writeFixedString(raw + 0x088, 64, header_.bitmapFile);
-    writeFixedString(raw + 0x0C8, 64, header_.defaultCameraFile);
-    writeFixedString(raw + 0x108, 64, header_.userCameraFile);
-    writeFixedString(raw + 0x148, 64, header_.settingsFile);
-    writeFixedString(raw + 0x188, 64, header_.skyCloudEffects);
-    writeFixedString(raw + 0x1C8, 64, header_.aiScriptFile);
-    writeFixedString(raw + 0x20C, 64, header_.cubemapTexture);
-    writeLE(raw + 0x270, header_.unitCount);
-}
-
-void StgFormat::parseUnit(StgUnit& unit, const std::byte* data) {
-    std::memcpy(unit.rawData.data(), data, kStgUnitSize);
-
-    // Core unit data (84 bytes starting at offset 0x00).
-    unit.unitName = cp949ToUtf8(readFixedString(data + 0x00, 32));
-    unit.uniqueId = readLE<uint32_t>(data + 0x20);
-    unit.ucd = static_cast<UCD>(static_cast<uint8_t>(data[0x24]));
-    unit.isHero = static_cast<uint8_t>(data[0x25]);
-    unit.isEnabled = static_cast<uint8_t>(data[0x26]);
-    unit.leaderHpOverride = readLE<float>(data + 0x28);
-    unit.unitHpOverride = readLE<float>(data + 0x2C);
-    unit.positionX = readLE<float>(data + 0x44);
-    unit.positionY = readLE<float>(data + 0x48);
-    unit.direction = static_cast<Direction>(static_cast<uint8_t>(data[0x4C]));
-
-    // Leader configuration (108 bytes starting at offset 0x54).
-    unit.leaderJobType = static_cast<uint8_t>(data[0x54]);
-    unit.leaderModelId = static_cast<uint8_t>(data[0x55]);
-    unit.leaderWorldmapId = static_cast<uint8_t>(data[0x56]);
-    unit.leaderLevel = static_cast<uint8_t>(data[0x57]);
-
-    // Skill slots (8 bytes at offset 0x58).
-    for (int i = 0; i < 4; ++i) {
-        unit.leaderSkills[i].skillId = static_cast<uint8_t>(data[0x58 + i * 2]);
-        unit.leaderSkills[i].level = static_cast<uint8_t>(data[0x59 + i * 2]);
-    }
-
-    // Ability slots (92 bytes = 23 x int32 at offset 0x60).
-    for (int i = 0; i < 23; ++i) {
-        unit.leaderAbilities[i] = readLE<int32_t>(data + 0x60 + i * 4);
-    }
-
-    // Officer count at offset 0xBC.
-    unit.officerCount = readLE<uint32_t>(data + 0xBC);
-
-    // Officer 1 data (starts at offset 0xC0).
-    unit.officer1.jobType = static_cast<uint8_t>(data[0xC0]);
-    unit.officer1.modelId = static_cast<uint8_t>(data[0xC1]);
-    unit.officer1.worldmapId = static_cast<uint8_t>(data[0xC2]);
-    unit.officer1.level = static_cast<uint8_t>(data[0xC3]);
-    for (int i = 0; i < 4; ++i) {
-        unit.officer1.skills[i].skillId = static_cast<uint8_t>(data[0xC4 + i * 2]);
-        unit.officer1.skills[i].level = static_cast<uint8_t>(data[0xC5 + i * 2]);
-    }
-    for (int i = 0; i < 23; ++i) {
-        unit.officer1.abilities[i] = readLE<int32_t>(data + 0xCC + i * 4);
-    }
-
-    // Officer 2 data (starts at offset 0x128).
-    unit.officer2.jobType = static_cast<uint8_t>(data[0x128]);
-    unit.officer2.modelId = static_cast<uint8_t>(data[0x129]);
-    unit.officer2.worldmapId = static_cast<uint8_t>(data[0x12A]);
-    unit.officer2.level = static_cast<uint8_t>(data[0x12B]);
-    for (int i = 0; i < 4; ++i) {
-        unit.officer2.skills[i].skillId = static_cast<uint8_t>(data[0x12C + i * 2]);
-        unit.officer2.skills[i].level = static_cast<uint8_t>(data[0x12D + i * 2]);
-    }
-    for (int i = 0; i < 19; ++i) {
-        unit.officer2.abilities[i] = readLE<int32_t>(data + 0x134 + i * 4);
-    }
-
-    // Unit configuration (160 bytes starting at offset 0x180).
-    unit.unitAnimConfig = readLE<uint32_t>(data + 0x18C);
-    unit.gridX = readLE<uint32_t>(data + 0x190);
-    unit.gridY = readLE<uint32_t>(data + 0x194);
-    unit.troopInfoIndex = readLE<int32_t>(data + 0x1C0);
-    unit.formationType = readLE<uint32_t>(data + 0x1C4);
-
-    // Stat overrides: 22 floats at offset 0x1C8.
-    for (int i = 0; i < 22; ++i) {
-        unit.statOverrides[i] = readLE<float>(data + 0x1C8 + i * 4);
-    }
-}
-
-void StgFormat::patchUnit(StgUnit& unit) const {
-    std::byte* raw = unit.rawData.data();
-
-    // Core unit data.
-    writeFixedString(raw + 0x00, 32, utf8ToCp949(unit.unitName));
-    writeLE(raw + 0x20, unit.uniqueId);
-    raw[0x24] = static_cast<std::byte>(unit.ucd);
-    raw[0x25] = static_cast<std::byte>(unit.isHero);
-    raw[0x26] = static_cast<std::byte>(unit.isEnabled);
-    writeLE(raw + 0x28, unit.leaderHpOverride);
-    writeLE(raw + 0x2C, unit.unitHpOverride);
-    writeLE(raw + 0x44, unit.positionX);
-    writeLE(raw + 0x48, unit.positionY);
-    raw[0x4C] = static_cast<std::byte>(unit.direction);
-
-    // Leader configuration.
-    raw[0x54] = static_cast<std::byte>(unit.leaderJobType);
-    raw[0x55] = static_cast<std::byte>(unit.leaderModelId);
-    raw[0x56] = static_cast<std::byte>(unit.leaderWorldmapId);
-    raw[0x57] = static_cast<std::byte>(unit.leaderLevel);
-
-    for (int i = 0; i < 4; ++i) {
-        raw[0x58 + i * 2] = static_cast<std::byte>(unit.leaderSkills[i].skillId);
-        raw[0x59 + i * 2] = static_cast<std::byte>(unit.leaderSkills[i].level);
-    }
-
-    for (int i = 0; i < 23; ++i) {
-        writeLE(raw + 0x60 + i * 4, unit.leaderAbilities[i]);
-    }
-
-    writeLE(raw + 0xBC, unit.officerCount);
-
-    // Officer 1.
-    raw[0xC0] = static_cast<std::byte>(unit.officer1.jobType);
-    raw[0xC1] = static_cast<std::byte>(unit.officer1.modelId);
-    raw[0xC2] = static_cast<std::byte>(unit.officer1.worldmapId);
-    raw[0xC3] = static_cast<std::byte>(unit.officer1.level);
-    for (int i = 0; i < 4; ++i) {
-        raw[0xC4 + i * 2] = static_cast<std::byte>(unit.officer1.skills[i].skillId);
-        raw[0xC5 + i * 2] = static_cast<std::byte>(unit.officer1.skills[i].level);
-    }
-    for (int i = 0; i < 23; ++i) {
-        writeLE(raw + 0xCC + i * 4, unit.officer1.abilities[i]);
-    }
-
-    // Officer 2.
-    raw[0x128] = static_cast<std::byte>(unit.officer2.jobType);
-    raw[0x129] = static_cast<std::byte>(unit.officer2.modelId);
-    raw[0x12A] = static_cast<std::byte>(unit.officer2.worldmapId);
-    raw[0x12B] = static_cast<std::byte>(unit.officer2.level);
-    for (int i = 0; i < 4; ++i) {
-        raw[0x12C + i * 2] = static_cast<std::byte>(unit.officer2.skills[i].skillId);
-        raw[0x12D + i * 2] = static_cast<std::byte>(unit.officer2.skills[i].level);
-    }
-    for (int i = 0; i < 19; ++i) {
-        writeLE(raw + 0x134 + i * 4, unit.officer2.abilities[i]);
-    }
-
-    // Unit configuration.
-    writeLE(raw + 0x18C, unit.unitAnimConfig);
-    writeLE(raw + 0x190, unit.gridX);
-    writeLE(raw + 0x194, unit.gridY);
-    writeLE(raw + 0x1C0, unit.troopInfoIndex);
-    writeLE(raw + 0x1C4, unit.formationType);
-
-    for (int i = 0; i < 22; ++i) {
-        writeLE(raw + 0x1C8 + i * 4, unit.statOverrides[i]);
-    }
-}
-
 bool StgFormat::load(std::span<const std::byte> data) {
-    if (data.size() < kStgHeaderSize) {
-        return false;
-    }
+    const auto* buf = reinterpret_cast<const uint8_t*>(data.data());
+    size_t len = data.size();
 
-    parseHeader(data.data());
+    if (len < kStgHeaderSize) return false;
 
-    uint32_t count = header_.unitCount;
-    size_t expectedMinSize = kStgHeaderSize + count * kStgUnitSize;
-    if (data.size() < expectedMinSize) {
-        return false;
-    }
+    try {
+        size_t offset = 0;
 
-    units_.clear();
-    units_.resize(count);
+        // Phase 1: Parse magic + header + units using cleave parsers.
+        uint32_t magic;
+        std::memcpy(&magic, buf, 4);
+        if (magic != 0x3E9) return false;
+        offset = 4;
 
-    const std::byte* ptr = data.data() + kStgHeaderSize;
-    for (uint32_t i = 0; i < count; ++i) {
-        parseUnit(units_[i], ptr);
-        ptr += kStgUnitSize;
-    }
+        auto wireHeader = kuf_stg::StgHeader::parse(buf, len, offset);
 
-    size_t tailOffset = kStgHeaderSize + count * kStgUnitSize;
-    size_t tailSize = data.size() - tailOffset;
-    if (tailSize > 0) {
-        if (!parseTail(data.data() + tailOffset, tailSize)) {
-            rawTail_.assign(data.begin() + tailOffset, data.end());
-            tailParsed_ = false;
+        if (offset + 4 > len) return false;
+        uint32_t unitCount;
+        std::memcpy(&unitCount, buf + offset, 4);
+        offset += 4;
+
+        if (offset + static_cast<size_t>(unitCount) * kStgUnitSize > len) return false;
+
+        std::vector<kuf_stg::UnitBlock> wireUnits;
+        wireUnits.reserve(unitCount);
+        for (uint32_t i = 0; i < unitCount; ++i) {
+            wireUnits.push_back(kuf_stg::UnitBlock::parse(buf, len, offset));
         }
-    } else {
-        tailParsed_ = false;
-    }
 
-    version_ = GameVersion::Crusaders;
-    return true;
+        // Convert header.
+        header_.wire_ = wireHeader;
+        header_.formatMagic = magic;
+        header_.mapFile = wireHeader.map_filename;
+        header_.bitmapFile = wireHeader.bitmap_filename;
+        header_.defaultCameraFile = wireHeader.default_camera;
+        header_.userCameraFile = wireHeader.user_camera;
+        header_.settingsFile = wireHeader.settings_file;
+        header_.skyCloudEffects = wireHeader.sky_effects;
+        header_.aiScriptFile = wireHeader.ai_script;
+        header_.cubemapTexture = wireHeader.cubemap_texture;
+        header_.unitCount = unitCount;
+
+        // Convert units.
+        units_.clear();
+        units_.resize(wireUnits.size());
+        for (size_t i = 0; i < wireUnits.size(); ++i) {
+            auto& unit = units_[i];
+            const auto& wu = wireUnits[i];
+
+            unit.wire_ = wu;
+
+            unit.unitName = cp949ToUtf8(wu.name);
+            unit.uniqueId = wu.unique_id;
+            unit.ucd = static_cast<UCD>(wu.ucd);
+            unit.isHero = wu.is_hero;
+            unit.isEnabled = wu.is_enabled;
+            unit.leaderHpOverride = wu.leader_hp_override;
+            unit.unitHpOverride = wu.unit_hp_override;
+            unit.positionX = wu.pos_x;
+            unit.positionY = wu.pos_y;
+            unit.direction = static_cast<Direction>(wu.facing_direction);
+
+            unit.leaderJobType = wu.leader_job_type;
+            unit.leaderModelId = wu.leader_model_id;
+            unit.leaderWorldmapId = wu.leader_worldmap_id;
+            unit.leaderLevel = wu.leader_level;
+
+            for (int s = 0; s < 4; ++s) {
+                unit.leaderSkills[s].skillId = wu.leader_skills[s * 2];
+                unit.leaderSkills[s].level = wu.leader_skills[s * 2 + 1];
+            }
+
+            for (int a = 0; a < 23 && a < static_cast<int>(wu.leader_abilities.size()); ++a) {
+                unit.leaderAbilities[a] = wu.leader_abilities[a];
+            }
+
+            unit.officerCount = wu.officer_count;
+
+            unit.officer1.jobType = wu.officer1_job_type;
+            unit.officer1.modelId = wu.officer1_model_id;
+            unit.officer1.worldmapId = wu.officer1_worldmap_id;
+            unit.officer1.level = wu.officer1_level;
+            for (int s = 0; s < 4; ++s) {
+                unit.officer1.skills[s].skillId = wu.officer1_data[s * 2];
+                unit.officer1.skills[s].level = wu.officer1_data[s * 2 + 1];
+            }
+            for (int a = 0; a < 23; ++a) {
+                std::memcpy(&unit.officer1.abilities[a], wu.officer1_data + 8 + a * 4, 4);
+            }
+
+            unit.officer2.jobType = wu.officer2_job_type;
+            unit.officer2.modelId = wu.officer2_model_id;
+            unit.officer2.worldmapId = wu.officer2_worldmap_id;
+            unit.officer2.level = wu.officer2_level;
+            for (int s = 0; s < 4; ++s) {
+                unit.officer2.skills[s].skillId = wu.officer2_data[s * 2];
+                unit.officer2.skills[s].level = wu.officer2_data[s * 2 + 1];
+            }
+            for (int a = 0; a < 19; ++a) {
+                std::memcpy(&unit.officer2.abilities[a], wu.officer2_data + 8 + a * 4, 4);
+            }
+
+            unit.unitAnimConfig = wu.animation_config;
+            unit.gridX = wu.grid_x;
+            unit.gridY = wu.grid_y;
+            unit.troopInfoIndex = wu.troop_info_index;
+            unit.formationType = wu.formation_type;
+
+            for (int f = 0; f < 22 && f < static_cast<int>(wu.stat_overrides.size()); ++f) {
+                unit.statOverrides[f] = wu.stat_overrides[f];
+            }
+        }
+
+        // Phase 2: Try to parse tail (areas, variables, events, footer).
+        size_t tailStart = offset;
+        tailParsed_ = false;
+        rawTail_.clear();
+        areas_.clear();
+        variables_.clear();
+        eventBlocks_.clear();
+        footerEntries_.clear();
+
+        if (tailStart < len) {
+            try {
+                // Areas.
+                if (offset + 4 > len) throw std::runtime_error("truncated");
+                uint32_t areaCount;
+                std::memcpy(&areaCount, buf + offset, 4);
+                offset += 4;
+
+                areas_.reserve(areaCount);
+                for (uint32_t i = 0; i < areaCount; ++i) {
+                    auto wa = kuf_stg::AreaEntry::parse(buf, len, offset);
+                    StgArea area;
+                    area.wire_ = wa;
+                    area.description = wa.description;
+                    area.areaId = wa.area_id;
+                    area.boundX1 = wa.bound_x1;
+                    area.boundY1 = wa.bound_y1;
+                    area.boundX2 = wa.bound_x2;
+                    area.boundY2 = wa.bound_y2;
+                    areas_.push_back(std::move(area));
+                }
+
+                // Variables.
+                if (offset + 4 > len) throw std::runtime_error("truncated");
+                uint32_t varCount;
+                std::memcpy(&varCount, buf + offset, 4);
+                offset += 4;
+
+                variables_.reserve(varCount);
+                for (uint32_t i = 0; i < varCount; ++i) {
+                    auto wv = kuf_stg::StgVariable::parse(buf, len, offset);
+                    StgVariable var;
+                    var.name = wv.name;
+                    var.variableId = wv.variable_id;
+                    var.initialValue = wireToParam(wv.initial_value);
+                    variables_.push_back(std::move(var));
+                }
+
+                // Event blocks.
+                if (offset + 4 > len) throw std::runtime_error("truncated");
+                uint32_t blockCount;
+                std::memcpy(&blockCount, buf + offset, 4);
+                offset += 4;
+
+                eventBlocks_.reserve(blockCount);
+                for (uint32_t i = 0; i < blockCount; ++i) {
+                    auto wb = kuf_stg::EventBlock::parse(buf, len, offset);
+                    StgEventBlock block;
+                    block.blockHeader = wb.block_header;
+                    block.events.reserve(wb.events.size());
+
+                    for (const auto& we : wb.events) {
+                        StgEvent event;
+                        event.description = we.description;
+                        event.eventId = we.event_id;
+
+                        event.conditions.reserve(we.conditions.size());
+                        for (const auto& wc : we.conditions) {
+                            event.conditions.push_back(wireToScript(wc));
+                        }
+
+                        event.actions.reserve(we.actions.size());
+                        for (const auto& wa : we.actions) {
+                            event.actions.push_back(wireToScript(wa));
+                        }
+
+                        event.wire_ = we;
+                        event.modified = false;
+
+                        block.events.push_back(std::move(event));
+                    }
+
+                    eventBlocks_.push_back(std::move(block));
+                }
+
+                // Footer.
+                if (offset + 4 > len) throw std::runtime_error("truncated");
+                uint32_t footerCount;
+                std::memcpy(&footerCount, buf + offset, 4);
+                offset += 4;
+
+                footerEntries_.reserve(footerCount);
+                for (uint32_t i = 0; i < footerCount; ++i) {
+                    auto wf = kuf_stg::FooterEntry::parse(buf, len, offset);
+                    footerEntries_.push_back({wf.slot_data_1, wf.slot_data_2});
+                }
+
+                tailParsed_ = true;
+            } catch (...) {
+                areas_.clear();
+                variables_.clear();
+                eventBlocks_.clear();
+                footerEntries_.clear();
+                rawTail_.assign(
+                    reinterpret_cast<const std::byte*>(buf + tailStart),
+                    reinterpret_cast<const std::byte*>(buf + len));
+                tailParsed_ = false;
+            }
+        }
+
+        version_ = GameVersion::Crusaders;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 std::vector<std::byte> StgFormat::save() const {
-    patchHeader();
-    for (auto& unit : const_cast<std::vector<StgUnit>&>(units_)) {
-        patchUnit(unit);
+    if (tailParsed_) {
+        kuf_stg::File file;
+        file.magic = header_.formatMagic;
+        file.header = headerToWire(header_);
+
+        for (const auto& unit : units_) {
+            file.units.push_back(unitToWire(unit));
+        }
+
+        for (const auto& area : areas_) {
+            file.areas.push_back(areaToWire(area));
+        }
+
+        for (const auto& var : variables_) {
+            kuf_stg::StgVariable wv;
+            wv.name = var.name;
+            wv.variable_id = var.variableId;
+            wv.initial_value = domainParamToWire(var.initialValue);
+            file.variables.push_back(std::move(wv));
+        }
+
+        for (const auto& block : eventBlocks_) {
+            kuf_stg::EventBlock wb;
+            wb.block_header = block.blockHeader;
+            for (const auto& event : block.events) {
+                if (!event.modified) {
+                    wb.events.push_back(event.wire_);
+                } else {
+                    wb.events.push_back(eventToWire(event));
+                }
+            }
+            file.event_blocks.push_back(std::move(wb));
+        }
+
+        for (const auto& entry : footerEntries_) {
+            file.footer_entries.push_back({entry.field1, entry.field2});
+        }
+
+        auto bytes = file.to_bytes();
+        return {reinterpret_cast<const std::byte*>(bytes.data()),
+                reinterpret_cast<const std::byte*>(bytes.data() + bytes.size())};
     }
 
+    // Tail not parsed: emit header + units manually, append raw tail.
     std::vector<std::byte> data;
 
-    // Write header.
-    data.insert(data.end(), header_.rawData.begin(), header_.rawData.end());
+    // Magic.
+    data.resize(4);
+    std::memcpy(data.data(), &header_.formatMagic, 4);
 
-    // Write units.
+    // Header.
+    auto hdrBytes = headerToWire(header_).to_bytes();
+    data.insert(data.end(),
+        reinterpret_cast<const std::byte*>(hdrBytes.data()),
+        reinterpret_cast<const std::byte*>(hdrBytes.data() + hdrBytes.size()));
+
+    // Unit count.
+    uint32_t unitCount = static_cast<uint32_t>(units_.size());
+    size_t pos = data.size();
+    data.resize(pos + 4);
+    std::memcpy(data.data() + pos, &unitCount, 4);
+
+    // Units.
     for (const auto& unit : units_) {
-        data.insert(data.end(), unit.rawData.begin(), unit.rawData.end());
+        auto uBytes = unitToWire(unit).to_bytes();
+        data.insert(data.end(),
+            reinterpret_cast<const std::byte*>(uBytes.data()),
+            reinterpret_cast<const std::byte*>(uBytes.data() + uBytes.size()));
     }
 
-    if (!tailParsed_) {
-        data.insert(data.end(), rawTail_.begin(), rawTail_.end());
-        return data;
-    }
-
-    // Write parsed tail sections.
-    serializeAreaIds(data);
-    serializeVariables(data);
-    serializeEventBlocks(data);
-    serializeFooter(data);
-
+    data.insert(data.end(), rawTail_.begin(), rawTail_.end());
     return data;
-}
-
-StgParamValue StgFormat::readParamValue(const std::byte* data, size_t& offset, size_t limit) const {
-    StgParamValue val;
-    if (offset + 4 > limit) {
-        return val;
-    }
-
-    val.type = static_cast<StgParamType>(readLE<uint32_t>(data + offset));
-    offset += 4;
-
-    if (val.type == StgParamType::String) {
-        if (offset + 4 > limit) return val;
-        uint32_t slen = readLE<uint32_t>(data + offset);
-        offset += 4;
-        if (offset + slen > limit) return val;
-        val.stringValue = std::string(reinterpret_cast<const char*>(data + offset), slen);
-        offset += slen;
-    } else if (val.type == StgParamType::Float) {
-        if (offset + 4 > limit) return val;
-        val.floatValue = readLE<float>(data + offset);
-        offset += 4;
-    } else {
-        // Int or Enum — both are 4-byte int32.
-        if (offset + 4 > limit) return val;
-        val.intValue = readLE<int32_t>(data + offset);
-        offset += 4;
-    }
-
-    return val;
-}
-
-void StgFormat::serializeParamValue(std::vector<std::byte>& out, const StgParamValue& val) const {
-    appendLE(out, static_cast<uint32_t>(val.type));
-
-    if (val.type == StgParamType::String) {
-        appendLE(out, static_cast<uint32_t>(val.stringValue.size()));
-        appendBytes(out, val.stringValue.data(), val.stringValue.size());
-    } else if (val.type == StgParamType::Float) {
-        appendLE(out, val.floatValue);
-    } else {
-        appendLE(out, val.intValue);
-    }
-}
-
-size_t StgFormat::parseAreaIds(const std::byte* data, size_t tailSize, size_t offset) {
-    if (offset + 4 > tailSize) return SIZE_MAX;
-    uint32_t areaCount = readLE<uint32_t>(data + offset);
-    size_t areaSection = 4 + static_cast<size_t>(areaCount) * kStgAreaIdEntrySize;
-    if (offset + areaSection > tailSize) return SIZE_MAX;
-    offset += 4;
-
-    areas_.clear();
-    areas_.reserve(areaCount);
-
-    for (uint32_t i = 0; i < areaCount; ++i) {
-        StgArea area;
-        const std::byte* entry = data + offset;
-        std::memcpy(area.rawData.data(), entry, kStgAreaIdEntrySize);
-
-        area.description = readFixedString(entry + 0x00, 32);
-        area.areaId = readLE<uint32_t>(entry + 0x40);
-        area.boundX1 = readLE<float>(entry + 0x44);
-        area.boundY1 = readLE<float>(entry + 0x48);
-        area.boundX2 = readLE<float>(entry + 0x4C);
-        area.boundY2 = readLE<float>(entry + 0x50);
-
-        areas_.push_back(std::move(area));
-        offset += kStgAreaIdEntrySize;
-    }
-
-    return offset;
-}
-
-size_t StgFormat::parseVariables(const std::byte* data, size_t tailSize, size_t offset) {
-    if (offset + 4 > tailSize) return SIZE_MAX;
-    uint32_t varCount = readLE<uint32_t>(data + offset);
-    offset += 4;
-
-    variables_.clear();
-    variables_.reserve(varCount);
-
-    for (uint32_t i = 0; i < varCount; ++i) {
-        StgVariable var;
-
-        // Fixed 64-byte name.
-        if (offset + kStgVariableNameSize > tailSize) return SIZE_MAX;
-        var.name = readFixedString(data + offset, kStgVariableNameSize);
-        offset += kStgVariableNameSize;
-
-        // Variable ID (4 bytes).
-        if (offset + 4 > tailSize) return SIZE_MAX;
-        var.variableId = readLE<uint32_t>(data + offset);
-        offset += 4;
-
-        // Typed initial value via ReadSTGParamValue.
-        var.initialValue = readParamValue(data, offset, tailSize);
-
-        variables_.push_back(std::move(var));
-    }
-
-    return offset;
-}
-
-size_t StgFormat::parseEventBlocks(const std::byte* data, size_t tailSize, size_t offset) {
-    if (offset + 4 > tailSize) return SIZE_MAX;
-    uint32_t blockCount = readLE<uint32_t>(data + offset);
-    offset += 4;
-
-    eventBlocks_.clear();
-    eventBlocks_.reserve(blockCount);
-
-    for (uint32_t b = 0; b < blockCount; ++b) {
-        StgEventBlock block;
-
-        // Block header (4 bytes).
-        if (offset + 4 > tailSize) return SIZE_MAX;
-        block.blockHeader = readLE<uint32_t>(data + offset);
-        offset += 4;
-
-        // Event count (4 bytes).
-        if (offset + 4 > tailSize) return SIZE_MAX;
-        uint32_t eventCount = readLE<uint32_t>(data + offset);
-        offset += 4;
-
-        block.events.reserve(eventCount);
-
-        for (uint32_t e = 0; e < eventCount; ++e) {
-            StgEvent event;
-            size_t eventStart = offset;
-
-            // Description (64 bytes).
-            if (offset + kStgEventDescriptionSize > tailSize) return SIZE_MAX;
-            event.description = readFixedString(data + offset, kStgEventDescriptionSize);
-            offset += kStgEventDescriptionSize;
-
-            // Event ID (4 bytes).
-            if (offset + 4 > tailSize) return SIZE_MAX;
-            event.eventId = readLE<uint32_t>(data + offset);
-            offset += 4;
-
-            // Condition count (4 bytes).
-            if (offset + 4 > tailSize) return SIZE_MAX;
-            uint32_t condCount = readLE<uint32_t>(data + offset);
-            offset += 4;
-
-            event.conditions.reserve(condCount);
-            for (uint32_t c = 0; c < condCount; ++c) {
-                StgScriptEntry cond;
-
-                // Type ID (4 bytes).
-                if (offset + 4 > tailSize) return SIZE_MAX;
-                cond.typeId = readLE<uint32_t>(data + offset);
-                offset += 4;
-
-                // Param count (4 bytes).
-                if (offset + 4 > tailSize) return SIZE_MAX;
-                uint32_t paramCount = readLE<uint32_t>(data + offset);
-                offset += 4;
-
-                cond.params.reserve(paramCount);
-                for (uint32_t p = 0; p < paramCount; ++p) {
-                    cond.params.push_back(readParamValue(data, offset, tailSize));
-                }
-
-                event.conditions.push_back(std::move(cond));
-            }
-
-            // Action count (4 bytes).
-            if (offset + 4 > tailSize) return SIZE_MAX;
-            uint32_t actCount = readLE<uint32_t>(data + offset);
-            offset += 4;
-
-            event.actions.reserve(actCount);
-            for (uint32_t a = 0; a < actCount; ++a) {
-                StgScriptEntry act;
-
-                // Type ID (4 bytes).
-                if (offset + 4 > tailSize) return SIZE_MAX;
-                act.typeId = readLE<uint32_t>(data + offset);
-                offset += 4;
-
-                // Param count (4 bytes).
-                if (offset + 4 > tailSize) return SIZE_MAX;
-                uint32_t paramCount = readLE<uint32_t>(data + offset);
-                offset += 4;
-
-                act.params.reserve(paramCount);
-                for (uint32_t p = 0; p < paramCount; ++p) {
-                    act.params.push_back(readParamValue(data, offset, tailSize));
-                }
-
-                event.actions.push_back(std::move(act));
-            }
-
-            // Store raw bytes for unmodified round-trip.
-            event.rawData.assign(data + eventStart, data + offset);
-            block.events.push_back(std::move(event));
-        }
-
-        eventBlocks_.push_back(std::move(block));
-    }
-
-    return offset;
-}
-
-size_t StgFormat::parseFooter(const std::byte* data, size_t tailSize, size_t offset) {
-    if (offset + 4 > tailSize) return SIZE_MAX;
-    uint32_t footerCount = readLE<uint32_t>(data + offset);
-    offset += 4;
-
-    footerEntries_.clear();
-    footerEntries_.reserve(footerCount);
-
-    if (offset + static_cast<size_t>(footerCount) * 8 > tailSize) return SIZE_MAX;
-
-    for (uint32_t i = 0; i < footerCount; ++i) {
-        StgFooterEntry entry;
-        entry.field1 = readLE<uint32_t>(data + offset);
-        entry.field2 = readLE<uint32_t>(data + offset + 4);
-        footerEntries_.push_back(entry);
-        offset += 8;
-    }
-
-    return offset;
-}
-
-bool StgFormat::parseTail(const std::byte* data, size_t tailSize) {
-    size_t offset = 0;
-
-    // AreaIDs section.
-    offset = parseAreaIds(data, tailSize, offset);
-    if (offset == SIZE_MAX) return false;
-
-    // Variables section.
-    offset = parseVariables(data, tailSize, offset);
-    if (offset == SIZE_MAX) return false;
-
-    // Event blocks section.
-    offset = parseEventBlocks(data, tailSize, offset);
-    if (offset == SIZE_MAX) return false;
-
-    // Footer section.
-    offset = parseFooter(data, tailSize, offset);
-    if (offset == SIZE_MAX) return false;
-
-    // Validate total consumed == tailSize.
-    if (offset != tailSize) return false;
-
-    tailParsed_ = true;
-    return true;
-}
-
-void StgFormat::serializeAreaIds(std::vector<std::byte>& out) const {
-    appendLE(out, static_cast<uint32_t>(areas_.size()));
-
-    for (const auto& area : areas_) {
-        // Patch known fields into rawData, then write the full 84 bytes.
-        std::array<std::byte, 84> patched = area.rawData;
-        writeFixedString(patched.data() + 0x00, 32, area.description);
-        writeLE(patched.data() + 0x40, area.areaId);
-        writeLE(patched.data() + 0x44, area.boundX1);
-        writeLE(patched.data() + 0x48, area.boundY1);
-        writeLE(patched.data() + 0x4C, area.boundX2);
-        writeLE(patched.data() + 0x50, area.boundY2);
-        appendBytes(out, patched.data(), patched.size());
-    }
-}
-
-void StgFormat::serializeVariables(std::vector<std::byte>& out) const {
-    appendLE(out, static_cast<uint32_t>(variables_.size()));
-
-    for (const auto& var : variables_) {
-        // Fixed 64-byte name.
-        size_t nameStart = out.size();
-        appendZeros(out, kStgVariableNameSize);
-        size_t copyLen = std::min(var.name.size(), kStgVariableNameSize - 1);
-        std::memcpy(out.data() + nameStart, var.name.data(), copyLen);
-
-        // Variable ID.
-        appendLE(out, var.variableId);
-
-        // Typed initial value.
-        serializeParamValue(out, var.initialValue);
-    }
-}
-
-void StgFormat::serializeEventBlocks(std::vector<std::byte>& out) const {
-    appendLE(out, static_cast<uint32_t>(eventBlocks_.size()));
-
-    for (const auto& block : eventBlocks_) {
-        // Block header.
-        appendLE(out, block.blockHeader);
-
-        // Event count.
-        appendLE(out, static_cast<uint32_t>(block.events.size()));
-
-        for (const auto& event : block.events) {
-            if (!event.modified && !event.rawData.empty()) {
-                // Unmodified event — emit raw bytes for byte-identical round-trip.
-                out.insert(out.end(), event.rawData.begin(), event.rawData.end());
-                continue;
-            }
-
-            // Description (64 bytes).
-            size_t descStart = out.size();
-            appendZeros(out, kStgEventDescriptionSize);
-            size_t copyLen = std::min(event.description.size(), kStgEventDescriptionSize - 1);
-            std::memcpy(out.data() + descStart, event.description.data(), copyLen);
-
-            // Event ID.
-            appendLE(out, event.eventId);
-
-            // Conditions.
-            appendLE(out, static_cast<uint32_t>(event.conditions.size()));
-            for (const auto& cond : event.conditions) {
-                appendLE(out, cond.typeId);
-                appendLE(out, static_cast<uint32_t>(cond.params.size()));
-                for (const auto& param : cond.params) {
-                    serializeParamValue(out, param);
-                }
-            }
-
-            // Actions.
-            appendLE(out, static_cast<uint32_t>(event.actions.size()));
-            for (const auto& act : event.actions) {
-                appendLE(out, act.typeId);
-                appendLE(out, static_cast<uint32_t>(act.params.size()));
-                for (const auto& param : act.params) {
-                    serializeParamValue(out, param);
-                }
-            }
-        }
-    }
-}
-
-void StgFormat::serializeFooter(std::vector<std::byte>& out) const {
-    appendLE(out, static_cast<uint32_t>(footerEntries_.size()));
-
-    for (const auto& entry : footerEntries_) {
-        appendLE(out, entry.field1);
-        appendLE(out, entry.field2);
-    }
 }
 
 size_t StgFormat::totalEventCount() const {
@@ -697,7 +526,6 @@ std::vector<ValidationIssue> StgFormat::validate() const {
             });
         }
 
-        // Check for duplicate unique IDs.
         for (size_t j = i + 1; j < units_.size(); ++j) {
             if (units_[j].uniqueId == unit.uniqueId) {
                 issues.push_back({
@@ -710,7 +538,6 @@ std::vector<ValidationIssue> StgFormat::validate() const {
             }
         }
 
-        // Validate officer count.
         if (unit.officerCount > 2) {
             issues.push_back({
                 Severity::Error,

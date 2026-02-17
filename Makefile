@@ -23,9 +23,9 @@ clean:
 
 rebuild: clean build
 
-# Generate C++ parsers from Kaitai Struct (.ksy) files
+# Generate C++ parsers from cleave (.clv) specs
 generate:
-	@kaitai-struct-compiler --target cpp_stl --outdir src/parsers src/ksy/*.ksy
+	@for f in src/parsers/*.clv; do cleave generate --lang cpp --out src/parsers "$$f"; done
 
 # Debug build variants
 debug:
@@ -55,5 +55,5 @@ help:
 	@echo "  configure     - Run CMake configuration"
 	@echo "  build-verbose - Build with verbose output"
 	@echo "  test-only     - Run tests without rebuilding"
-	@echo "  generate      - Regenerate C++ from .ksy files"
+	@echo "  generate      - Regenerate C++ from .clv specs"
 	@echo "  help          - Show this help message"

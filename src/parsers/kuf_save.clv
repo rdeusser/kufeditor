@@ -1,0 +1,112 @@
+package kuf_save;
+
+// Save file format for Kingdom Under Fire: The Crusaders (PC port).
+// Saves are created from the world map between missions.
+// The file uses a 4-byte size prefix (Xbox memory card remnant)
+// and is zero-padded to 32KB (0x8000 bytes of stream data).
+format KufSave {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - Save File";
+    extension = "sav";
+    endian    = little;
+}
+
+// Per-unit save data. 483 bytes per unit.
+struct UnitSaveData {
+// Runtime 0x24, default -1
+    unknown_index         u32;
+// Runtime 0x28
+    troop_info_index      u32;
+// Runtime 0x2C. K2_JOB_TYPE enum or CharInfo index (>=43)
+    job_type              u32;
+// Runtime 0x30, sub_type
+    model_id              u32;
+// Runtime 0x34
+    stg_field_190         u32;
+// Runtime 0x38
+    stg_field_192         u32;
+// Runtime 0x3C
+    stg_field_194         u32;
+// Runtime 0x40
+    stg_field_198         u32;
+// Runtime 0x20, unit identity from STG byte 0x56
+    char_id               u32;
+// Runtime 0x48, from STG offset 0x1C0
+    troop_info_index_2    u32;
+// Runtime 0x4C. 0=Player, 1=Enemy, 2=Ally, 3=Neutral
+    ucd                   u32;
+// Runtime 0x44 (written out of sequential order)
+    formation_type        u32;
+// Runtime 0x50
+    grid_config           u32;
+// Runtime 0x54, computed by CalcUnitSkillLevel
+    skill_level           u32;
+// Runtime 0x58, default 0x01
+    byte_58               u8;
+// Runtime 0x59. 0=hero, 1=troop
+    hero_flag             u8;
+// Runtime 0x5A, default 0x01
+    byte_5a               u8;
+    field_60              u32;
+    field_64              u32;
+    field_68              u32;
+// 6 equipment slots, 4 bytes each
+    equipment             bytes[24];
+    leader_abilities_1    bytes[64];
+    officer1_abilities_1  bytes[64];
+    officer2_abilities_1  bytes[64];
+    leader_abilities_2    bytes[64];
+    officer1_abilities_2  bytes[64];
+    officer2_abilities_2  bytes[64];
+    field_504             u32;
+}
+
+struct RosterEntry {
+    byte_61  u8;
+    byte_60  u8;
+    byte_62  u8;
+    byte_63  u8;
+    uint_64  u32;
+}
+
+struct File {
+// File size in bytes (memory card format remnant).
+// Note: game validates size_prefix == file_size at runtime.
+    size_prefix           u32;
+// Save format magic number (0x6E = 110)
+    magic                 u32                       [
+        (builtin).cel = {
+            id: "magic.check"
+            message: "save magic must be 0x6E"
+            expression: "this == 0x6E"
+        }
+    ];
+// Save context (1080 bytes): slot name, timestamp, display strings
+    context_data          bytes[0x438];
+// 0=Hironeiden/Gerald, 1=Vellond/Lucretia, 2=Ecclesia/Kendal, 3=Dark Legion/Regnier
+    campaign_index        u32                       [
+        (builtin).cel = {
+            id: "campaign_index.max"
+            message: "campaign index must be at most 3"
+            expression: "this <= 3"
+        }
+    ];
+// Main save data block (340 bytes from game state object at +0xA4)
+    main_save_block       bytes[0x154];
+    unit_count            u32;
+    units                 UnitSaveData[unit_count];
+// Index of selected/active unit
+    selected_unit_ref     u32;
+    roster_count          u32;
+    roster_entries        RosterEntry[roster_count];
+    second_array_count    u32;
+// Hash-map key references
+    second_array          u32[second_array_count];
+// Mission completion flags (20 entries from DAT_00743960, 0x4C stride)
+    mission_completion    u32[20];
+    current_mission_slot  u32;
+// Remaining data: mission state (variable-length, NOT self-describing),
+// campaign-specific data (5 or 50 bytes), script object array, zero padding.
+// Cannot be structurally parsed without runtime STG context.
+    tail_data             bytes                     [rest = true];
+}

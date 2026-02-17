@@ -1,0 +1,33 @@
+package sox_worldmap_troop_info;
+
+import "common.clv";
+
+// World map troop display data. 35 records controlling barracks
+// equipment display and model advancement on the world map screen.
+format SoxWorldmapTroopInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - WorldMap_TroopInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 28 bytes per record: 7 x i32.
+struct WorldmapTroopInfoRecord {
+    troop_id          i32;
+    primary_ref_id    i32;
+// -1 = none
+    secondary_ref_id  i32;
+// -1 = none
+    tertiary_ref_id   i32;
+// -1 = none
+    unknown_4         i32;
+    icon_id_1         i32;
+    icon_id_2         i32;
+}
+
+struct File {
+    header   SoxHeader;
+    records  WorldmapTroopInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

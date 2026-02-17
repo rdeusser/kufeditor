@@ -1,6 +1,7 @@
 #pragma once
 
 #include "formats/file_format.h"
+#include "parsers/kuf_stg.h"
 
 #include <array>
 #include <cstdint>
@@ -66,8 +67,7 @@ struct StgHeader {
     std::string cubemapTexture;
     uint32_t unitCount = 0;
 
-    // Raw header bytes for round-trip fidelity.
-    std::array<std::byte, 628> rawData{};
+    kuf_stg::StgHeader wire_{};
 };
 
 // STG unit block (544 bytes for Crusaders).
@@ -105,8 +105,7 @@ struct StgUnit {
     uint32_t gridY = 1;
     std::array<float, 22> statOverrides{};
 
-    // Raw unit bytes for round-trip fidelity.
-    std::array<std::byte, 544> rawData{};
+    kuf_stg::UnitBlock wire_{};
 
     StgUnit() {
         leaderAbilities.fill(-1);
@@ -152,7 +151,7 @@ struct StgEvent {
     uint32_t eventId = 0;
     std::vector<StgScriptEntry> conditions;
     std::vector<StgScriptEntry> actions;
-    std::vector<std::byte> rawData;
+    kuf_stg::StgEvent wire_{};
     bool modified = false;
 };
 
@@ -174,7 +173,7 @@ struct StgArea {
     float boundY1 = 0.0f;
     float boundX2 = 0.0f;
     float boundY2 = 0.0f;
-    std::array<std::byte, 84> rawData{};
+    kuf_stg::AreaEntry wire_{};
 };
 
 struct StgFooterEntry {
@@ -213,24 +212,6 @@ public:
     bool tailParsed() const { return tailParsed_; }
 
 private:
-    void parseHeader(const std::byte* data);
-    void patchHeader() const;
-    void parseUnit(StgUnit& unit, const std::byte* data);
-    void patchUnit(StgUnit& unit) const;
-    bool parseTail(const std::byte* data, size_t tailSize);
-
-    size_t parseAreaIds(const std::byte* data, size_t tailSize, size_t offset);
-    size_t parseVariables(const std::byte* data, size_t tailSize, size_t offset);
-    size_t parseEventBlocks(const std::byte* data, size_t tailSize, size_t offset);
-    size_t parseFooter(const std::byte* data, size_t tailSize, size_t offset);
-    StgParamValue readParamValue(const std::byte* data, size_t& offset, size_t limit) const;
-
-    void serializeParamValue(std::vector<std::byte>& out, const StgParamValue& val) const;
-    void serializeAreaIds(std::vector<std::byte>& out) const;
-    void serializeVariables(std::vector<std::byte>& out) const;
-    void serializeEventBlocks(std::vector<std::byte>& out) const;
-    void serializeFooter(std::vector<std::byte>& out) const;
-
     StgHeader header_;
     std::vector<StgUnit> units_;
     std::vector<StgArea> areas_;

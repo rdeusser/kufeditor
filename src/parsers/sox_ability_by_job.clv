@@ -1,0 +1,27 @@
+package sox_ability_by_job;
+
+import "common.clv";
+
+// Maps job type IDs to their available abilities. 35 records, one per
+// job type (K2JobDef.h values 0-34).
+format SoxAbilityByJob {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - AbilityByJob.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 24 bytes per record: 6 x u32.
+struct AbilityByJobRecord {
+// K2_JOB_TYPE enum value
+    job_id         u32;
+// Available ability IDs for this job (-1 = empty)
+    ability_slots  i32[5];
+}
+
+struct File {
+    header   SoxHeader;
+    records  AbilityByJobRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

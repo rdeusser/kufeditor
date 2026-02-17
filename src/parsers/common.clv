@@ -1,0 +1,17 @@
+package common;
+
+struct SoxHeader {
+    marker        u32 [
+        (builtin).cel = {
+            id: "marker.check"
+            message: "SOX marker must be 100"
+            expression: "this == 100"
+        }
+    ];
+    record_count  u32;
+}
+
+struct Lps {
+    length  u16;
+    value   string[length];
+}

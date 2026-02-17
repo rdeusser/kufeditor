@@ -1,0 +1,34 @@
+package sox_skill_info;
+
+import "common.clv";
+
+// Skill definitions. 15 records (IDs 0-13 plus -2 for "Any Elemental").
+// Each record has a localization key, icon path, skill type, and max level.
+format SoxSkillInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - SkillInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// Variable-length record: i32 + string + string + u32 + u32.
+// Skill ID -2 (0xFFFFFFFE) represents "Any Elemental".
+struct SkillInfoRecord {
+// 0-13, or -2 for Any Elemental
+    skill_id    i32;
+// Localization key, e.g. @(S_Melee)
+    loc_key     Lps;
+// Icon path, e.g. IL_SKL_Melee.tga
+    icon        Lps;
+// 1=Combat, 2=Magic
+    skill_type  u32;
+// Maximum skill level (3 for Scouting, 25 for magic, 50 for combat)
+    max_level   u32;
+}
+
+struct File {
+    header   SoxHeader;
+    records  SkillInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

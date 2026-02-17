@@ -1,0 +1,49 @@
+package sox_job_info;
+
+import "common.clv";
+
+// Job/troop type definitions. 35 records (one per K2_JOB_TYPE 0-34).
+// Variable-length records with 17 u32 fields plus two strings.
+// In-memory record size is 0x178 (376) bytes. Field layout confirmed
+// from Ghidra decompilation of ReadJobInfoSOX at 0x005e27c0.
+format SoxJobInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - JobInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 17 x u32 fields + 2 strings per record.
+struct JobInfoRecord {
+// K2_JOB_TYPE enum value (stored as u16 in memory)
+    job_id         u32;
+// Direct u32 in memory at offset 0x04
+    field_1        u32;
+// Direct u32 in memory at offset 0x08
+    field_2        u32;
+// 8 direct u32/i32 fields in memory at offsets 0x0c-0x28
+    stat_fields    i32[8];
+// Skill entry 0 ID (u32->u16 in memory at 0x2c, -1=none)
+    skill_0_id     i32;
+// Skill entry 0 bonus (u32->u16 in memory at 0x2e)
+    skill_0_bonus  i32;
+// Skill entry 1 ID (u32->u16 in memory at 0x30, -1=none)
+    skill_1_id     i32;
+// Skill entry 1 bonus (u32->u16 in memory at 0x32)
+    skill_1_bonus  i32;
+// Skill entry 2 ID (u32->u16 in memory at 0x34, -1=none)
+    skill_2_id     i32;
+// Skill entry 2 bonus (u32->u16 in memory at 0x36)
+    skill_2_bonus  i32;
+// Localization key, e.g. @(J_HArcher), stored at memory offset 0x38
+    loc_key        Lps;
+// Icon path, e.g. IL_job_archer.tga, stored at memory offset 0x158
+    icon           Lps;
+}
+
+struct File {
+    header   SoxHeader;
+    records  JobInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

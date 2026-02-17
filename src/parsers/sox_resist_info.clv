@@ -1,0 +1,33 @@
+package sox_resist_info;
+
+import "common.clv";
+
+// Resistance type definitions. 10 records mapping resistance IDs (0-9)
+// to their UI display names and icons. IDs correspond to:
+// 0=Melee, 1=Ranged, 2=Explosion, 3=Frontal, 4=Fire, 5=Lightning,
+// 6=Ice, 7=Holy, 8=Poison, 9=Curse.
+format SoxResistInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - ResistInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// Variable-length: u32 + u32 + string + string.
+struct ResistInfoRecord {
+// Resistance type ID (0-9)
+    resist_id  u32;
+// Always 10 (0x0A)
+    unknown    u32;
+// Localization key, e.g. @(R_Melee)
+    loc_key    Lps;
+// Icon path, e.g. IL_RES_MELEE.tga
+    icon       Lps;
+}
+
+struct File {
+    header   SoxHeader;
+    records  ResistInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

@@ -1,132 +1,63 @@
 #include "formats/sox_skill_info.h"
 
+#include "parsers/sox_skill_info.h"
+
 #include <cstring>
 
 namespace kuf {
 
-namespace {
-
-template<typename T>
-T readLE(const std::byte* data) {
-    T value;
-    std::memcpy(&value, data, sizeof(T));
-    return value;
-}
-
-template<typename T>
-void writeLE(std::byte* data, T value) {
-    std::memcpy(data, &value, sizeof(T));
-}
-
-constexpr size_t HEADER_SIZE = 8;
-constexpr size_t FOOTER_SIZE = 64;
-
-} // namespace
-
 bool SoxSkillInfo::load(std::span<const std::byte> data) {
-    if (data.size() < HEADER_SIZE + FOOTER_SIZE) {
+    try {
+        const auto* buf = reinterpret_cast<const uint8_t*>(data.data());
+        size_t offset = 0;
+        auto file = sox_skill_info::File::parse(buf, data.size(), offset);
+
+        headerVersion_ = static_cast<int32_t>(file.header.marker);
+
+        skills_.clear();
+        skills_.reserve(file.records.size());
+        for (const auto& rec : file.records) {
+            SkillInfo skill{};
+            skill.id = rec.skill_id;
+            skill.locKey.assign(rec.loc_key.value.begin(), rec.loc_key.value.end());
+            skill.iconPath.assign(rec.icon.value.begin(), rec.icon.value.end());
+            skill.skillType = rec.skill_type;
+            skill.maxLevel = rec.max_level;
+            skills_.push_back(std::move(skill));
+        }
+
+        footer_.resize(64);
+        std::memcpy(footer_.data(), file.footer, 64);
+        version_ = GameVersion::Crusaders;
+        return true;
+    } catch (const std::exception&) {
         return false;
     }
-
-    headerVersion_ = readLE<int32_t>(data.data());
-    int32_t count = readLE<int32_t>(data.data() + 4);
-
-    if (headerVersion_ != 100 || count <= 0) {
-        return false;
-    }
-
-    skills_.clear();
-    skills_.reserve(count);
-
-    const std::byte* ptr = data.data() + HEADER_SIZE;
-    const std::byte* end = data.data() + data.size() - FOOTER_SIZE;
-
-    for (int32_t i = 0; i < count; ++i) {
-        SkillInfo skill{};
-
-        if (ptr + sizeof(int32_t) > end) return false;
-        skill.id = readLE<int32_t>(ptr);
-        ptr += sizeof(int32_t);
-
-        // Localization key: uint16 length + raw bytes.
-        if (ptr + sizeof(uint16_t) > end) return false;
-        uint16_t locLen = readLE<uint16_t>(ptr);
-        ptr += sizeof(uint16_t);
-        if (ptr + locLen > end) return false;
-        skill.locKey.assign(reinterpret_cast<const char*>(ptr), locLen);
-        ptr += locLen;
-
-        // Icon path: uint16 length + raw bytes.
-        if (ptr + sizeof(uint16_t) > end) return false;
-        uint16_t iconLen = readLE<uint16_t>(ptr);
-        ptr += sizeof(uint16_t);
-        if (ptr + iconLen > end) return false;
-        skill.iconPath.assign(reinterpret_cast<const char*>(ptr), iconLen);
-        ptr += iconLen;
-
-        // Slot count and max level.
-        if (ptr + 2 * sizeof(uint32_t) > end) return false;
-        skill.skillType = readLE<uint32_t>(ptr);
-        ptr += sizeof(uint32_t);
-        skill.maxLevel = readLE<uint32_t>(ptr);
-        ptr += sizeof(uint32_t);
-
-        skills_.push_back(std::move(skill));
-    }
-
-    // After all records, remaining data before the footer must be zero.
-    if (ptr != end) {
-        return false;
-    }
-
-    footer_.assign(end, end + FOOTER_SIZE);
-    version_ = GameVersion::Crusaders;
-
-    return true;
 }
 
 std::vector<std::byte> SoxSkillInfo::save() const {
-    // Calculate total size.
-    size_t dataSize = HEADER_SIZE;
-    for (const auto& skill : skills_) {
-        dataSize += sizeof(int32_t);                            // id
-        dataSize += sizeof(uint16_t) + skill.locKey.size();     // locKey
-        dataSize += sizeof(uint16_t) + skill.iconPath.size();   // iconPath
-        dataSize += sizeof(uint32_t);                           // skillType
-        dataSize += sizeof(uint32_t);                           // maxLevel
-    }
-    dataSize += FOOTER_SIZE;
-
-    std::vector<std::byte> data(dataSize, std::byte{0});
-
-    std::byte* ptr = data.data();
-    writeLE(ptr, headerVersion_);
-    writeLE(ptr + 4, static_cast<int32_t>(skills_.size()));
-    ptr += HEADER_SIZE;
+    sox_skill_info::File file{};
+    file.header.marker = static_cast<uint32_t>(headerVersion_);
+    file.header.record_count = static_cast<uint32_t>(skills_.size());
 
     for (const auto& skill : skills_) {
-        writeLE(ptr, skill.id);
-        ptr += sizeof(int32_t);
-
-        writeLE(ptr, static_cast<uint16_t>(skill.locKey.size()));
-        ptr += sizeof(uint16_t);
-        std::memcpy(ptr, skill.locKey.data(), skill.locKey.size());
-        ptr += skill.locKey.size();
-
-        writeLE(ptr, static_cast<uint16_t>(skill.iconPath.size()));
-        ptr += sizeof(uint16_t);
-        std::memcpy(ptr, skill.iconPath.data(), skill.iconPath.size());
-        ptr += skill.iconPath.size();
-
-        writeLE(ptr, skill.skillType);
-        ptr += sizeof(uint32_t);
-        writeLE(ptr, skill.maxLevel);
-        ptr += sizeof(uint32_t);
+        sox_skill_info::SkillInfoRecord rec{};
+        rec.skill_id = skill.id;
+        rec.loc_key.length = static_cast<uint16_t>(skill.locKey.size());
+        rec.loc_key.value.assign(skill.locKey.begin(), skill.locKey.end());
+        rec.icon.length = static_cast<uint16_t>(skill.iconPath.size());
+        rec.icon.value.assign(skill.iconPath.begin(), skill.iconPath.end());
+        rec.skill_type = skill.skillType;
+        rec.max_level = skill.maxLevel;
+        file.records.push_back(std::move(rec));
     }
 
-    std::memcpy(ptr, footer_.data(), footer_.size());
+    std::memcpy(file.footer, footer_.data(), std::min(footer_.size(), size_t{64}));
 
-    return data;
+    auto bytes = file.to_bytes();
+    std::vector<std::byte> result(bytes.size());
+    std::memcpy(result.data(), bytes.data(), bytes.size());
+    return result;
 }
 
 std::vector<ValidationIssue> SoxSkillInfo::validate() const {

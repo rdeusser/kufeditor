@@ -1,0 +1,39 @@
+package sox_leader_generation;
+
+import "common.clv";
+
+// Random leader generation templates. 19 records defining faction,
+// base stats, attributes, and available equipment pools for randomly
+// generated leader characters.
+format SoxLeaderGeneration {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - LeaderGeneration.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 72 bytes per record: 18 x u32.
+struct LeaderGenerationRecord {
+// Leader template ID (references name pool in localized file)
+    template_id              u32;
+// 0=Human, 1=Dark, 2=Mixed
+    faction_type             u32;
+// Base stat tier: 0=Low, 5=Medium, 10=High
+    base_stat                u32;
+// Stat modifier (0-10)
+    stat_modifier            u32;
+    attribute_1              u32;
+    attribute_2              u32;
+    attribute_3              u32;
+// Always 0
+    reserved                 u32;
+// Available ability/equipment slot IDs (-1 = unused)
+    ability_equipment_slots  i32[10];
+}
+
+struct File {
+    header   SoxHeader;
+    records  LeaderGenerationRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

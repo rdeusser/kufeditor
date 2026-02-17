@@ -1,0 +1,26 @@
+package sox_unit_uvid;
+
+import "common.clv";
+
+// Unit upgrade/variant ID mappings. 61 records mapping unit types
+// to their available upgrade paths (up to 17 variant slots per unit).
+format SoxUnitUvid {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - UnitUVID.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 72 bytes per record: 18 x i32.
+struct UnitUvidRecord {
+    unit_id        i32;
+// Upgrade/variant slot IDs (-1 = unused)
+    upgrade_slots  i32[17];
+}
+
+struct File {
+    header   SoxHeader;
+    records  UnitUvidRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

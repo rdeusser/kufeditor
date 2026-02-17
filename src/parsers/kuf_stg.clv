@@ -1,0 +1,239 @@
+package kuf_stg;
+
+// Mission/unit placement file for Kingdom Under Fire: Crusaders.
+// Defines units, map regions, mission variables, and event scripting.
+// Structure confirmed from Ghidra decompilation of ReadSTGFile at
+// 0x00489bc0 and validated against all 178 STG files in game data.
+format KufStg {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - Mission STG File";
+    extension = "stg";
+    endian    = little;
+}
+
+// Variable-length string parameter: u32 length + raw bytes.
+struct StgStringParam {
+    length  u32;
+    value   string[length];
+}
+
+// 620-byte (0x26C) header body, read as a single bulk _fread.
+// Contains mission metadata, filenames, and configuration.
+struct StgHeader {
+// Reserved, always -1
+    reserved_0       i32;
+// Typically 1
+    unknown_1        u32;
+// Typically 3
+    unknown_2        u32;
+// Typically 3
+    unknown_3        u32;
+// Reserved zeros
+    reserved_1       bytes[24];
+// Typically 1
+    unknown_4        u32;
+// Reserved zeros
+    reserved_2       bytes[24];
+// Map file (null-terminated within 64 bytes, e.g. 'E1001.map')
+    map_filename     string[64, terminator = 0x00];
+// Minimap bitmap (null-terminated within 64 bytes, e.g. 'E1001.bmp')
+    bitmap_filename  string[64, terminator = 0x00];
+// Default camera file (null-terminated within 64 bytes, e.g. 'Default.cam')
+    default_camera   string[64, terminator = 0x00];
+// User camera file (null-terminated within 64 bytes, e.g. 'User.cam')
+    user_camera      string[64, terminator = 0x00];
+// Settings file (null-terminated within 64 bytes, e.g. '(08)000114.set')
+    settings_file    string[64, terminator = 0x00];
+// Sky/cloud effects (null-terminated within 64 bytes, e.g. 'cloud08.smfx')
+    sky_effects      string[64, terminator = 0x00];
+// AI script file (null-terminated within 64 bytes, e.g. 'AI1001.txt')
+    ai_script        string[64, terminator = 0x00];
+    padding_208      bytes[4];
+// Cubemap texture (null-terminated within 64 bytes, e.g. 'cubemap.dds')
+    cubemap_texture  string[64, terminator = 0x00];
+// Configuration data including text_table_id and trigger_id
+    config_data      bytes[36];
+}
+
+// 544-byte (0x220) unit definition block.
+struct UnitBlock {
+// Unit name (null-terminated, padded). CP949/EUC-KR encoded.
+    name                  string[32, terminator = 0x00, encoding = "CP949"];
+// Must be unique per mission
+    unique_id             u32;
+// Unit Control Disposition: 0=Player, 1=Enemy, 2=Ally, 3=Neutral
+    ucd                   u8;
+// 0=No, 1=Yes
+    is_hero               u8;
+// 0=Disabled, 1=Enabled
+    is_enabled            u8;
+    reserved_27           u8;
+// -1.0 = use default from CharInfo
+    leader_hp_override    f32;
+// -1.0 = use default from TroopInfo
+    unit_hp_override      f32;
+// Typically 0.5
+    unknown_30            f32;
+    reserved_34           bytes[16];
+// World X coordinate
+    pos_x                 f32;
+// World Y coordinate
+    pos_y                 f32;
+// 0=E, 1=NE, 2=N, 3=NW, 4=W, 5=SW, 6=S, 7=SE
+    facing_direction      u8;
+    extra_flags_1         u8;
+// 0xFF for wildcards
+    extra_flags_2         u8;
+// Typically 3
+    category              u8;
+// Reserved, always -1
+    reserved_50           i32;
+// K2_JOB_TYPE (0-42) or CharInfo index (>=43)
+    leader_job_type       u8;
+// Model/animation variant
+    leader_model_id       u8;
+// Worldmap save slot. 0xFF = no worldmap state
+    leader_worldmap_id    u8;
+// Level 1-99
+    leader_level          u8;
+// 4 skill slots, 2 bytes each (skill_id + skill_level)
+    leader_skills         bytes[8];
+// 23 ability/equipment slots (-1 = empty)
+    leader_abilities      i32[23];
+// Number of officers (0-2)
+    officer_count         u32;
+    officer1_job_type     u8;
+    officer1_model_id     u8;
+    officer1_worldmap_id  u8;
+    officer1_level        u8;
+// Officer 1 skills (8 bytes) + abilities (92 bytes)
+    officer1_data         bytes[100];
+    officer2_job_type     u8;
+    officer2_model_id     u8;
+    officer2_worldmap_id  u8;
+    officer2_level        u8;
+// Officer 2 skills (8 bytes) + abilities (76 bytes)
+    officer2_data         bytes[84];
+    padding_180           bytes[12];
+    animation_config      u32;
+// Formation grid X dimension
+    grid_x                u32;
+// Formation grid Y dimension
+    grid_y                u32;
+    reserved_198          bytes[40];
+// TroopInfo.sox record index. -1 = auto from formation_type
+    troop_info_index      i32;
+    formation_type        u32;
+// 22 float overrides. Value >= 0.0 replaces TroopInfo default, -1.0 = keep default
+    stat_overrides        f32[22];
+}
+
+// 84-byte (0x54) named map region for scripting.
+struct AreaEntry {
+// Area description (null-terminated). CP949/EUC-KR encoded.
+    description  string[32, terminator = 0x00, encoding = "CP949"];
+// Observed: 15
+    unknown_20   u32;
+    unknown_24   u32;
+    unknown_28   bytes[24];
+// Referenced by event actions (e.g., ACT_RESPAWN_*)
+    area_id      u32;
+// Bounding box X1 (world coordinates)
+    bound_x1     f32;
+// Bounding box Y1
+    bound_y1     f32;
+// Bounding box X2
+    bound_x2     f32;
+// Bounding box Y2
+    bound_y2     f32;
+}
+
+// Typed parameter value from ReadSTGParamValue (0x004847b0).
+// 4-byte type tag followed by type-dependent data.
+struct StgParamValue {
+// 0=Int, 1=Float, 2=String, 3=Enum
+    type_tag  u32;
+    value     match type_tag {
+        0 => i32;
+        1 => f32;
+        2 => StgStringParam;
+        3 => i32;
+    };
+}
+
+// Mission state variable. 64-byte name + 4-byte ID + typed initial value.
+struct StgVariable {
+// Variable name (null-terminated). CP949 encoded.
+    name           string[64, terminator = 0x00, encoding = "CP949"];
+// Referenced by CON_VAR_INT_COMPARE and ACT_VAR_INT_SET
+    variable_id    u32;
+// Typed initial value
+    initial_value  StgParamValue;
+}
+
+// Event condition. Type IDs defined in CruMission.h (CON_* enum).
+struct StgCondition {
+// CON_* enum value (e.g., 19 = CON_VAR_INT_COMPARE)
+    type_id      u32;
+    param_count  u32;
+    params       StgParamValue[param_count];
+}
+
+// Event action. Type IDs defined in CruMission.h (ACT_* enum).
+struct StgAction {
+// ACT_* enum value (e.g., 55 = ACT_VAR_INT_SET)
+    type_id      u32;
+    param_count  u32;
+    params       StgParamValue[param_count];
+}
+
+// Variable-length event entry. Events fire when all conditions are true
+// and execute all actions.
+struct StgEvent {
+// Editable event label (null-terminated). CP949/EUC-KR encoded.
+    description      string[64, terminator = 0x00, encoding = "CP949"];
+// Unique event ID within this mission
+    event_id         u32;
+    condition_count  u32;
+    conditions       StgCondition[condition_count];
+    action_count     u32;
+    actions          StgAction[action_count];
+}
+
+// Container for a group of events.
+struct EventBlock {
+// Block identifier/flags (often 0)
+    block_header  u32;
+    event_count   u32;
+    events        StgEvent[event_count];
+}
+
+// 8-byte footer entry. In briefing files these define unit selection slots.
+struct FooterEntry {
+// UniqueID / flags
+    slot_data_1  u32;
+// Configuration
+    slot_data_2  u32;
+}
+
+struct File {
+// Format magic 0x3E9 (1001). All STG files share this value.
+    magic              u32                           [
+        (builtin).cel = {
+            id: "magic.check"
+            message: "STG magic must be 0x3E9"
+            expression: "this == 0x3E9"
+        }
+    ];
+    header             StgHeader;
+    unit_count         u32;
+    units              UnitBlock[unit_count];
+    area_count         u32;
+    areas              AreaEntry[area_count];
+    variable_count     u32;
+    variables          StgVariable[variable_count];
+    event_block_count  u32;
+    event_blocks       EventBlock[event_block_count];
+    footer_count       u32;
+    footer_entries     FooterEntry[footer_count];
+}

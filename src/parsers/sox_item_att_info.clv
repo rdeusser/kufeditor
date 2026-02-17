@@ -1,0 +1,29 @@
+package sox_item_att_info;
+
+import "common.clv";
+
+// Item attribute/enchantment definitions. 23 records defining offensive
+// bonuses, recovery rates, and elemental attack additions.
+format SoxItemAttInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - ItemAttInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 12 bytes per record: 3 x u32.
+struct ItemAttInfoRecord {
+// 0-22
+    attribute_id  u32;
+// Inversely related to bonus strength: 0=Special, 2=High(+20-25%), 5=Medium(+10-15%), 10=Low(+10%)
+    power_value   u32;
+// 0=HP Recovery, 1=EXP, 2=SP, 3=HP Bonus, 4=HP Recovery+, 5=KO Recovery, 6=Autoblock, 7=Elemental Attack
+    category      u32;
+}
+
+struct File {
+    header   SoxHeader;
+    records  ItemAttInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

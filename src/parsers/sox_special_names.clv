@@ -1,0 +1,34 @@
+package sox_special_names;
+
+import "common.clv";
+
+// Special character name translations. 12 records with key/value string
+// pairs. Names starting with '-' in STG unit blocks are looked up here
+// via strncmp to get display names.
+format SoxSpecialNames {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - SpecialNames.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// Length-prefixed raw bytes (may contain non-ASCII).
+struct LpsBytes {
+    length  u16;
+    value   bytes[length];
+}
+
+// Two length-prefixed byte strings per record: key + value.
+struct SpecialNamesRecord {
+// Name key (may be Korean text or ASCII like 'monarch')
+    key    LpsBytes;
+// Name value (may be empty)
+    value  LpsBytes;
+}
+
+struct File {
+    header   SoxHeader;
+    records  SpecialNamesRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

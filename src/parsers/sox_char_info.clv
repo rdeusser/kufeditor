@@ -1,0 +1,46 @@
+package sox_char_info;
+
+import "common.clv";
+
+// Character/unit type configurations. 63 records defining hero classes,
+// animations, combat stats, and ability/equipment slots.
+format SoxCharInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - CharInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 136 bytes per record: 34 x u32.
+struct CharInfoRecord {
+    character_id              u32;
+// -1 = none. Heroes: 30=Gerald, 31=Kendal, 32=Regnier, 44=Lucretia
+    animation_id              i32;
+// -1 = default model
+    model_id_variant          i32;
+// -1 = default
+    unknown_03                i32;
+    max_hp                    u32;
+// 5=Human Hero, 10=Dark Elf Hero, 15=Empowered, 20=Standard Troop, 40=Officer
+    hero_class                u32;
+    unknown_hp_field          u32;
+    unknown_07                u32;
+    unknown_08                u32;
+    base_stat_value           u32;
+    unknown_10                u32;
+    unknown_11                u32;
+// Combat stats and modifiers
+    combat_stats              u32[8];
+// Skill/ability slot IDs (-1 = empty)
+    skill_ability_slots       i32[8];
+// Additional ability slots (-1 = empty)
+    additional_ability_slots  i32[5];
+    unknown_footer            u32;
+}
+
+struct File {
+    header   SoxHeader;
+    records  CharInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

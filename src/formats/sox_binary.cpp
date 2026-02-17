@@ -1,163 +1,134 @@
 #include "formats/sox_binary.h"
 
+#include "parsers/sox_troop_info.h"
+
 #include <cstring>
 
 namespace kuf {
 
 namespace {
 
-template<typename T>
-T readLE(const std::byte* data) {
-    T value;
-    std::memcpy(&value, data, sizeof(T));
-    return value;
+TroopInfo wireToTroop(const sox_troop_info::TroopInfoRecord& r) {
+    TroopInfo t{};
+    t.job = r.job;
+    t.typeId = r.type_id;
+    t.moveSpeed = static_cast<float>(r.move_speed);
+    t.rotateRate = static_cast<float>(r.rotate_rate);
+    t.moveAcceleration = static_cast<float>(r.move_acceleration);
+    t.moveDeceleration = static_cast<float>(r.move_deceleration);
+    t.sightRange = static_cast<float>(r.sight_range);
+    t.attackRangeMax = static_cast<float>(r.attack_range_max);
+    t.attackRangeMin = static_cast<float>(r.attack_range_min);
+    t.attackFrontRange = static_cast<float>(r.attack_front_range);
+    t.directAttack = static_cast<float>(r.direct_attack);
+    t.indirectAttack = static_cast<float>(r.indirect_attack);
+    t.defense = static_cast<float>(r.defense);
+    t.baseWidth = static_cast<float>(r.base_width);
+    t.resistMelee = static_cast<float>(r.resist_melee);
+    t.resistRanged = static_cast<float>(r.resist_ranged);
+    t.resistFrontal = static_cast<float>(r.resist_frontal);
+    t.resistExplosion = static_cast<float>(r.resist_explosion);
+    t.resistFire = static_cast<float>(r.resist_fire);
+    t.resistIce = static_cast<float>(r.resist_ice);
+    t.resistLightning = static_cast<float>(r.resist_lightning);
+    t.resistHoly = static_cast<float>(r.resist_holy);
+    t.resistCurse = static_cast<float>(r.resist_curse);
+    t.resistEarth = static_cast<float>(r.resist_earth);
+    t.maxUnitSpeedMultiplier = static_cast<float>(r.max_unit_speed_multiplier);
+    t.defaultUnitHp = static_cast<float>(r.default_unit_hp);
+    t.formationRandom = r.formation_random;
+    t.defaultUnitNumX = r.default_unit_num_x;
+    t.defaultUnitNumY = r.default_unit_num_y;
+    t.unitHpLevelUp = static_cast<float>(r.unit_hp_level_up);
+    t.levelUpData[0] = {r.level_up_0_skill_id, static_cast<float>(r.level_up_0_bonus)};
+    t.levelUpData[1] = {r.level_up_1_skill_id, static_cast<float>(r.level_up_1_bonus)};
+    t.levelUpData[2] = {r.level_up_2_skill_id, static_cast<float>(r.level_up_2_bonus)};
+    t.damageDistribution = static_cast<float>(r.damage_distribution);
+    return t;
 }
 
-template<typename T>
-void writeLE(std::byte* data, T value) {
-    std::memcpy(data, &value, sizeof(T));
+sox_troop_info::TroopInfoRecord troopToWire(const TroopInfo& t) {
+    sox_troop_info::TroopInfoRecord r{};
+    r.job = t.job;
+    r.type_id = t.typeId;
+    r.move_speed = static_cast<int32_t>(t.moveSpeed);
+    r.rotate_rate = static_cast<int32_t>(t.rotateRate);
+    r.move_acceleration = static_cast<int32_t>(t.moveAcceleration);
+    r.move_deceleration = static_cast<int32_t>(t.moveDeceleration);
+    r.sight_range = static_cast<int32_t>(t.sightRange);
+    r.attack_range_max = static_cast<int32_t>(t.attackRangeMax);
+    r.attack_range_min = static_cast<int32_t>(t.attackRangeMin);
+    r.attack_front_range = static_cast<int32_t>(t.attackFrontRange);
+    r.direct_attack = static_cast<int32_t>(t.directAttack);
+    r.indirect_attack = static_cast<int32_t>(t.indirectAttack);
+    r.defense = static_cast<int32_t>(t.defense);
+    r.base_width = static_cast<int32_t>(t.baseWidth);
+    r.resist_melee = static_cast<int32_t>(t.resistMelee);
+    r.resist_ranged = static_cast<int32_t>(t.resistRanged);
+    r.resist_frontal = static_cast<int32_t>(t.resistFrontal);
+    r.resist_explosion = static_cast<int32_t>(t.resistExplosion);
+    r.resist_fire = static_cast<int32_t>(t.resistFire);
+    r.resist_ice = static_cast<int32_t>(t.resistIce);
+    r.resist_lightning = static_cast<int32_t>(t.resistLightning);
+    r.resist_holy = static_cast<int32_t>(t.resistHoly);
+    r.resist_curse = static_cast<int32_t>(t.resistCurse);
+    r.resist_earth = static_cast<int32_t>(t.resistEarth);
+    r.max_unit_speed_multiplier = static_cast<int32_t>(t.maxUnitSpeedMultiplier);
+    r.default_unit_hp = static_cast<int32_t>(t.defaultUnitHp);
+    r.formation_random = t.formationRandom;
+    r.default_unit_num_x = t.defaultUnitNumX;
+    r.default_unit_num_y = t.defaultUnitNumY;
+    r.unit_hp_level_up = static_cast<int32_t>(t.unitHpLevelUp);
+    r.level_up_0_skill_id = t.levelUpData[0].skillId;
+    r.level_up_0_bonus = static_cast<int32_t>(t.levelUpData[0].bonusPerLevel);
+    r.level_up_1_skill_id = t.levelUpData[1].skillId;
+    r.level_up_1_bonus = static_cast<int32_t>(t.levelUpData[1].bonusPerLevel);
+    r.level_up_2_skill_id = t.levelUpData[2].skillId;
+    r.level_up_2_bonus = static_cast<int32_t>(t.levelUpData[2].bonusPerLevel);
+    r.damage_distribution = static_cast<int32_t>(t.damageDistribution);
+    return r;
 }
-
-// Read int32 and convert to float (file stores integers, not IEEE floats).
-float readIntAsFloat(const std::byte* data) {
-    return static_cast<float>(readLE<int32_t>(data));
-}
-
-// Write float as int32 (reverse of readIntAsFloat).
-void writeFloatAsInt(std::byte* data, float value) {
-    writeLE(data, static_cast<int32_t>(value));
-}
-
-constexpr size_t HEADER_SIZE = 8;
-constexpr size_t TROOP_RECORD_SIZE = 148;
-constexpr size_t FOOTER_SIZE = 64;
 
 } // namespace
 
 bool SoxBinary::load(std::span<const std::byte> data) {
-    if (data.size() < HEADER_SIZE) {
-        return false;
-    }
+    try {
+        const auto* buf = reinterpret_cast<const uint8_t*>(data.data());
+        size_t offset = 0;
+        auto file = sox_troop_info::File::parse(buf, data.size(), offset);
 
-    headerVersion_ = readLE<int32_t>(data.data());
-    int32_t count = readLE<int32_t>(data.data() + 4);
+        headerVersion_ = static_cast<int32_t>(file.header.marker);
 
-    if (headerVersion_ != 100) {
-        return false;
-    }
-
-    size_t expectedSize = HEADER_SIZE + (count * TROOP_RECORD_SIZE) + FOOTER_SIZE;
-    if (data.size() < expectedSize) {
-        return false;
-    }
-
-    troops_.clear();
-    troops_.reserve(count);
-
-    const std::byte* ptr = data.data() + HEADER_SIZE;
-    for (int32_t i = 0; i < count; ++i) {
-        TroopInfo troop{};
-        troop.job = readLE<int32_t>(ptr + 0x00);
-        troop.typeId = readLE<int32_t>(ptr + 0x04);
-        troop.moveSpeed = readIntAsFloat(ptr + 0x08);
-        troop.rotateRate = readIntAsFloat(ptr + 0x0C);
-        troop.moveAcceleration = readIntAsFloat(ptr + 0x10);
-        troop.moveDeceleration = readIntAsFloat(ptr + 0x14);
-        troop.sightRange = readIntAsFloat(ptr + 0x18);
-        troop.attackRangeMax = readIntAsFloat(ptr + 0x1C);
-        troop.attackRangeMin = readIntAsFloat(ptr + 0x20);
-        troop.attackFrontRange = readIntAsFloat(ptr + 0x24);
-        troop.directAttack = readIntAsFloat(ptr + 0x28);
-        troop.indirectAttack = readIntAsFloat(ptr + 0x2C);
-        troop.defense = readIntAsFloat(ptr + 0x30);
-        troop.baseWidth = readIntAsFloat(ptr + 0x34);
-        troop.resistMelee = readIntAsFloat(ptr + 0x38);
-        troop.resistRanged = readIntAsFloat(ptr + 0x3C);
-        troop.resistFrontal = readIntAsFloat(ptr + 0x40);
-        troop.resistExplosion = readIntAsFloat(ptr + 0x44);
-        troop.resistFire = readIntAsFloat(ptr + 0x48);
-        troop.resistIce = readIntAsFloat(ptr + 0x4C);
-        troop.resistLightning = readIntAsFloat(ptr + 0x50);
-        troop.resistHoly = readIntAsFloat(ptr + 0x54);
-        troop.resistCurse = readIntAsFloat(ptr + 0x58);
-        troop.resistEarth = readIntAsFloat(ptr + 0x5C);
-        troop.maxUnitSpeedMultiplier = readIntAsFloat(ptr + 0x60);
-        troop.defaultUnitHp = readIntAsFloat(ptr + 0x64);
-        troop.formationRandom = readLE<int32_t>(ptr + 0x68);
-        troop.defaultUnitNumX = readLE<int32_t>(ptr + 0x6C);
-        troop.defaultUnitNumY = readLE<int32_t>(ptr + 0x70);
-        troop.unitHpLevelUp = readIntAsFloat(ptr + 0x74);
-
-        for (int j = 0; j < 3; ++j) {
-            troop.levelUpData[j].skillId = readLE<int32_t>(ptr + 0x78 + j * 8);
-            troop.levelUpData[j].bonusPerLevel = readIntAsFloat(ptr + 0x7C + j * 8);
+        troops_.clear();
+        troops_.reserve(file.records.size());
+        for (const auto& rec : file.records) {
+            troops_.push_back(wireToTroop(rec));
         }
 
-        troop.damageDistribution = readIntAsFloat(ptr + 0x90);
-
-        troops_.push_back(troop);
-        ptr += TROOP_RECORD_SIZE;
+        footer_.resize(64);
+        std::memcpy(footer_.data(), file.footer, 64);
+        version_ = GameVersion::Crusaders;
+        return true;
+    } catch (const std::exception&) {
+        return false;
     }
-
-    footer_.assign(ptr, ptr + FOOTER_SIZE);
-    version_ = GameVersion::Crusaders;
-
-    return true;
 }
 
 std::vector<std::byte> SoxBinary::save() const {
-    std::vector<std::byte> data;
-    data.resize(HEADER_SIZE + troops_.size() * TROOP_RECORD_SIZE + FOOTER_SIZE);
-
-    std::byte* ptr = data.data();
-    writeLE(ptr, headerVersion_);
-    writeLE(ptr + 4, static_cast<int32_t>(troops_.size()));
-    ptr += HEADER_SIZE;
+    sox_troop_info::File file{};
+    file.header.marker = static_cast<uint32_t>(headerVersion_);
+    file.header.record_count = static_cast<uint32_t>(troops_.size());
 
     for (const auto& troop : troops_) {
-        writeLE(ptr + 0x00, troop.job);
-        writeLE(ptr + 0x04, troop.typeId);
-        writeFloatAsInt(ptr + 0x08, troop.moveSpeed);
-        writeFloatAsInt(ptr + 0x0C, troop.rotateRate);
-        writeFloatAsInt(ptr + 0x10, troop.moveAcceleration);
-        writeFloatAsInt(ptr + 0x14, troop.moveDeceleration);
-        writeFloatAsInt(ptr + 0x18, troop.sightRange);
-        writeFloatAsInt(ptr + 0x1C, troop.attackRangeMax);
-        writeFloatAsInt(ptr + 0x20, troop.attackRangeMin);
-        writeFloatAsInt(ptr + 0x24, troop.attackFrontRange);
-        writeFloatAsInt(ptr + 0x28, troop.directAttack);
-        writeFloatAsInt(ptr + 0x2C, troop.indirectAttack);
-        writeFloatAsInt(ptr + 0x30, troop.defense);
-        writeFloatAsInt(ptr + 0x34, troop.baseWidth);
-        writeFloatAsInt(ptr + 0x38, troop.resistMelee);
-        writeFloatAsInt(ptr + 0x3C, troop.resistRanged);
-        writeFloatAsInt(ptr + 0x40, troop.resistFrontal);
-        writeFloatAsInt(ptr + 0x44, troop.resistExplosion);
-        writeFloatAsInt(ptr + 0x48, troop.resistFire);
-        writeFloatAsInt(ptr + 0x4C, troop.resistIce);
-        writeFloatAsInt(ptr + 0x50, troop.resistLightning);
-        writeFloatAsInt(ptr + 0x54, troop.resistHoly);
-        writeFloatAsInt(ptr + 0x58, troop.resistCurse);
-        writeFloatAsInt(ptr + 0x5C, troop.resistEarth);
-        writeFloatAsInt(ptr + 0x60, troop.maxUnitSpeedMultiplier);
-        writeFloatAsInt(ptr + 0x64, troop.defaultUnitHp);
-        writeLE(ptr + 0x68, troop.formationRandom);
-        writeLE(ptr + 0x6C, troop.defaultUnitNumX);
-        writeLE(ptr + 0x70, troop.defaultUnitNumY);
-        writeFloatAsInt(ptr + 0x74, troop.unitHpLevelUp);
-
-        for (int j = 0; j < 3; ++j) {
-            writeLE(ptr + 0x78 + j * 8, troop.levelUpData[j].skillId);
-            writeFloatAsInt(ptr + 0x7C + j * 8, troop.levelUpData[j].bonusPerLevel);
-        }
-
-        writeFloatAsInt(ptr + 0x90, troop.damageDistribution);
-        ptr += TROOP_RECORD_SIZE;
+        file.records.push_back(troopToWire(troop));
     }
 
-    std::memcpy(ptr, footer_.data(), footer_.size());
+    std::memcpy(file.footer, footer_.data(), std::min(footer_.size(), size_t{64}));
 
-    return data;
+    auto bytes = file.to_bytes();
+    std::vector<std::byte> result(bytes.size());
+    std::memcpy(result.data(), bytes.data(), bytes.size());
+    return result;
 }
 
 std::vector<ValidationIssue> SoxBinary::validate() const {

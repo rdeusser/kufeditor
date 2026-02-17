@@ -1,0 +1,27 @@
+package sox_library_info;
+
+import "common.clv";
+
+// Library/encyclopedia offset table. 100 records pointing to in-game
+// library/codex content.
+format SoxLibraryInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - LibraryInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 6 bytes per record: u32 + u16.
+struct LibraryInfoRecord {
+// Absolute file position of referenced data
+    data_offset  u32;
+// Always 0
+    unknown      u16;
+}
+
+struct File {
+    header   SoxHeader;
+    records  LibraryInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}

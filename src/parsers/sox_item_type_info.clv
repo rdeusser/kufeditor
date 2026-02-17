@@ -1,0 +1,94 @@
+package sox_item_type_info;
+
+import "common.clv";
+
+// Item/equipment type definitions. 96 records with item stats,
+// resistances, and a name string. Uses format version 2 (NOT the
+// standard marker 100) and has NO THEND footer.
+format SoxItemTypeInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - ItemTypeInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// Format version 2 (NOT standard marker 100). No THEND footer.
+struct ItemTypeInfoHeader {
+    marker        u32 [
+        (builtin).cel = {
+            id: "marker.check"
+            message: "ItemTypeInfo marker must be 2"
+            expression: "this == 2"
+        }
+    ];
+    record_count  u32;
+}
+
+// 44 x u32 fields + 1 string. All fields read as u32 from file.
+struct ItemTypeInfoRecord {
+// Direct u32 at memory +0x00
+    field_00      u32;
+// Direct u32 at memory +0x04
+    field_01      u32;
+// Direct u32 at memory +0x08
+    field_02      u32;
+// u32->u16 at memory +0x0c (pair loop A, iter 0, slot 0)
+    pair_a0_0     u32;
+// u32->u16 at memory +0x10 (pair loop A, iter 0, slot 1)
+    pair_a0_1     u32;
+// u32->u16 at memory +0x14 (pair loop A, iter 0, slot 2)
+    pair_a0_2     u32;
+// u32->u16 at memory +0x0e (pair loop A, iter 1, slot 0)
+    pair_a1_0     u32;
+// u32->u16 at memory +0x12 (pair loop A, iter 1, slot 1)
+    pair_a1_1     u32;
+// u32->u16 at memory +0x16 (pair loop A, iter 1, slot 2)
+    pair_a1_2     u32;
+// u32->u16 at memory +0x24
+    field_09      u32;
+// u32->u16 at memory +0x26
+    field_10      u32;
+// u32->u16 at memory +0x28
+    field_11      u32;
+// u32->u16 at memory +0x2a
+    field_12      u32;
+// u32->u8 (byte) at memory +0x2c
+    field_13      u32;
+// u32->bool at memory +0x2d
+    field_14      u32;
+// u32->bool at memory +0x2e
+    field_15      u32;
+// u32->u16 at memory +0x18 (pair loop B, iter 0, slot 0)
+    pair_b0_0     u32;
+// u32->u16 at memory +0x1c (pair loop B, iter 0, slot 1)
+    pair_b0_1     u32;
+// u32->u16 at memory +0x20 (pair loop B, iter 0, slot 2)
+    pair_b0_2     u32;
+// u32->u16 at memory +0x1a (pair loop B, iter 1, slot 0)
+    pair_b1_0     u32;
+// u32->u16 at memory +0x1e (pair loop B, iter 1, slot 1)
+    pair_b1_1     u32;
+// u32->u16 at memory +0x22 (pair loop B, iter 1, slot 2)
+    pair_b1_2     u32;
+// u32->u16 at memory +0x30
+    field_22      u32;
+// u32->u16 at memory +0x32
+    field_23      u32;
+// u32->u16 at memory +0x34
+    field_24      u32;
+// u32->bool at memory +0x2f
+    field_25      u32;
+// u32->u16 equipment stats slot 0 at memory +0x36..+0x40
+    equip_slot_0  u32[6];
+// u32->u16 equipment stats slot 1 at memory +0x82..+0x8c
+    equip_slot_1  u32[6];
+// u32->u16 equipment stats slot 2 at memory +0xce..+0xd8
+    equip_slot_2  u32[6];
+// Item key/name string, stored at memory offset 0x11a
+    name          Lps;
+}
+
+struct File {
+    header   ItemTypeInfoHeader;
+    records  ItemTypeInfoRecord [count = header.record_count];
+}

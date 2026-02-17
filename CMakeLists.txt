@@ -75,14 +75,8 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 FetchContent_MakeAvailable(miniz)
 unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
-# Kaitai Struct C++ runtime for generated parsers
-FetchContent_Declare(
-    kaitai_struct_cpp_stl_runtime
-    GIT_REPOSITORY https://github.com/kaitai-io/kaitai_struct_cpp_stl_runtime.git
-    GIT_TAG 0.11
-)
-set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(kaitai_struct_cpp_stl_runtime)
+# Cleave-generated parsers
+file(GLOB CLEAVE_PARSER_SOURCES src/parsers/*.cpp)
 
 # ImGui library (manual setup required for imgui)
 add_library(imgui STATIC
@@ -152,7 +146,7 @@ add_executable(kufeditor
     src/mods/backup_manager.cpp
     src/mods/mod_manager.cpp
     src/ui/views/mod_manager_view.cpp
-    src/parsers/kuf_save.cpp
+    ${CLEAVE_PARSER_SOURCES}
     ${PLATFORM_SOURCES}
 )
 target_link_libraries(kufeditor PRIVATE
@@ -161,7 +155,6 @@ target_link_libraries(kufeditor PRIVATE
     Iconv::Iconv
     ${LIBCONFIG_LINK_TARGET}
     miniz
-    kaitai_struct_cpp_stl_runtime
 )
 target_include_directories(kufeditor PRIVATE src)
 
@@ -193,9 +186,9 @@ add_executable(kufeditor_tests
     src/formats/sox_encoding.cpp
     src/formats/stg_format.cpp
     src/formats/stg_script_catalog.cpp
-    src/parsers/kuf_save.cpp
+    ${CLEAVE_PARSER_SOURCES}
 )
-target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain Iconv::Iconv kaitai_struct_cpp_stl_runtime)
+target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain Iconv::Iconv)
 target_include_directories(kufeditor_tests PRIVATE src)
 include(CTest)
 include(Catch)

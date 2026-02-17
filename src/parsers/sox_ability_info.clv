@@ -1,0 +1,60 @@
+package sox_ability_info;
+
+import "common.clv";
+
+// Ability definitions. Variable-length records with 15 u32 fields
+// (stored as u16/bool in memory) plus two length-prefixed strings.
+// Field layout confirmed from Ghidra decompilation of ReadAbilityInfoSOX
+// at 0x005e1880. In-memory record size is 0x1e4 (484) bytes.
+format SoxAbilityInfo {
+    root      = File;
+    title     = "Kingdom Under Fire: Crusaders - AbilityInfo.sox";
+    extension = "sox";
+    endian    = little;
+}
+
+// 15 x u32 fields + 2 strings per record.
+// All integer fields read as u32 from file but stored as u16 or bool in memory.
+struct AbilityInfoRecord {
+// Ability type ID (K2AbilityDef.h enum, stored as u16 in memory)
+    ability_id     u32;
+// Boolean flag (stored as bool in memory)
+    is_active      u32;
+// Stored as u16 in memory
+    field_02       u32;
+// Stored as u16 in memory
+    field_03       u32;
+// Stored as u16 in memory (-1 = none)
+    field_04       i32;
+// Stored as u16 in memory (-1 = none)
+    field_05       i32;
+// Stored as u16 in memory (-1 = none)
+    field_06       i32;
+// Stored as u16 in memory
+    field_07       u32;
+// Stored as u16 in memory
+    field_08       u32;
+// Stored as u32 in memory (direct copy)
+    field_09       u32;
+// Stored as u32 in memory (direct copy)
+    field_10       u32;
+// Stored as u16 in memory at offset 0x1c
+    pair_0_first   u32;
+// Stored as u16 in memory at offset 0x1e
+    pair_0_second  u32;
+// Stored as u16 in memory at offset 0x20 (-1 = none)
+    pair_1_first   i32;
+// Stored as u16 in memory at offset 0x22 (-1 = none)
+    pair_1_second  i32;
+// Localization key, e.g. @(Scout), stored at memory offset 0xa4
+    loc_key        Lps;
+// Icon path, e.g. IL_ABL_SCOUT.tga, stored at memory offset 0xc4
+    icon           Lps;
+}
+
+struct File {
+    header   SoxHeader;
+    records  AbilityInfoRecord [count = header.record_count];
+// THEND + space padding
+    footer   bytes[64];
+}
