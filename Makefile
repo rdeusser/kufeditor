@@ -7,10 +7,10 @@ all: build
 
 configure:
 	@mkdir -p $(BUILD_DIR)
-	@cd $(BUILD_DIR) && cmake .. -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+	@cd $(BUILD_DIR) && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
 
 build: configure
-	@cmake --build $(BUILD_DIR) --config $(BUILD_TYPE)
+	@cmake --build $(BUILD_DIR) --config $(BUILD_TYPE) --parallel
 
 run: build
 	@./$(BUILD_DIR)/kufeditor
@@ -37,7 +37,7 @@ run-debug:
 
 # Verbose build
 build-verbose: configure
-	@cmake --build $(BUILD_DIR) --config $(BUILD_TYPE) --verbose
+	@cmake --build $(BUILD_DIR) --config $(BUILD_TYPE) --parallel --verbose
 
 # Just run tests without rebuilding
 test-only:
