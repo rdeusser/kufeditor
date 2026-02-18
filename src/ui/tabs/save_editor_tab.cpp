@@ -597,7 +597,7 @@ void SaveEditorTab::drawEquipmentSlot(const char* label, SaveEquipmentSlot& slot
                 snprintf(preview, sizeof(preview), "Item %d", slot.itemTypeId);
             }
 
-            if (ImGui::BeginCombo("Item Type", preview)) {
+            if (BeginComboCentered("Item Type", preview)) {
                 for (int t = 0; t < static_cast<int>(typeCount); ++t) {
                     std::string name = nameDictionary_.itemTypeBaseName(t);
                     if (name.empty()) continue;
@@ -649,7 +649,7 @@ void SaveEditorTab::drawEquipmentSlot(const char* label, SaveEquipmentSlot& slot
         auto skillCombo = [&](const char* comboLabel, const char* bonusLabel,
                               int32_t& type, int32_t& bonus) {
             const char* preview = (type >= 0 && type <= 14) ? skillTypeNames[type] : "(None)";
-            if (ImGui::BeginCombo(comboLabel, preview)) {
+            if (BeginComboCentered(comboLabel, preview)) {
                 bool noneSelected = (type < 0);
                 if (ImGui::Selectable("(None)", noneSelected)) {
                     document_->undoStack->execute(
@@ -685,7 +685,7 @@ void SaveEditorTab::drawEquipmentSlot(const char* label, SaveEquipmentSlot& slot
         auto resistCombo = [&](const char* comboLabel, const char* bonusLabel,
                                int32_t& type, int32_t& bonus) {
             const char* preview = (type >= 0 && type <= 9) ? resistTypeNames[type] : "(None)";
-            if (ImGui::BeginCombo(comboLabel, preview)) {
+            if (BeginComboCentered(comboLabel, preview)) {
                 bool noneSelected = (type < 0);
                 if (ImGui::Selectable("(None)", noneSelected)) {
                     document_->undoStack->execute(
@@ -716,35 +716,59 @@ void SaveEditorTab::drawEquipmentSlot(const char* label, SaveEquipmentSlot& slot
         resistCombo("Resist Type 2", "Resist Bonus 2", slot.resistType2, slot.resistBonus2);
     }
 
-    // Attribute inputs with resolved name suffix.
+    // Attribute dropdowns (fall back to DragInt if no attribute data loaded).
     {
-        int att1 = slot.attribute1Index;
-        const char* att1Name = nameDictionary_.itemAttName(att1);
-        char att1Label[64];
-        if (att1Name) {
-            snprintf(att1Label, sizeof(att1Label), "Attribute 1 (%s)", att1Name);
-        } else {
-            snprintf(att1Label, sizeof(att1Label), "Attribute 1");
-        }
-        if (ImGui::DragInt(att1Label, &att1)) {
-            document_->undoStack->execute(
-                makeSetFieldCommand(&slot.attribute1Index, static_cast<int32_t>(att1), "Change attribute 1"));
-            document_->dirty = true;
-        }
+        auto attCombo = [&](const char* label, int32_t& attrIndex) {
+            size_t attCount = nameDictionary_.itemAttCount();
+            if (attCount > 0) {
+                const char* currentName = nameDictionary_.itemAttName(attrIndex);
+                char preview[64];
+                if (attrIndex < 0 || !currentName) {
+                    snprintf(preview, sizeof(preview), "(None)");
+                } else {
+                    snprintf(preview, sizeof(preview), "%s (%d)", currentName, attrIndex);
+                }
 
-        int att2 = slot.attribute2Index;
-        const char* att2Name = nameDictionary_.itemAttName(att2);
-        char att2Label[64];
-        if (att2Name) {
-            snprintf(att2Label, sizeof(att2Label), "Attribute 2 (%s)", att2Name);
-        } else {
-            snprintf(att2Label, sizeof(att2Label), "Attribute 2");
-        }
-        if (ImGui::DragInt(att2Label, &att2)) {
-            document_->undoStack->execute(
-                makeSetFieldCommand(&slot.attribute2Index, static_cast<int32_t>(att2), "Change attribute 2"));
-            document_->dirty = true;
-        }
+                if (BeginComboCentered(label, preview)) {
+                    bool noneSelected = (attrIndex < 0);
+                    if (ImGui::Selectable("(None)", noneSelected)) {
+                        document_->undoStack->execute(
+                            makeSetFieldCommand(&attrIndex, static_cast<int32_t>(-1), std::string("Change ") + label));
+                        document_->dirty = true;
+                    }
+                    if (noneSelected) ImGui::SetItemDefaultFocus();
+
+                    for (int a = 0; a < static_cast<int>(attCount); ++a) {
+                        const char* name = nameDictionary_.itemAttName(a);
+                        if (!name) continue;
+                        char itemLabel[64];
+                        snprintf(itemLabel, sizeof(itemLabel), "%s (%d)", name, a);
+                        bool sel = (attrIndex == a);
+                        if (ImGui::Selectable(itemLabel, sel)) {
+                            document_->undoStack->execute(
+                                makeSetFieldCommand(&attrIndex, static_cast<int32_t>(a), std::string("Change ") + label));
+                            document_->dirty = true;
+                        }
+                        if (sel) ImGui::SetItemDefaultFocus();
+                        if (ImGui::IsItemHovered()) {
+                            const char* desc = nameDictionary_.itemAttDescription(a);
+                            if (desc) ImGui::SetTooltip("%s", desc);
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+            } else {
+                int val = attrIndex;
+                if (ImGui::DragInt(label, &val)) {
+                    document_->undoStack->execute(
+                        makeSetFieldCommand(&attrIndex, static_cast<int32_t>(val), std::string("Change ") + label));
+                    document_->dirty = true;
+                }
+            }
+        };
+
+        attCombo("Attribute 1", slot.attribute1Index);
+        attCombo("Attribute 2", slot.attribute2Index);
     }
 
     // Rarely-changed fields in a collapsed section.

@@ -1075,7 +1075,7 @@ void StgEditorTab::drawScriptEntry(const char* entryLabel, StgScriptEntry& entry
         ImGui::TextUnformatted("Type");
         ImGui::SameLine(kParamLabelWidth);
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::BeginCombo("##typeId", preview)) {
+        if (BeginComboCentered("##typeId", preview)) {
             for (size_t ci = 0; ci < catalogSize; ++ci) {
                 char itemLabel[64];
                 snprintf(itemLabel, sizeof(itemLabel), "%s (%u)", catalog[ci].name, catalog[ci].id);
@@ -1162,7 +1162,7 @@ void StgEditorTab::drawParamValue(const char* label, StgParamValue& param, StgEv
             snprintf(preview, sizeof(preview), "Unknown (%d)", param.intValue);
         }
 
-        if (ImGui::BeginCombo("##v", preview)) {
+        if (BeginComboCentered("##v", preview)) {
             for (const auto& unit : units) {
                 std::string displayName = resolveDisplayName(unit, nameDictionary_);
                 char itemLabel[64];

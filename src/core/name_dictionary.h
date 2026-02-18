@@ -35,6 +35,7 @@ public:
 
     std::string weaponName(int32_t itemTypeId, uint16_t variantIndex, int16_t enhancementTier) const;
     size_t itemTypeCount() const { return weaponNames_.size(); }
+    size_t itemAttCount() const { return itemAttNames_.size(); }
     std::string itemTypeBaseName(int32_t itemTypeId) const;
     const char* itemAttName(int32_t attrIndex) const;
     const char* itemAttDescription(int32_t attrIndex) const;
