@@ -158,6 +158,11 @@ target_link_libraries(kufeditor PRIVATE
 )
 target_include_directories(kufeditor PRIVATE src)
 
+# On Windows, build as a GUI application (no console window).
+if(WIN32)
+    set_target_properties(kufeditor PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
 # Silence OpenGL deprecation warnings on macOS.
 if(APPLE)
     target_compile_definitions(kufeditor PRIVATE GL_SILENCE_DEPRECATION)

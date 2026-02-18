@@ -496,7 +496,7 @@ std::string findGameDirectory(const std::string& stgFilePath) {
     fs::path stgPath(stgFilePath);
     fs::path dir = stgPath.parent_path();
 
-    // Walk up from the STG file's directory looking for a sibling SOX/ folder.
+    // Walk up from the file's directory looking for a sibling SOX/ folder.
     for (int depth = 0; depth < 5; ++depth) {
         if (dir.empty()) break;
 
@@ -509,6 +509,27 @@ std::string findGameDirectory(const std::string& stgFilePath) {
         if (parent == dir) break;
         dir = parent;
     }
+
+#ifdef _WIN32
+    // Save files live in Documents, completely outside the game install.
+    // Fall back to common Steam installation paths.
+    const char* steamRoots[] = {
+        "C:\\Program Files (x86)\\Steam",
+        "C:\\Program Files\\Steam",
+        "C:\\Steam",
+    };
+    for (const char* root : steamRoots) {
+        fs::path gameDir = fs::path(root) / "steamapps" / "common" / "KUF Crusader";
+        if (!fs::exists(gameDir / "Kuf2Main.exe")) continue;
+
+        // Check SOX/ at top level first, then Data/SOX/.
+        fs::path soxDir = gameDir / "SOX";
+        if (fs::is_directory(soxDir)) return soxDir.string();
+
+        soxDir = gameDir / "Data" / "SOX";
+        if (fs::is_directory(soxDir)) return soxDir.string();
+    }
+#endif
 
     return {};
 }

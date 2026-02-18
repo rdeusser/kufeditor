@@ -20,6 +20,7 @@
 #include <imgui_impl_opengl3.h>
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -236,7 +237,9 @@ void Application::drawMenuBar() {
                         openFile(path);
                     }
                     if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("%s", path.c_str());
+                        std::string display = path;
+                        std::replace(display.begin(), display.end(), '\\', '/');
+                        ImGui::SetTooltip("%s", display.c_str());
                     }
                 }
                 ImGui::Separator();
