@@ -41,6 +41,7 @@ public:
     const char* itemAttDescription(int32_t attrIndex) const;
 
     std::string translate(const std::string& korean) const;
+    std::string reverseTranslate(const std::string& english) const;
 
     bool loaded() const { return loaded_; }
 
@@ -57,6 +58,7 @@ private:
     std::vector<std::vector<std::string>> leaderGenPools_;
     std::vector<SpecialNameEntry> specialNames_;
     std::unordered_map<std::string, std::string> koreanToEnglish_;
+    std::unordered_map<std::string, std::string> englishToKorean_;
     std::vector<std::vector<WeaponVariant>> weaponNames_;
     std::vector<ItemAttEntry> itemAttNames_;
     std::vector<std::array<std::string, 3>> itemTypePrefixes_;

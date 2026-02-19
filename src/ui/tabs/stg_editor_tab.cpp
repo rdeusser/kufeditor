@@ -698,11 +698,14 @@ void StgEditorTab::drawAreaList() {
         const auto& area = areas[i];
         bool selected = (selectedArea_ == static_cast<int>(i));
 
+        std::string displayAreaDesc = nameDictionary_.translate(area.description);
+        if (displayAreaDesc.empty()) displayAreaDesc = area.description;
+
         char label[96];
-        if (area.description.empty()) {
+        if (displayAreaDesc.empty()) {
             snprintf(label, sizeof(label), "[%zu] Area %u", i, area.areaId);
         } else {
-            snprintf(label, sizeof(label), "[%zu] %s (ID %u)", i, area.description.c_str(), area.areaId);
+            snprintf(label, sizeof(label), "[%zu] %s (ID %u)", i, displayAreaDesc.c_str(), area.areaId);
         }
 
         if (ImGui::Selectable(label, selected)) {
@@ -722,11 +725,16 @@ void StgEditorTab::drawAreaDetails(size_t index) {
     ImGui::Text("Area %zu", index);
     ImGui::Separator();
 
+    std::string translatedAreaDesc = nameDictionary_.translate(area.description);
+    const std::string& displayDesc = translatedAreaDesc.empty() ? area.description : translatedAreaDesc;
+
     char descBuf[32];
     std::memset(descBuf, 0, sizeof(descBuf));
-    std::strncpy(descBuf, area.description.c_str(), sizeof(descBuf) - 1);
+    std::strncpy(descBuf, displayDesc.c_str(), sizeof(descBuf) - 1);
     if (InputTextCentered("Description", descBuf, sizeof(descBuf))) {
-        area.description = descBuf;
+        std::string input(descBuf);
+        std::string korean = nameDictionary_.reverseTranslate(input);
+        area.description = korean.empty() ? input : korean;
         document_->dirty = true;
     }
 
@@ -763,8 +771,11 @@ void StgEditorTab::drawVariableList() {
         const auto& var = vars[i];
         bool selected = (selectedVariable_ == static_cast<int>(i));
 
+        std::string displayVarName = nameDictionary_.translate(var.name);
+        if (displayVarName.empty()) displayVarName = var.name;
+
         char label[96];
-        snprintf(label, sizeof(label), "[%u] %s", var.variableId, var.name.c_str());
+        snprintf(label, sizeof(label), "[%u] %s", var.variableId, displayVarName.c_str());
 
         if (ImGui::Selectable(label, selected)) {
             selectedVariable_ = static_cast<int>(i);
@@ -789,11 +800,16 @@ void StgEditorTab::drawVariableDetails(size_t index) {
     ImGui::Text("Variable %zu", index);
     ImGui::Separator();
 
+    std::string translatedVarName = nameDictionary_.translate(var.name);
+    const std::string& displayName = translatedVarName.empty() ? var.name : translatedVarName;
+
     char nameBuf[64];
     std::memset(nameBuf, 0, sizeof(nameBuf));
-    std::strncpy(nameBuf, var.name.c_str(), sizeof(nameBuf) - 1);
+    std::strncpy(nameBuf, displayName.c_str(), sizeof(nameBuf) - 1);
     if (InputTextCentered("Name", nameBuf, sizeof(nameBuf))) {
-        var.name = nameBuf;
+        std::string input(nameBuf);
+        std::string korean = nameDictionary_.reverseTranslate(input);
+        var.name = korean.empty() ? input : korean;
         document_->dirty = true;
     }
 
@@ -877,11 +893,14 @@ void StgEditorTab::drawEventList() {
                 bool selected = (selectedBlock_ == static_cast<int>(b) &&
                                  selectedEvent_ == static_cast<int>(i));
 
+                std::string displayEventDesc = nameDictionary_.translate(event.description);
+                if (displayEventDesc.empty()) displayEventDesc = event.description;
+
                 char label[128];
-                if (event.description.empty()) {
+                if (displayEventDesc.empty()) {
                     snprintf(label, sizeof(label), "[%u] Event %zu", event.eventId, i);
                 } else {
-                    snprintf(label, sizeof(label), "[%u] %s", event.eventId, event.description.c_str());
+                    snprintf(label, sizeof(label), "[%u] %s", event.eventId, displayEventDesc.c_str());
                 }
 
                 if (ImGui::Selectable(label, selected)) {
@@ -923,11 +942,16 @@ void StgEditorTab::drawEventDetails(size_t blockIdx, size_t eventIdx) {
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Event Header", ImGuiTreeNodeFlags_DefaultOpen)) {
+        std::string translatedEventDesc = nameDictionary_.translate(event.description);
+        const std::string& displayDesc = translatedEventDesc.empty() ? event.description : translatedEventDesc;
+
         char descBuf[64];
         std::memset(descBuf, 0, sizeof(descBuf));
-        std::strncpy(descBuf, event.description.c_str(), sizeof(descBuf) - 1);
+        std::strncpy(descBuf, displayDesc.c_str(), sizeof(descBuf) - 1);
         if (InputTextCentered("Description", descBuf, sizeof(descBuf))) {
-            event.description = descBuf;
+            std::string input(descBuf);
+            std::string korean = nameDictionary_.reverseTranslate(input);
+            event.description = korean.empty() ? input : korean;
             event.modified = true;
             document_->dirty = true;
         }

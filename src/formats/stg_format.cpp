@@ -117,7 +117,7 @@ kuf_stg::UnitBlock unitToWire(const StgUnit& u) {
 
 kuf_stg::AreaEntry areaToWire(const StgArea& a) {
     kuf_stg::AreaEntry w = a.wire_;
-    w.description = a.description;
+    w.description = utf8ToCp949(a.description);
     w.area_id = a.areaId;
     w.bound_x1 = a.boundX1;
     w.bound_y1 = a.boundY1;
@@ -144,7 +144,7 @@ kuf_stg::StgParamValue domainParamToWire(const StgParamValue& p) {
 
 kuf_stg::StgEvent eventToWire(const StgEvent& e) {
     kuf_stg::StgEvent w;
-    w.description = e.description;
+    w.description = utf8ToCp949(e.description);
     w.event_id = e.eventId;
     w.condition_count = static_cast<uint32_t>(e.conditions.size());
     for (const auto& cond : e.conditions) {
@@ -307,7 +307,7 @@ bool StgFormat::load(std::span<const std::byte> data) {
                     auto wa = kuf_stg::AreaEntry::parse(buf, len, offset);
                     StgArea area;
                     area.wire_ = wa;
-                    area.description = wa.description;
+                    area.description = cp949ToUtf8(wa.description);
                     area.areaId = wa.area_id;
                     area.boundX1 = wa.bound_x1;
                     area.boundY1 = wa.bound_y1;
@@ -326,7 +326,7 @@ bool StgFormat::load(std::span<const std::byte> data) {
                 for (uint32_t i = 0; i < varCount; ++i) {
                     auto wv = kuf_stg::StgVariable::parse(buf, len, offset);
                     StgVariable var;
-                    var.name = wv.name;
+                    var.name = cp949ToUtf8(wv.name);
                     var.variableId = wv.variable_id;
                     var.initialValue = wireToParam(wv.initial_value);
                     variables_.push_back(std::move(var));
@@ -347,7 +347,7 @@ bool StgFormat::load(std::span<const std::byte> data) {
 
                     for (const auto& we : wb.events) {
                         StgEvent event;
-                        event.description = we.description;
+                        event.description = cp949ToUtf8(we.description);
                         event.eventId = we.event_id;
 
                         event.conditions.reserve(we.conditions.size());
@@ -417,7 +417,7 @@ std::vector<std::byte> StgFormat::save() const {
 
         for (const auto& var : variables_) {
             kuf_stg::StgVariable wv;
-            wv.name = var.name;
+            wv.name = utf8ToCp949(var.name);
             wv.variable_id = var.variableId;
             wv.initial_value = domainParamToWire(var.initialValue);
             file.variables.push_back(std::move(wv));

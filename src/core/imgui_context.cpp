@@ -59,7 +59,36 @@ void ImGuiContext::rebuildFonts() {
 }
 
 void ImGuiContext::loadFont(ImGuiIO& io, float size) {
-    const char* fontPaths[] = {
+    // Load a Latin font first — its ASCII glyphs (including backslash) take
+    // priority, avoiding the Won sign substitution in Korean fonts.
+    const char* latinPaths[] = {
+#ifdef __APPLE__
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+#elif defined(_WIN32)
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\tahoma.ttf",
+#else
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+#endif
+    };
+
+    bool latinLoaded = false;
+    for (const char* path : latinPaths) {
+        if (io.Fonts->AddFontFromFileTTF(path, size)) {
+            latinLoaded = true;
+            break;
+        }
+    }
+
+    if (!latinLoaded) {
+        io.Fonts->AddFontDefault();
+    }
+
+    // Merge Korean glyphs from a CJK font. MergeMode adds glyphs to the
+    // already-loaded Latin font without overriding its ASCII characters.
+    const char* koreanPaths[] = {
 #ifdef __APPLE__
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",
         "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
@@ -74,14 +103,14 @@ void ImGuiContext::loadFont(ImGuiIO& io, float size) {
 #endif
     };
 
-    for (const char* path : fontPaths) {
-        if (io.Fonts->AddFontFromFileTTF(path, size, nullptr,
+    ImFontConfig mergeConfig;
+    mergeConfig.MergeMode = true;
+    for (const char* path : koreanPaths) {
+        if (io.Fonts->AddFontFromFileTTF(path, size, &mergeConfig,
                                           io.Fonts->GetGlyphRangesKorean())) {
-            return;
+            break;
         }
     }
-
-    io.Fonts->AddFontDefault();
 }
 
 void ImGuiContext::applyDarkTheme() {

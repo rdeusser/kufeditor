@@ -72,15 +72,23 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Catch2)
 
 # miniz for zip archive support
-set(CMAKE_POLICY_DEFAULT_CMP0048 NEW)
+# Disable sccache for miniz on MSVC. Despite CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+# being set to Embedded, miniz's C files end up with both /Zi and /Z7 flags.
+# /Z7 wins (last-wins) so no PDB is generated, but sccache still expects the
+# PDB referenced by /Fd and errors when it doesn't exist.
+if(MSVC)
+    set(_saved_c_launcher "${CMAKE_C_COMPILER_LAUNCHER}")
+    set(CMAKE_C_COMPILER_LAUNCHER "")
+endif()
 FetchContent_Declare(
     miniz
     GIT_REPOSITORY https://github.com/richgel999/miniz.git
-    GIT_TAG 3.0.2
+    GIT_TAG 3.1.1
 )
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 FetchContent_MakeAvailable(miniz)
-unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
+if(MSVC)
+    set(CMAKE_C_COMPILER_LAUNCHER "${_saved_c_launcher}")
+endif()
 
 # Cleave-generated parsers
 file(GLOB CLEAVE_PARSER_SOURCES src/parsers/*.cpp)
