@@ -21,8 +21,14 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -63,12 +69,18 @@ jobs:
 
       - name: Configure (Unix)
         if: runner.os != 'Windows'
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: >
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded `
             -DCMAKE_TOOLCHAIN_FILE="${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}
 

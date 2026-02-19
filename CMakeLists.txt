@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
+
+# Enable CMAKE_MSVC_DEBUG_INFORMATION_FORMAT support (CMake 3.25+).
+if(POLICY CMP0141)
+    cmake_policy(SET CMP0141 NEW)
+endif()
+
 project(kufeditor VERSION 1.0.0 LANGUAGES CXX)
 
 if(APPLE)
