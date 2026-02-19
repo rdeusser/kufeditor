@@ -1,8 +1,9 @@
 #include "ui/views/home_view.h"
-#include "ui/dialogs/file_dialog.h"
 
 #include <imgui.h>
-#include <filesystem>
+
+#include "core/steam.h"
+#include "ui/dialogs/file_dialog.h"
 
 namespace kuf {
 
@@ -66,51 +67,8 @@ void HomeView::drawContent() {
 void HomeView::detectGames() {
     detectedGames_.clear();
 
-#ifdef _WIN32
-    namespace fs = std::filesystem;
-
-    // Steam paths to check.
-    std::vector<std::string> steamPaths = {
-        "C:\\Program Files\\Steam\\steamapps\\common",
-        "C:\\Program Files (x86)\\Steam\\steamapps\\common",
-        "C:\\Steam\\steamapps\\common",
-        "D:\\Steam\\steamapps\\common",
-        "D:\\SteamLibrary\\steamapps\\common",
-        "E:\\SteamLibrary\\steamapps\\common"
-    };
-
-    // Games and their SOX folder names.
-    std::vector<std::pair<std::string, std::string>> games = {
-        {"Kingdom Under Fire The Crusaders", "Kingdom Under Fire The Crusaders"},
-        {"Kingdom Under Fire Heroes", "Kingdom Under Fire Heroes"}
-    };
-
-    for (const auto& steamPath : steamPaths) {
-        for (const auto& [gameName, gameFolder] : games) {
-            std::string gamePath = steamPath + "\\" + gameFolder;
-            std::string soxPath = gamePath + "\\SOX";
-
-            if (fs::exists(soxPath) && fs::is_directory(soxPath)) {
-                GameInfo info;
-                info.name = gameName;
-                info.path = soxPath;
-                info.exists = true;
-
-                // Avoid duplicates.
-                bool duplicate = false;
-                for (const auto& existing : detectedGames_) {
-                    if (existing.path == info.path) {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (!duplicate) {
-                    detectedGames_.push_back(info);
-                }
-            }
-        }
-    }
-#endif
+    for (const auto& game : detectSteamGames())
+        detectedGames_.push_back({game.name, game.soxPath, true});
 }
 
 void HomeView::drawGameButton(const GameInfo& game) {

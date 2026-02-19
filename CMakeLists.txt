@@ -125,6 +125,7 @@ add_executable(kufeditor
     src/core/tab_manager.cpp
     src/core/text_encoding.cpp
     src/core/name_dictionary.cpp
+    src/core/steam.cpp
     src/formats/sox_binary.cpp
     src/formats/sox_skill_info.cpp
     src/formats/sox_text.cpp
