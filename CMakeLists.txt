@@ -147,6 +147,8 @@ add_executable(kufeditor
     src/mods/backup_manager.cpp
     src/mods/mod_manager.cpp
     src/ui/views/mod_manager_view.cpp
+    src/ui/views/patch_editor_view.cpp
+    src/patches/exe_patch.cpp
     ${CLEAVE_PARSER_SOURCES}
     ${PLATFORM_SOURCES}
 )

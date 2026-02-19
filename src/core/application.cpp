@@ -6,6 +6,7 @@
 #include "ui/views/home_view.h"
 #include "ui/views/validation_log.h"
 #include "ui/views/mod_manager_view.h"
+#include "ui/views/patch_editor_view.h"
 #include "ui/dialogs/file_dialog.h"
 #include "ui/dialogs/settings_dialog.h"
 #include "ui/tabs/editor_tab.h"
@@ -46,6 +47,7 @@ Application::Application() {
     homeView_ = std::make_unique<HomeView>();
     validationLog_ = std::make_unique<ValidationLogView>();
     modManagerView_ = std::make_unique<ModManagerView>();
+    patchEditorView_ = std::make_unique<PatchEditorView>();
 
     modManagerView_->setOnError([this](const std::string& msg) {
         pendingPopupMessage_ = msg;
@@ -156,6 +158,7 @@ void Application::openFile(const std::string& path) {
 void Application::setGameDirectory(const std::string& dir) {
     gameDirectory_ = dir;
     modManagerView_->setGameDirectory(dir);
+    patchEditorView_->setGameDirectory(dir);
 }
 
 void Application::saveActiveDocument() {
@@ -305,6 +308,7 @@ void Application::drawMenuBar() {
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Home", nullptr, &showHomeTab_);
             ImGui::MenuItem("Mod Manager", nullptr, &showModManager_);
+            ImGui::MenuItem("Patch Editor", nullptr, &showPatchEditor_);
             ImGui::MenuItem("Validation Log", nullptr, &validationLog_->isOpen());
             ImGui::EndMenu();
         }
@@ -323,7 +327,7 @@ void Application::drawTabBar() {
                                    ImGuiTabBarFlags_AutoSelectNewTabs |
                                    ImGuiTabBarFlags_FittingPolicyScroll;
 
-    enum class ActiveContent { None, Home, ModManager, Editor };
+    enum class ActiveContent { None, Home, ModManager, PatchEditor, Editor };
     ActiveContent activeContent = ActiveContent::None;
     EditorTab* activeEditorTab = nullptr;
     EditorTab* tabToClose = nullptr;
@@ -350,6 +354,18 @@ void Application::drawTabBar() {
             }
             if (!modOpen) {
                 showModManager_ = false;
+            }
+        }
+
+        // Patch Editor tab header.
+        if (showPatchEditor_) {
+            bool patchOpen = true;
+            if (ImGui::BeginTabItem("Patch Editor", &patchOpen)) {
+                activeContent = ActiveContent::PatchEditor;
+                ImGui::EndTabItem();
+            }
+            if (!patchOpen) {
+                showPatchEditor_ = false;
             }
         }
 
@@ -390,6 +406,9 @@ void Application::drawTabBar() {
         break;
     case ActiveContent::ModManager:
         modManagerView_->drawContent();
+        break;
+    case ActiveContent::PatchEditor:
+        patchEditorView_->drawContent();
         break;
     case ActiveContent::Editor:
         if (activeEditorTab) {
