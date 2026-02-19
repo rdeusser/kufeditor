@@ -157,8 +157,13 @@ void Application::openFile(const std::string& path) {
 
 void Application::setGameDirectory(const std::string& dir) {
     gameDirectory_ = dir;
-    modManagerView_->setGameDirectory(dir);
+    modManagerView_->setGameDirectory(soxDirectory());
     patchEditorView_->setGameDirectory(dir);
+}
+
+std::string Application::soxDirectory() const {
+    if (gameDirectory_.empty()) return {};
+    return (std::filesystem::path(gameDirectory_) / "Data" / "SOX").string();
 }
 
 void Application::saveActiveDocument() {
@@ -188,7 +193,8 @@ void Application::handleKeyboardShortcuts() {
         }
     }
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, ImGuiInputFlags_RouteGlobal)) {
-        if (auto path = FileDialog::openFile("*.sox;*.stg;*.sav", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
+        auto sox = soxDirectory();
+        if (auto path = FileDialog::openFile("*.sox;*.stg;*.sav", sox.empty() ? nullptr : sox.c_str())) {
             openFile(*path);
         }
     }
@@ -222,7 +228,8 @@ void Application::drawMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open File...", "Ctrl+O")) {
-                if (auto path = FileDialog::openFile("*.sox;*.stg;*.sav", gameDirectory_.empty() ? nullptr : gameDirectory_.c_str())) {
+                auto sox = soxDirectory();
+                if (auto path = FileDialog::openFile("*.sox;*.stg;*.sav", sox.empty() ? nullptr : sox.c_str())) {
                     openFile(*path);
                 }
             }

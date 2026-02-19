@@ -64,9 +64,7 @@ void PatchEditorView::drawContent() {
 
 void PatchEditorView::setGameDirectory(const std::string& dir) {
     gameDirectory_ = dir;
-    // gameDirectory_ points to Data/SOX, so Kuf2Main.exe is two levels up.
-    exePath_ = std::filesystem::path(dir) / ".." / ".." / "Kuf2Main.exe";
-    exePath_ = exePath_.lexically_normal();
+    exePath_ = std::filesystem::path(dir) / "Kuf2Main.exe";
     statusLoaded_ = false;
 }
 

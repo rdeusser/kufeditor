@@ -40,13 +40,13 @@ std::vector<SteamGame> detectSteamGames() {
             if (!fs::is_directory(steamCommon)) continue;
 
             for (const auto& game : kGames) {
-                fs::path soxPath = steamCommon / game.folder / "Data" / "SOX";
-                if (!fs::is_directory(soxPath)) continue;
+                fs::path gameDir = steamCommon / game.folder;
+                if (!fs::is_directory(gameDir / "Data" / "SOX")) continue;
 
-                std::string pathStr = soxPath.string();
+                std::string pathStr = gameDir.string();
                 bool duplicate = false;
                 for (const auto& existing : results)
-                    if (existing.soxPath == pathStr) { duplicate = true; break; }
+                    if (existing.path == pathStr) { duplicate = true; break; }
                 if (!duplicate)
                     results.push_back({game.displayName, pathStr});
             }

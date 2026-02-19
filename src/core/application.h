@@ -31,6 +31,7 @@ private:
     void drawDockspace();
     void openFile(const std::string& path);
     void setGameDirectory(const std::string& dir);
+    std::string soxDirectory() const;
     void saveActiveDocument();
     void handleKeyboardShortcuts();
     void updateValidationLog();
