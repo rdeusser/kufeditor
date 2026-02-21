@@ -3,62 +3,63 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace sox_ability_info {
 
 struct Lps {
-    uint16_t length;
-    std::vector<uint8_t> value;
+	uint16_t length;
+	std::vector<uint8_t> value;
 
-    static Lps parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static Lps parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct SoxHeader {
-    uint32_t marker;
-    uint32_t record_count;
+	uint32_t marker;
+	uint32_t record_count;
 
-    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct AbilityInfoRecord {
-    uint32_t ability_id;
-    uint32_t is_active;
-    uint32_t field_02;
-    uint32_t field_03;
-    int32_t field_04;
-    int32_t field_05;
-    int32_t field_06;
-    uint32_t field_07;
-    uint32_t field_08;
-    uint32_t field_09;
-    uint32_t field_10;
-    uint32_t pair_0_first;
-    uint32_t pair_0_second;
-    int32_t pair_1_first;
-    int32_t pair_1_second;
-    Lps loc_key;
-    Lps icon;
+	uint32_t ability_id;
+	uint32_t is_active;
+	uint32_t field_02;
+	uint32_t field_03;
+	int32_t field_04;
+	int32_t field_05;
+	int32_t field_06;
+	uint32_t field_07;
+	uint32_t field_08;
+	uint32_t field_09;
+	uint32_t field_10;
+	uint32_t pair_0_first;
+	uint32_t pair_0_second;
+	int32_t pair_1_first;
+	int32_t pair_1_second;
+	Lps loc_key;
+	Lps icon;
 
-    static AbilityInfoRecord parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static AbilityInfoRecord parse(const uint8_t *buf, size_t len,
+				       size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-    SoxHeader header;
-    std::vector<AbilityInfoRecord> records;
-    uint8_t footer[64];
+	SoxHeader header;
+	std::vector<AbilityInfoRecord> records;
+	uint8_t footer[64];
 
-    static File parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static File parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_ability_info

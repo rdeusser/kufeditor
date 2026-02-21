@@ -6,8 +6,8 @@
 namespace kuf {
 
 struct SteamGame {
-    std::string name;
-    std::string path;
+	std::string name;
+	std::string path;
 };
 
 /// Scans all drives for known KUF game installations under common Steam

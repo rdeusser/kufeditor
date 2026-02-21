@@ -3,43 +3,44 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace sox_worldmap_char_info {
 
 struct SoxHeader {
-    uint32_t marker;
-    uint32_t record_count;
+	uint32_t marker;
+	uint32_t record_count;
 
-    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct WorldmapCharInfoRecord {
-    int32_t character_id;
-    int32_t primary_slot_id;
-    int32_t secondary_slot_id;
-    int32_t unknown_3;
-    int32_t unknown_4;
-    int32_t portrait_id_1;
-    int32_t portrait_id_2;
+	int32_t character_id;
+	int32_t primary_slot_id;
+	int32_t secondary_slot_id;
+	int32_t unknown_3;
+	int32_t unknown_4;
+	int32_t portrait_id_1;
+	int32_t portrait_id_2;
 
-    static WorldmapCharInfoRecord parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static WorldmapCharInfoRecord parse(const uint8_t *buf, size_t len,
+					    size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-    SoxHeader header;
-    std::vector<WorldmapCharInfoRecord> records;
-    uint8_t footer[64];
+	SoxHeader header;
+	std::vector<WorldmapCharInfoRecord> records;
+	uint8_t footer[64];
 
-    static File parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static File parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_worldmap_char_info

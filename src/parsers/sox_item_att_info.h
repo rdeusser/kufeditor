@@ -3,39 +3,40 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace sox_item_att_info {
 
 struct SoxHeader {
-    uint32_t marker;
-    uint32_t record_count;
+	uint32_t marker;
+	uint32_t record_count;
 
-    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct ItemAttInfoRecord {
-    uint32_t attribute_id;
-    uint32_t power_value;
-    uint32_t category;
+	uint32_t attribute_id;
+	uint32_t power_value;
+	uint32_t category;
 
-    static ItemAttInfoRecord parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static ItemAttInfoRecord parse(const uint8_t *buf, size_t len,
+				       size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-    SoxHeader header;
-    std::vector<ItemAttInfoRecord> records;
-    uint8_t footer[64];
+	SoxHeader header;
+	std::vector<ItemAttInfoRecord> records;
+	uint8_t footer[64];
 
-    static File parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static File parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_item_att_info

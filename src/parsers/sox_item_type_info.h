@@ -3,74 +3,76 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace sox_item_type_info {
 
 struct Lps {
-    uint16_t length;
-    std::vector<uint8_t> value;
+	uint16_t length;
+	std::vector<uint8_t> value;
 
-    static Lps parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static Lps parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct ItemTypeInfoHeader {
-    uint32_t marker;
-    uint32_t record_count;
+	uint32_t marker;
+	uint32_t record_count;
 
-    static ItemTypeInfoHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static ItemTypeInfoHeader parse(const uint8_t *buf, size_t len,
+					size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct ItemTypeInfoRecord {
-    uint32_t field_00;
-    uint32_t field_01;
-    uint32_t field_02;
-    uint32_t pair_a0_0;
-    uint32_t pair_a0_1;
-    uint32_t pair_a0_2;
-    uint32_t pair_a1_0;
-    uint32_t pair_a1_1;
-    uint32_t pair_a1_2;
-    uint32_t field_09;
-    uint32_t field_10;
-    uint32_t field_11;
-    uint32_t field_12;
-    uint32_t field_13;
-    uint32_t field_14;
-    uint32_t field_15;
-    uint32_t pair_b0_0;
-    uint32_t pair_b0_1;
-    uint32_t pair_b0_2;
-    uint32_t pair_b1_0;
-    uint32_t pair_b1_1;
-    uint32_t pair_b1_2;
-    uint32_t field_22;
-    uint32_t field_23;
-    uint32_t field_24;
-    uint32_t field_25;
-    std::vector<uint32_t> equip_slot_0;
-    std::vector<uint32_t> equip_slot_1;
-    std::vector<uint32_t> equip_slot_2;
-    Lps name;
+	uint32_t field_00;
+	uint32_t field_01;
+	uint32_t field_02;
+	uint32_t pair_a0_0;
+	uint32_t pair_a0_1;
+	uint32_t pair_a0_2;
+	uint32_t pair_a1_0;
+	uint32_t pair_a1_1;
+	uint32_t pair_a1_2;
+	uint32_t field_09;
+	uint32_t field_10;
+	uint32_t field_11;
+	uint32_t field_12;
+	uint32_t field_13;
+	uint32_t field_14;
+	uint32_t field_15;
+	uint32_t pair_b0_0;
+	uint32_t pair_b0_1;
+	uint32_t pair_b0_2;
+	uint32_t pair_b1_0;
+	uint32_t pair_b1_1;
+	uint32_t pair_b1_2;
+	uint32_t field_22;
+	uint32_t field_23;
+	uint32_t field_24;
+	uint32_t field_25;
+	std::vector<uint32_t> equip_slot_0;
+	std::vector<uint32_t> equip_slot_1;
+	std::vector<uint32_t> equip_slot_2;
+	Lps name;
 
-    static ItemTypeInfoRecord parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static ItemTypeInfoRecord parse(const uint8_t *buf, size_t len,
+					size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-    ItemTypeInfoHeader header;
-    std::vector<ItemTypeInfoRecord> records;
+	ItemTypeInfoHeader header;
+	std::vector<ItemTypeInfoRecord> records;
 
-    static File parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static File parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_item_type_info

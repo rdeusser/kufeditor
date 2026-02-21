@@ -3,219 +3,221 @@
 
 namespace sox_unit_uv_info {
 
-SoxHeader SoxHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    SoxHeader result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.marker, buf + offset, 4);
-    offset += 4;
-    if (!((result.marker == 100))) {
-        throw std::runtime_error("SOX marker must be 100");
-    }
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.record_count, buf + offset, 4);
-    offset += 4;
-    return result;
+SoxHeader SoxHeader::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	SoxHeader result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.marker, buf + offset, 4);
+	offset += 4;
+	if (!((result.marker == 100))) {
+		throw std::runtime_error("SOX marker must be 100");
+	}
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.record_count, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string SoxHeader::to_json() const {
-    std::string s = "{";
-    s += "\"marker\":";
-    s += std::to_string(marker);
-    s += ",";
-    s += "\"record_count\":";
-    s += std::to_string(record_count);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"marker\":";
+	s += std::to_string(marker);
+	s += ",";
+	s += "\"record_count\":";
+	s += std::to_string(record_count);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> SoxHeader::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = marker;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = record_count;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint32_t _tmp = marker;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = record_count;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
-UnitUvInfoRecord UnitUvInfoRecord::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    UnitUvInfoRecord result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.unknown_0, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.base_value, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.uv_offset_x, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.uv_offset_y, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.uv_scale, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.anim_frame_data, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.anim_timing, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.frame_count, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.unknown_8, buf + offset, 4);
-    offset += 4;
-    return result;
+UnitUvInfoRecord UnitUvInfoRecord::parse(const uint8_t *buf, size_t len,
+					 size_t &offset) {
+	UnitUvInfoRecord result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.unknown_0, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.base_value, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.uv_offset_x, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.uv_offset_y, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.uv_scale, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.anim_frame_data, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.anim_timing, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.frame_count, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.unknown_8, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string UnitUvInfoRecord::to_json() const {
-    std::string s = "{";
-    s += "\"unknown_0\":";
-    s += std::to_string(unknown_0);
-    s += ",";
-    s += "\"base_value\":";
-    s += std::to_string(base_value);
-    s += ",";
-    s += "\"uv_offset_x\":";
-    s += std::to_string(uv_offset_x);
-    s += ",";
-    s += "\"uv_offset_y\":";
-    s += std::to_string(uv_offset_y);
-    s += ",";
-    s += "\"uv_scale\":";
-    s += std::to_string(uv_scale);
-    s += ",";
-    s += "\"anim_frame_data\":";
-    s += std::to_string(anim_frame_data);
-    s += ",";
-    s += "\"anim_timing\":";
-    s += std::to_string(anim_timing);
-    s += ",";
-    s += "\"frame_count\":";
-    s += std::to_string(frame_count);
-    s += ",";
-    s += "\"unknown_8\":";
-    s += std::to_string(unknown_8);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"unknown_0\":";
+	s += std::to_string(unknown_0);
+	s += ",";
+	s += "\"base_value\":";
+	s += std::to_string(base_value);
+	s += ",";
+	s += "\"uv_offset_x\":";
+	s += std::to_string(uv_offset_x);
+	s += ",";
+	s += "\"uv_offset_y\":";
+	s += std::to_string(uv_offset_y);
+	s += ",";
+	s += "\"uv_scale\":";
+	s += std::to_string(uv_scale);
+	s += ",";
+	s += "\"anim_frame_data\":";
+	s += std::to_string(anim_frame_data);
+	s += ",";
+	s += "\"anim_timing\":";
+	s += std::to_string(anim_timing);
+	s += ",";
+	s += "\"frame_count\":";
+	s += std::to_string(frame_count);
+	s += ",";
+	s += "\"unknown_8\":";
+	s += std::to_string(unknown_8);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> UnitUvInfoRecord::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = unknown_0;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = base_value;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = uv_offset_x;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = uv_offset_y;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = uv_scale;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = anim_frame_data;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = anim_timing;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = frame_count;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = unknown_8;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint32_t _tmp = unknown_0;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = base_value;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = uv_offset_x;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = uv_offset_y;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = uv_scale;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = anim_frame_data;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = anim_timing;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = frame_count;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = unknown_8;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
-File File::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    File result;
-    result.header = SoxHeader::parse(buf, len, offset);
-    for (size_t i = 0; i < result.header.record_count; ++i) {
-        result.records.push_back(UnitUvInfoRecord::parse(buf, len, offset));
-    }
-    if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(result.footer, buf + offset, 64);
-    offset += 64;
-    return result;
+File File::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	File result;
+	result.header = SoxHeader::parse(buf, len, offset);
+	for (size_t i = 0; i < result.header.record_count; ++i) {
+		result.records.push_back(
+		    UnitUvInfoRecord::parse(buf, len, offset));
+	}
+	if (offset + 64 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(result.footer, buf + offset, 64);
+	offset += 64;
+	return result;
 }
 
 std::string File::to_json() const {
-    std::string s = "{";
-    s += "\"header\":";
-    s += header.to_json();
-    s += ",";
-    s += "\"records\":";
-    s += "[";
-    for (size_t i = 0; i < records.size(); ++i) {
-        if (i > 0) s += ",";
-        s += records[i].to_json();
-    }
-    s += "]";
-    s += ",";
-    s += "\"footer\":";
-    s += "[";
-    for (size_t i = 0; i < 64; ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(footer[i]);
-    }
-    s += "]";
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"header\":";
+	s += header.to_json();
+	s += ",";
+	s += "\"records\":";
+	s += "[";
+	for (size_t i = 0; i < records.size(); ++i) {
+		if (i > 0) s += ",";
+		s += records[i].to_json();
+	}
+	s += "]";
+	s += ",";
+	s += "\"footer\":";
+	s += "[";
+	for (size_t i = 0; i < 64; ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(footer[i]);
+	}
+	s += "]";
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> File::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        auto _tmp = header.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    for (const auto& _item : records) {
-        auto _tmp = _item.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    _buf.insert(_buf.end(), footer, footer + 64);
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		auto _tmp = header.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	for (const auto &_item : records) {
+		auto _tmp = _item.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	_buf.insert(_buf.end(), footer, footer + 64);
+	return _buf;
 }
 
 } // namespace sox_unit_uv_info

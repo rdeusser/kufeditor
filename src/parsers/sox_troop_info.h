@@ -3,73 +3,74 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace sox_troop_info {
 
 struct SoxHeader {
-    uint32_t marker;
-    uint32_t record_count;
+	uint32_t marker;
+	uint32_t record_count;
 
-    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct TroopInfoRecord {
-    int32_t job;
-    int32_t type_id;
-    int32_t move_speed;
-    int32_t rotate_rate;
-    int32_t move_acceleration;
-    int32_t move_deceleration;
-    int32_t sight_range;
-    int32_t attack_range_max;
-    int32_t attack_range_min;
-    int32_t attack_front_range;
-    int32_t direct_attack;
-    int32_t indirect_attack;
-    int32_t defense;
-    int32_t base_width;
-    int32_t resist_melee;
-    int32_t resist_ranged;
-    int32_t resist_frontal;
-    int32_t resist_explosion;
-    int32_t resist_fire;
-    int32_t resist_ice;
-    int32_t resist_lightning;
-    int32_t resist_holy;
-    int32_t resist_curse;
-    int32_t resist_earth;
-    int32_t max_unit_speed_multiplier;
-    int32_t default_unit_hp;
-    int32_t formation_random;
-    int32_t default_unit_num_x;
-    int32_t default_unit_num_y;
-    int32_t unit_hp_level_up;
-    int32_t level_up_0_skill_id;
-    int32_t level_up_0_bonus;
-    int32_t level_up_1_skill_id;
-    int32_t level_up_1_bonus;
-    int32_t level_up_2_skill_id;
-    int32_t level_up_2_bonus;
-    int32_t damage_distribution;
+	int32_t job;
+	int32_t type_id;
+	int32_t move_speed;
+	int32_t rotate_rate;
+	int32_t move_acceleration;
+	int32_t move_deceleration;
+	int32_t sight_range;
+	int32_t attack_range_max;
+	int32_t attack_range_min;
+	int32_t attack_front_range;
+	int32_t direct_attack;
+	int32_t indirect_attack;
+	int32_t defense;
+	int32_t base_width;
+	int32_t resist_melee;
+	int32_t resist_ranged;
+	int32_t resist_frontal;
+	int32_t resist_explosion;
+	int32_t resist_fire;
+	int32_t resist_ice;
+	int32_t resist_lightning;
+	int32_t resist_holy;
+	int32_t resist_curse;
+	int32_t resist_earth;
+	int32_t max_unit_speed_multiplier;
+	int32_t default_unit_hp;
+	int32_t formation_random;
+	int32_t default_unit_num_x;
+	int32_t default_unit_num_y;
+	int32_t unit_hp_level_up;
+	int32_t level_up_0_skill_id;
+	int32_t level_up_0_bonus;
+	int32_t level_up_1_skill_id;
+	int32_t level_up_1_bonus;
+	int32_t level_up_2_skill_id;
+	int32_t level_up_2_bonus;
+	int32_t damage_distribution;
 
-    static TroopInfoRecord parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static TroopInfoRecord parse(const uint8_t *buf, size_t len,
+				     size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-    SoxHeader header;
-    std::vector<TroopInfoRecord> records;
-    uint8_t footer[64];
+	SoxHeader header;
+	std::vector<TroopInfoRecord> records;
+	uint8_t footer[64];
 
-    static File parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static File parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_troop_info

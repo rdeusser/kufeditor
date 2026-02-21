@@ -10,28 +10,29 @@ namespace kuf {
 
 /// Home view showing game selection UI.
 class HomeView : public View {
-public:
-    HomeView();
+      public:
+	HomeView();
 
-    void drawContent() override;
+	void drawContent() override;
 
-    void setOnSelectGameDirectory(std::function<void(const std::string&)> cb) {
-        onSelectGameDirectory_ = std::move(cb);
-    }
+	void
+	setOnSelectGameDirectory(std::function<void(const std::string &)> cb) {
+		onSelectGameDirectory_ = std::move(cb);
+	}
 
-private:
-    struct GameInfo {
-        std::string name;
-        std::string path;
-        bool exists = false;
-    };
+      private:
+	struct GameInfo {
+		std::string name;
+		std::string path;
+		bool exists = false;
+	};
 
-    void detectGames();
-    void drawGameButton(const GameInfo& game);
+	void detectGames();
+	void drawGameButton(const GameInfo &game);
 
-    std::vector<GameInfo> detectedGames_;
-    std::function<void(const std::string&)> onSelectGameDirectory_;
-    bool gamesDetected_ = false;
+	std::vector<GameInfo> detectedGames_;
+	std::function<void(const std::string &)> onSelectGameDirectory_;
+	bool gamesDetected_ = false;
 };
 
 } // namespace kuf

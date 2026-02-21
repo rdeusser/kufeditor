@@ -3,45 +3,46 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include <stdexcept>
 
 namespace sox_leader_generation {
 
 struct SoxHeader {
-    uint32_t marker;
-    uint32_t record_count;
+	uint32_t marker;
+	uint32_t record_count;
 
-    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct LeaderGenerationRecord {
-    uint32_t template_id;
-    uint32_t faction_type;
-    uint32_t base_stat;
-    uint32_t stat_modifier;
-    uint32_t attribute_1;
-    uint32_t attribute_2;
-    uint32_t attribute_3;
-    uint32_t reserved;
-    std::vector<int32_t> ability_equipment_slots;
+	uint32_t template_id;
+	uint32_t faction_type;
+	uint32_t base_stat;
+	uint32_t stat_modifier;
+	uint32_t attribute_1;
+	uint32_t attribute_2;
+	uint32_t attribute_3;
+	uint32_t reserved;
+	std::vector<int32_t> ability_equipment_slots;
 
-    static LeaderGenerationRecord parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static LeaderGenerationRecord parse(const uint8_t *buf, size_t len,
+					    size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-    SoxHeader header;
-    std::vector<LeaderGenerationRecord> records;
-    uint8_t footer[64];
+	SoxHeader header;
+	std::vector<LeaderGenerationRecord> records;
+	uint8_t footer[64];
 
-    static File parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static File parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_leader_generation

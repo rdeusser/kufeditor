@@ -15,47 +15,48 @@ namespace fs = std::filesystem;
 
 namespace {
 
-uint16_t readU16LE(const std::byte* p) {
-    return static_cast<uint16_t>(static_cast<uint8_t>(p[0])) |
-           (static_cast<uint16_t>(static_cast<uint8_t>(p[1])) << 8);
+uint16_t readU16LE(const std::byte *p) {
+	return static_cast<uint16_t>(static_cast<uint8_t>(p[0])) |
+	       (static_cast<uint16_t>(static_cast<uint8_t>(p[1])) << 8);
 }
 
-uint32_t readU32LE(const std::byte* p) {
-    return static_cast<uint32_t>(static_cast<uint8_t>(p[0])) |
-           (static_cast<uint32_t>(static_cast<uint8_t>(p[1])) << 8) |
-           (static_cast<uint32_t>(static_cast<uint8_t>(p[2])) << 16) |
-           (static_cast<uint32_t>(static_cast<uint8_t>(p[3])) << 24);
+uint32_t readU32LE(const std::byte *p) {
+	return static_cast<uint32_t>(static_cast<uint8_t>(p[0])) |
+	       (static_cast<uint32_t>(static_cast<uint8_t>(p[1])) << 8) |
+	       (static_cast<uint32_t>(static_cast<uint8_t>(p[2])) << 16) |
+	       (static_cast<uint32_t>(static_cast<uint8_t>(p[3])) << 24);
 }
 
-std::string stripDelimiters(const std::string& s) {
-    std::string result = s;
-    while (result.size() >= 2 && result.substr(0, 2) == "--") {
-        result = result.substr(2);
-    }
-    while (result.size() >= 2 && result.substr(result.size() - 2) == "--") {
-        result = result.substr(0, result.size() - 2);
-    }
-    return result;
+std::string stripDelimiters(const std::string &s) {
+	std::string result = s;
+	while (result.size() >= 2 && result.substr(0, 2) == "--") {
+		result = result.substr(2);
+	}
+	while (result.size() >= 2 && result.substr(result.size() - 2) == "--") {
+		result = result.substr(0, result.size() - 2);
+	}
+	return result;
 }
 
-std::string stripTrailingDigits(const std::string& s) {
-    size_t end = s.size();
-    while (end > 0 && s[end - 1] >= '0' && s[end - 1] <= '9') {
-        --end;
-    }
-    if (end == 0 || end == s.size()) return {};
-    return s.substr(0, end);
+std::string stripTrailingDigits(const std::string &s) {
+	size_t end = s.size();
+	while (end > 0 && s[end - 1] >= '0' && s[end - 1] <= '9') {
+		--end;
+	}
+	if (end == 0 || end == s.size()) return {};
+	return s.substr(0, end);
 }
 
-bool isThendMarker(const std::byte* data, size_t remaining) {
-    if (remaining < 5) return false;
-    return std::strncmp(reinterpret_cast<const char*>(data), "THEND", 5) == 0;
+bool isThendMarker(const std::byte *data, size_t remaining) {
+	if (remaining < 5) return false;
+	return std::strncmp(reinterpret_cast<const char *>(data), "THEND", 5) ==
+	       0;
 }
 
 // Korean → English translations that supplement the SpecialNames dictionary.
 struct StaticTranslation {
-    const char* korean;
-    const char* english;
+	const char *korean;
+	const char *english;
 };
 
 constexpr StaticTranslation kStaticTranslations[] = {
@@ -102,7 +103,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"개 이상 생성", "Or more spawned"},
     {"개 클리어", "Cleared"},
     {"개 클리어 후 본성", "After clearing, main castle"},
-    {"개 클리어 후 전진기지 장소처리", "After clearing, forward base location handling"},
+    {"개 클리어 후 전진기지 장소처리",
+     "After clearing, forward base location handling"},
     {"거리가 가까워서", "Because distance is close"},
     {"거의 다 왔다", "Almost there"},
     {"거점 하나 남았을때", "When one stronghold remains"},
@@ -144,7 +146,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"게럴드 싸움 붙었음", "Gerald engaged in combat"},
     {"게럴드 쓰러지면", "If Gerald falls"},
     {"게럴드 씨발 열받았음", "Gerald is pissed off"},
-    {"게럴드 에너지 너무 닳았으면 무적", "If Gerald's energy is too low, invincible"},
+    {"게럴드 에너지 너무 닳았으면 무적",
+     "If Gerald's energy is too low, invincible"},
     {"게럴드 엔딩", "Gerald ending"},
     {"게럴드 열받았다", "Gerald is angry"},
     {"게럴드 열은 받았는데 안싸운다", "Gerald is angry but won't fight"},
@@ -173,7 +176,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"게럴드가 루시 공격", "Gerald attacks Lucy"},
     {"게럴드가 루퍼트에게 치료해 달라고 함", "Gerald asks Rupert to heal"},
     {"게럴드가 휴 근처에 있음", "Gerald is near Hugh"},
-    {"게럴드는 놀고 월든만 싸우고 있음", "Gerald is idle and only Walden is fighting"},
+    {"게럴드는 놀고 월든만 싸우고 있음",
+     "Gerald is idle and only Walden is fighting"},
     {"게럴드는 다 싸웠음", "Gerald finished fighting"},
     {"게럴드배우 위치", "Gerald actor position"},
     {"게럴드배우달려가는 곳", "Place Gerald actor runs to"},
@@ -278,10 +282,13 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"궁병대 잠시 보여주기", "Briefly show archer unit"},
     {"궁병대 전멸", "Archer unit wiped out"},
     {"궁병대 정위치 체크", "Check archer unit default position"},
-    {"궁병대가 리스린이 같이 엉켜 싸움", "Archer unit tangled in combat with Lisrin"},
+    {"궁병대가 리스린이 같이 엉켜 싸움",
+     "Archer unit tangled in combat with Lisrin"},
     {"궁병대가 먼저 보였음", "Archer unit spotted first"},
-    {"궁병대가 보병대에 공격받고 있음", "Archer unit being attacked by infantry"},
-    {"궁병대가 오크와 같이 엉켜 싸움", "Archer unit tangled in combat with orc"},
+    {"궁병대가 보병대에 공격받고 있음",
+     "Archer unit being attacked by infantry"},
+    {"궁병대가 오크와 같이 엉켜 싸움",
+     "Archer unit tangled in combat with orc"},
     {"궁병대가 전멸해서 무시", "Ignore since archer unit wiped out"},
     {"궁병대는 놀고", "Archer unit is idle"},
     {"궁병대도 왔음", "Archer unit also arrived"},
@@ -311,7 +318,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"기병대 피하기", "Avoid cavalry unit"},
     {"기병대디버그", "Cavalry unit debug"},
     {"기사대", "Knight unit"},
-    {"기사대 다 안잡고 적 많이 잡았음", "Didn't capture all knights but killed many enemies"},
+    {"기사대 다 안잡고 적 많이 잡았음",
+     "Didn't capture all knights but killed many enemies"},
     {"기사대 메시지 출력 끝", "Knight unit message output done"},
     {"기사대 모두 전멸", "All knight units wiped out"},
     {"기사대 보인다", "Knight unit visible"},
@@ -360,8 +368,10 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"내성근처지역", "Area near inner castle"},
     {"내성벽 무너졌음", "Inner castle wall collapsed"},
     {"내성벽 무너짐", "Inner castle wall collapses"},
-    {"내성벽이 무너졌고 누군가 싸우고 있음", "Inner wall collapsed and someone is fighting"},
-    {"내성벽이 무너졌고 아무도 안싸우고 있음", "Inner wall collapsed and no one is fighting"},
+    {"내성벽이 무너졌고 누군가 싸우고 있음",
+     "Inner wall collapsed and someone is fighting"},
+    {"내성벽이 무너졌고 아무도 안싸우고 있음",
+     "Inner wall collapsed and no one is fighting"},
     {"너무 오래 가만히 있으면", "If idle for too long"},
     {"넘음", "Crossed over"},
     {"노바르트 열기", "Open Novart"},
@@ -378,12 +388,15 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"다시 셋팅", "Reset"},
     {"다음 스테이지로", "To next stage"},
     {"다음 장소로 이동", "Move to next location"},
-    {"다크엘프 못 구하고 리스린 찾으러 다님", "Couldn't rescue dark elf, searching for Lisrin"},
+    {"다크엘프 못 구하고 리스린 찾으러 다님",
+     "Couldn't rescue dark elf, searching for Lisrin"},
     {"다크엘프 발견", "Dark elf discovered"},
     {"다크엘프 보병대", "Dark elf infantry unit"},
-    {"다크엘프 보병대가 전멸하면 리스린 도주", "Lisrin flees when dark elf infantry wiped out"},
+    {"다크엘프 보병대가 전멸하면 리스린 도주",
+     "Lisrin flees when dark elf infantry wiped out"},
     {"다크엘프가 안전한 지역", "Area safe for dark elf"},
-    {"다크엘프와 전투 시작하면 레터박스 해제", "Release letterbox when combat with dark elf starts"},
+    {"다크엘프와 전투 시작하면 레터박스 해제",
+     "Release letterbox when combat with dark elf starts"},
     {"단 방향", "Single direction"},
     {"단역", "Extra (NPC)"},
     {"단역들", "Extras (NPCs)"},
@@ -526,7 +539,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"루멘 이동 시작", "Lumen move start"},
     {"루멘 전멸", "Lumen wiped out"},
     {"루멘만 도착", "Only Lumen arrived"},
-    {"루멘은 도착했는데 루크레티아 안왔음", "Lumen arrived but Lucretia hasn't come"},
+    {"루멘은 도착했는데 루크레티아 안왔음",
+     "Lumen arrived but Lucretia hasn't come"},
     {"루시", "Lucy"},
     {"루시 기병대 피하기", "Avoid Lucy's cavalry"},
     {"루시 이동", "Lucy move"},
@@ -575,7 +589,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"루퍼트 도착 위치", "Rupert arrival position"},
     {"루퍼트 멀어짐 카운트", "Rupert distance count"},
     {"루퍼트 이쪽으로 오지 말라니까", "Told Rupert not to come this way"},
-    {"루퍼트 이쪽으로 오지 말라니깐 쯧", "Told Rupert not to come this way, tsk"},
+    {"루퍼트 이쪽으로 오지 말라니깐 쯧",
+     "Told Rupert not to come this way, tsk"},
     {"루퍼트 적과 교전", "Rupert engaging enemy"},
     {"루퍼트 전멸", "Rupert wiped out"},
     {"루퍼트가 너무 멀어짐", "Rupert went too far"},
@@ -763,7 +778,9 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"보여진 적의 갯수", "Number of enemies spotted"},
     {"보오크보병", "Sub orc infantry"},
     {"보초병 걸어가는 자리", "Spot guard walks to"},
-    {"본국 명령으로 용의 무덤을 찾으러 왔다가 히로니덴군 발견", "Came to find dragon's tomb by homeland order and discovered Hironiden army"},
+    {"본국 명령으로 용의 무덤을 찾으러 왔다가 히로니덴군 발견",
+     "Came to find dragon's tomb by homeland order and discovered Hironiden "
+     "army"},
     {"본드래곤", "Main dragon"},
     {"본드래곤 사라지는 위치", "Position main dragon disappears"},
     {"본드래곤 영역제한", "Main dragon area restriction"},
@@ -855,7 +872,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"설치된 함정 수", "Number of traps installed"},
     {"성 무너졌음", "Castle collapsed"},
     {"성 무너짐", "Castle collapses"},
-    {"성 앞에 전멸이고 성벽궁병", "Wiped out in front of castle and wall archers"},
+    {"성 앞에 전멸이고 성벽궁병",
+     "Wiped out in front of castle and wall archers"},
     {"성공", "Success"},
     {"성기사대 전투 횟수", "Holy knight unit combat count"},
     {"성벽", "Castle wall"},
@@ -904,7 +922,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"스콜피온", "Scorpion"},
     {"스콜피온 무리가 보임", "Scorpion group visible"},
     {"스콜피온 보임", "Scorpion visible"},
-    {"스콜피온 없어졌는지 체크하는 영역", "Area checking if scorpion disappeared"},
+    {"스콜피온 없어졌는지 체크하는 영역",
+     "Area checking if scorpion disappeared"},
     {"스콜피온 전멸로 미션 실패", "Mission fail due to scorpion wipeout"},
     {"스콜피온과 싸움이 붙음", "Combat with scorpion starts"},
     {"스콜피온들 사라짐", "Scorpions disappeared"},
@@ -941,7 +960,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"시체", "Corpse"},
     {"시키는 대로 안했음", "Didn't follow instructions"},
     {"시키는 대로 했음", "Followed instructions"},
-    {"시키는대로 안하고 적 전멸", "Wiped out enemy without following instructions"},
+    {"시키는대로 안하고 적 전멸",
+     "Wiped out enemy without following instructions"},
     {"시키는대로 해서 적 전멸", "Wiped out enemy by following instructions"},
     {"신파극", "Melodrama"},
     {"실제 지뢰 설치지역", "Actual mine installation area"},
@@ -997,12 +1017,14 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"어라인 본성", "Arain main castle"},
     {"어라인 본성 나오자 마자", "Right after leaving Arain main castle"},
     {"어라인 본성 나온 후", "After leaving Arain main castle"},
-    {"어라인 본성 나온 후 장소처리", "Location handling after leaving Arain main castle"},
+    {"어라인 본성 나온 후 장소처리",
+     "Location handling after leaving Arain main castle"},
     {"어라인 본성 나온 후 주점", "Pub after leaving Arain main castle"},
     {"어라인 본성 후 장소 처리", "Location handling after Arain main castle"},
     {"어라인 장소처리", "Arain location handling"},
     {"어라인 주점", "Arain pub"},
-    {"어라인 주점 나온 후 장소처리", "Location handling after leaving Arain pub"},
+    {"어라인 주점 나온 후 장소처리",
+     "Location handling after leaving Arain pub"},
     {"어라인에서 나오면", "When leaving Arain"},
     {"어옴", "Comes"},
     {"어있기", "Being"},
@@ -1030,10 +1052,12 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"에클레시아 군 위험", "Ecclesia army in danger"},
     {"에클레시아 도착", "Ecclesia arrives"},
     {"에클레시아 도착 본성", "Ecclesia arrival main castle"},
-    {"에클레시아 도착 후 장소 처리", "Location handling after Ecclesia arrives"},
+    {"에클레시아 도착 후 장소 처리",
+     "Location handling after Ecclesia arrives"},
     {"에클레시아 부근", "Near Ecclesia"},
     {"에클레시아 재도착", "Ecclesia arrives again"},
-    {"에클레시아 재도착 후 장소처리", "Location handling after Ecclesia re-arrives"},
+    {"에클레시아 재도착 후 장소처리",
+     "Location handling after Ecclesia re-arrives"},
     {"에클레시아군 발견", "Ecclesia army discovered"},
     {"에클레시아군 전멸", "Ecclesia army wiped out"},
     {"엑낫", "Axe nut"},
@@ -1129,8 +1153,10 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"위험", "Danger"},
     {"윌든 빈정거림", "Walden taunting"},
     {"윌든이 빈정빈정", "Walden is taunting"},
-    {"유인되고 신호 떨어지기전 게럴드가 적 공격", "Gerald attacks enemy before signal drops after luring"},
-    {"유인되고 신호 떨어지기전 궁병대가 적 공격", "Archer unit attacks enemy before signal drops after luring"},
+    {"유인되고 신호 떨어지기전 게럴드가 적 공격",
+     "Gerald attacks enemy before signal drops after luring"},
+    {"유인되고 신호 떨어지기전 궁병대가 적 공격",
+     "Archer unit attacks enemy before signal drops after luring"},
     {"유인되었고 게럴드도 잘 했음", "Lured and Gerald did well"},
     {"유인되었음", "Lured"},
     {"유인된 오크 보병대 갯수", "Number of lured orc infantry"},
@@ -1210,7 +1236,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"적 기지", "Enemy base"},
     {"적 기지 병력 활성화", "Activate enemy base troops"},
     {"적 기지 위치", "Enemy base position"},
-    {"적 남았는데 루크레티아 놀고 있음", "Enemies remaining but Lucretia is idle"},
+    {"적 남았는데 루크레티아 놀고 있음",
+     "Enemies remaining but Lucretia is idle"},
     {"적 대장 전멸", "Enemy captain wiped out"},
     {"적 대장 쫓기", "Chase enemy captain"},
     {"적 덜 죽이고 왔음", "Came without killing enough enemies"},
@@ -1270,7 +1297,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"적 출현", "Enemy appears"},
     {"적 화공 영역에 들어옴", "Enemy entered fire attack area"},
     {"적 활성화", "Enemy activate"},
-    {"적 활성화 되었을 때 루크레티아가 근처에 있음", "Lucretia is nearby when enemy activates"},
+    {"적 활성화 되었을 때 루크레티아가 근처에 있음",
+     "Lucretia is nearby when enemy activates"},
     {"적 활성화 숫자", "Enemy activation count"},
     {"적 활성화 잠시 정지", "Temporarily pause enemy activation"},
     {"적 활성화 카운트", "Enemy activation count"},
@@ -1295,7 +1323,8 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"적수색", "Enemy search"},
     {"적수색대", "Enemy search unit"},
     {"적신호화살 쏘기", "Shoot enemy signal arrow"},
-    {"적은 유인되고 휴 신호는 안기다림", "Enemy lured but not waiting for Hugh's signal"},
+    {"적은 유인되고 휴 신호는 안기다림",
+     "Enemy lured but not waiting for Hugh's signal"},
     {"적을 발견", "Discovered enemy"},
     {"적을 유인하기 시작했음", "Started luring enemy"},
     {"적이 거의다 죽었으면 공격적", "Aggressive if enemies almost all dead"},
@@ -1307,8 +1336,10 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"적이 살아서 근처에 왔음", "Enemy alive and came nearby"},
     {"적이 에클레시아 공격", "Enemy attacks Ecclesia"},
     {"적이 움직이기 시작", "Enemy starts moving"},
-    {"적이 유인되기 전에 게럴드가 붙어버림", "Gerald engaged before enemy was lured"},
-    {"적이 유인되기 전에 궁병으로 공격", "Attack with archer before enemy is lured"},
+    {"적이 유인되기 전에 게럴드가 붙어버림",
+     "Gerald engaged before enemy was lured"},
+    {"적이 유인되기 전에 궁병으로 공격",
+     "Attack with archer before enemy is lured"},
     {"적이 중간지점 통과", "Enemy passes midpoint"},
     {"적이 치료마법 사용", "Enemy uses healing magic"},
     {"적진 방향표시", "Show enemy camp direction"},
@@ -1636,8 +1667,10 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"후 대사", "Post dialogue"},
     {"후 대화", "Post dialogue"},
     {"후 시작지점", "Post start point"},
-    {"후 에쎄 성에 가면 캐슬로", "Go to castle when going to Esse castle after"},
-    {"후 에쎄 성에서 레그나이어 후퇴", "Regnair retreats from Esse castle after"},
+    {"후 에쎄 성에 가면 캐슬로",
+     "Go to castle when going to Esse castle after"},
+    {"후 에쎄 성에서 레그나이어 후퇴",
+     "Regnair retreats from Esse castle after"},
     {"후 전진기지", "Post forward base"},
     {"후 칼리샤이어 본성", "Post Kalishai main castle"},
     {"후퇴", "Retreat"},
@@ -1682,8 +1715,10 @@ constexpr StaticTranslation kStaticTranslations[] = {
     {"히로니덴 본성", "Hironiden main castle"},
     {"히로니덴 본성 후", "After Hironiden main castle"},
     {"히로니덴 본성 후 밖으로", "Outside after Hironiden main castle"},
-    {"히로니덴 본성 후 장소 처리", "Location handling after Hironiden main castle"},
-    {"히로니덴 본성 후 장소처리", "Location handling after Hironiden main castle"},
+    {"히로니덴 본성 후 장소 처리",
+     "Location handling after Hironiden main castle"},
+    {"히로니덴 본성 후 장소처리",
+     "Location handling after Hironiden main castle"},
     {"히로니덴 본성 후 주점", "Pub after Hironiden main castle"},
     {"히로니덴 장소처리", "Hironiden location handling"},
     {"히로니덴 펍", "Hironiden pub"},
@@ -1692,554 +1727,622 @@ constexpr StaticTranslation kStaticTranslations[] = {
 };
 
 bool isHangulCodepoint(uint32_t cp) {
-    return (cp >= 0xAC00 && cp <= 0xD7A3) ||  // Hangul Syllables
-           (cp >= 0x3130 && cp <= 0x318F) ||   // Hangul Compatibility Jamo
-           (cp >= 0x1100 && cp <= 0x11FF);     // Hangul Jamo
+	return (cp >= 0xAC00 && cp <= 0xD7A3) || // Hangul Syllables
+	       (cp >= 0x3130 && cp <= 0x318F) || // Hangul Compatibility Jamo
+	       (cp >= 0x1100 && cp <= 0x11FF);	 // Hangul Jamo
 }
 
-bool isHangulUtf8(const char* p, size_t remaining) {
-    if (remaining < 3) return false;
-    auto b0 = static_cast<uint8_t>(p[0]);
-    auto b1 = static_cast<uint8_t>(p[1]);
-    auto b2 = static_cast<uint8_t>(p[2]);
-    if ((b0 & 0xF0) != 0xE0 || (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80)
-        return false;
-    uint32_t cp = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
-    return isHangulCodepoint(cp);
+bool isHangulUtf8(const char *p, size_t remaining) {
+	if (remaining < 3) return false;
+	auto b0 = static_cast<uint8_t>(p[0]);
+	auto b1 = static_cast<uint8_t>(p[1]);
+	auto b2 = static_cast<uint8_t>(p[2]);
+	if ((b0 & 0xF0) != 0xE0 || (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80)
+		return false;
+	uint32_t cp = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+	return isHangulCodepoint(cp);
 }
 
 } // namespace
 
-std::vector<std::byte> NameDictionary::readSoxFile(const std::string& path) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return {};
+std::vector<std::byte> NameDictionary::readSoxFile(const std::string &path) {
+	std::ifstream file(path, std::ios::binary | std::ios::ate);
+	if (!file) return {};
 
-    auto size = file.tellg();
-    if (size <= 0) return {};
-    file.seekg(0);
+	auto size = file.tellg();
+	if (size <= 0) return {};
+	file.seekg(0);
 
-    std::vector<std::byte> data(static_cast<size_t>(size));
-    file.read(reinterpret_cast<char*>(data.data()), size);
-    if (!file) return {};
+	std::vector<std::byte> data(static_cast<size_t>(size));
+	file.read(reinterpret_cast<char *>(data.data()), size);
+	if (!file) return {};
 
-    if (isSoxEncoded(data)) {
-        auto decoded = soxDecode(data);
-        if (decoded) return std::move(*decoded);
-        return {};
-    }
-    return data;
+	if (isSoxEncoded(data)) {
+		auto decoded = soxDecode(data);
+		if (decoded) return std::move(*decoded);
+		return {};
+	}
+	return data;
 }
 
-bool NameDictionary::loadIndexedTextSox(const std::string& path, std::vector<std::string>& entries) {
-    auto data = readSoxFile(path);
-    if (data.size() < 8) return false;
+bool NameDictionary::loadIndexedTextSox(const std::string &path,
+					std::vector<std::string> &entries) {
+	auto data = readSoxFile(path);
+	if (data.size() < 8) return false;
 
-    uint32_t version = readU32LE(data.data());
-    uint32_t count = readU32LE(data.data() + 4);
-    if (version != 100 || count == 0) return false;
+	uint32_t version = readU32LE(data.data());
+	uint32_t count = readU32LE(data.data() + 4);
+	if (version != 100 || count == 0) return false;
 
-    size_t offset = 8;
-    for (uint32_t i = 0; i < count; ++i) {
-        // Indexed format: 4-byte index + 2-byte length + text.
-        if (offset + 6 > data.size()) break;
+	size_t offset = 8;
+	for (uint32_t i = 0; i < count; ++i) {
+		// Indexed format: 4-byte index + 2-byte length + text.
+		if (offset + 6 > data.size()) break;
 
-        uint32_t index = readU32LE(data.data() + offset);
-        uint16_t len = readU16LE(data.data() + offset + 4);
-        offset += 6;
+		uint32_t index = readU32LE(data.data() + offset);
+		uint16_t len = readU16LE(data.data() + offset + 4);
+		offset += 6;
 
-        if (offset + len > data.size()) break;
+		if (offset + len > data.size()) break;
 
-        std::string text(reinterpret_cast<const char*>(data.data() + offset), len);
-        offset += len;
+		std::string text(
+		    reinterpret_cast<const char *>(data.data() + offset), len);
+		offset += len;
 
-        if (index >= entries.size()) {
-            entries.resize(index + 1);
-        }
-        entries[index] = std::move(text);
-    }
+		if (index >= entries.size()) {
+			entries.resize(index + 1);
+		}
+		entries[index] = std::move(text);
+	}
 
-    return !entries.empty();
+	return !entries.empty();
 }
 
-bool NameDictionary::loadSpecialNamesSox(const std::string& soxPath, const std::string& localizedPath) {
-    auto soxData = readSoxFile(soxPath);
-    if (soxData.size() < 8) return false;
+bool NameDictionary::loadSpecialNamesSox(const std::string &soxPath,
+					 const std::string &localizedPath) {
+	auto soxData = readSoxFile(soxPath);
+	if (soxData.size() < 8) return false;
 
-    uint32_t version = readU32LE(soxData.data());
-    uint32_t count = readU32LE(soxData.data() + 4);
-    if (version != 100 || count == 0) return false;
+	uint32_t version = readU32LE(soxData.data());
+	uint32_t count = readU32LE(soxData.data() + 4);
+	if (version != 100 || count == 0) return false;
 
-    // SpecialNames.sox has a paired format: each record is
-    // (uint16 key_len + key_bytes) + (uint16 default_len + default_bytes).
-    struct RawEntry {
-        std::vector<std::byte> keyBytes;
-        std::string defaultName;
-    };
+	// SpecialNames.sox has a paired format: each record is
+	// (uint16 key_len + key_bytes) + (uint16 default_len + default_bytes).
+	struct RawEntry {
+		std::vector<std::byte> keyBytes;
+		std::string defaultName;
+	};
 
-    std::vector<RawEntry> rawEntries;
-    rawEntries.reserve(count);
+	std::vector<RawEntry> rawEntries;
+	rawEntries.reserve(count);
 
-    size_t offset = 8;
-    for (uint32_t i = 0; i < count; ++i) {
-        if (offset + 2 > soxData.size()) break;
-        if (isThendMarker(soxData.data() + offset, soxData.size() - offset)) break;
+	size_t offset = 8;
+	for (uint32_t i = 0; i < count; ++i) {
+		if (offset + 2 > soxData.size()) break;
+		if (isThendMarker(soxData.data() + offset,
+				  soxData.size() - offset))
+			break;
 
-        uint16_t keyLen = readU16LE(soxData.data() + offset);
-        offset += 2;
-        if (offset + keyLen > soxData.size()) break;
+		uint16_t keyLen = readU16LE(soxData.data() + offset);
+		offset += 2;
+		if (offset + keyLen > soxData.size()) break;
 
-        std::vector<std::byte> keyBytes(soxData.data() + offset, soxData.data() + offset + keyLen);
-        offset += keyLen;
+		std::vector<std::byte> keyBytes(
+		    soxData.data() + offset, soxData.data() + offset + keyLen);
+		offset += keyLen;
 
-        if (offset + 2 > soxData.size()) break;
-        uint16_t defaultLen = readU16LE(soxData.data() + offset);
-        offset += 2;
+		if (offset + 2 > soxData.size()) break;
+		uint16_t defaultLen = readU16LE(soxData.data() + offset);
+		offset += 2;
 
-        std::string defaultName;
-        if (defaultLen > 0 && offset + defaultLen <= soxData.size()) {
-            defaultName = std::string(reinterpret_cast<const char*>(soxData.data() + offset), defaultLen);
-        }
-        offset += defaultLen;
+		std::string defaultName;
+		if (defaultLen > 0 && offset + defaultLen <= soxData.size()) {
+			defaultName =
+			    std::string(reinterpret_cast<const char *>(
+					    soxData.data() + offset),
+					defaultLen);
+		}
+		offset += defaultLen;
 
-        rawEntries.push_back({std::move(keyBytes), std::move(defaultName)});
-    }
+		rawEntries.push_back(
+		    {std::move(keyBytes), std::move(defaultName)});
+	}
 
-    // Load localized display names from SpecialNames_ENG.sox.
-    // This file has a simple non-indexed format: one string per entry.
-    std::vector<std::string> displayNames;
-    auto locData = readSoxFile(localizedPath);
-    if (locData.size() >= 8) {
-        uint32_t locVersion = readU32LE(locData.data());
-        uint32_t locCount = readU32LE(locData.data() + 4);
-        if (locVersion == 100 && locCount > 0) {
-            size_t locOffset = 8;
-            for (uint32_t i = 0; i < locCount; ++i) {
-                if (locOffset + 2 > locData.size()) break;
-                if (isThendMarker(locData.data() + locOffset, locData.size() - locOffset)) break;
+	// Load localized display names from SpecialNames_ENG.sox.
+	// This file has a simple non-indexed format: one string per entry.
+	std::vector<std::string> displayNames;
+	auto locData = readSoxFile(localizedPath);
+	if (locData.size() >= 8) {
+		uint32_t locVersion = readU32LE(locData.data());
+		uint32_t locCount = readU32LE(locData.data() + 4);
+		if (locVersion == 100 && locCount > 0) {
+			size_t locOffset = 8;
+			for (uint32_t i = 0; i < locCount; ++i) {
+				if (locOffset + 2 > locData.size()) break;
+				if (isThendMarker(locData.data() + locOffset,
+						  locData.size() - locOffset))
+					break;
 
-                uint16_t slen = readU16LE(locData.data() + locOffset);
-                locOffset += 2;
-                if (locOffset + slen > locData.size()) break;
+				uint16_t slen =
+				    readU16LE(locData.data() + locOffset);
+				locOffset += 2;
+				if (locOffset + slen > locData.size()) break;
 
-                displayNames.emplace_back(reinterpret_cast<const char*>(locData.data() + locOffset), slen);
-                locOffset += slen;
-            }
-        }
-    }
+				displayNames.emplace_back(
+				    reinterpret_cast<const char *>(
+					locData.data() + locOffset),
+				    slen);
+				locOffset += slen;
+			}
+		}
+	}
 
-    specialNames_.clear();
-    specialNames_.reserve(rawEntries.size());
-    for (size_t i = 0; i < rawEntries.size(); ++i) {
-        SpecialNameEntry entry;
-        entry.keyBytes = std::move(rawEntries[i].keyBytes);
-        if (i < displayNames.size() && !displayNames[i].empty()) {
-            entry.displayName = std::move(displayNames[i]);
-        } else {
-            entry.displayName = std::move(rawEntries[i].defaultName);
-        }
-        specialNames_.push_back(std::move(entry));
-    }
+	specialNames_.clear();
+	specialNames_.reserve(rawEntries.size());
+	for (size_t i = 0; i < rawEntries.size(); ++i) {
+		SpecialNameEntry entry;
+		entry.keyBytes = std::move(rawEntries[i].keyBytes);
+		if (i < displayNames.size() && !displayNames[i].empty()) {
+			entry.displayName = std::move(displayNames[i]);
+		} else {
+			entry.displayName =
+			    std::move(rawEntries[i].defaultName);
+		}
+		specialNames_.push_back(std::move(entry));
+	}
 
-    return !specialNames_.empty();
+	return !specialNames_.empty();
 }
 
-bool NameDictionary::load(const std::string& soxDir) {
-    if (soxDir.empty()) return false;
+bool NameDictionary::load(const std::string &soxDir) {
+	if (soxDir.empty()) return false;
 
-    fs::path base(soxDir);
-    fs::path engDir = base / "ENG";
+	fs::path base(soxDir);
+	fs::path engDir = base / "ENG";
 
-    // Load TroopInfo_ENG.sox — names for standard job types 0-42.
-    fs::path troopEngPath = engDir / "TroopInfo_ENG.sox";
-    if (fs::exists(troopEngPath)) {
-        loadIndexedTextSox(troopEngPath.string(), troopInfoNames_);
-    }
+	// Load TroopInfo_ENG.sox — names for standard job types 0-42.
+	fs::path troopEngPath = engDir / "TroopInfo_ENG.sox";
+	if (fs::exists(troopEngPath)) {
+		loadIndexedTextSox(troopEngPath.string(), troopInfoNames_);
+	}
 
-    // Load CharInfo_ENG.sox — names for character types (heroes, special units).
-    fs::path charInfoPath = engDir / "CharInfo_ENG.sox";
-    if (fs::exists(charInfoPath)) {
-        loadIndexedTextSox(charInfoPath.string(), charInfoNames_);
-    }
+	// Load CharInfo_ENG.sox — names for character types (heroes, special
+	// units).
+	fs::path charInfoPath = engDir / "CharInfo_ENG.sox";
+	if (fs::exists(charInfoPath)) {
+		loadIndexedTextSox(charInfoPath.string(), charInfoNames_);
+	}
 
-    // Load LeaderGeneration_ENG.sox — name pools for generated leaders.
-    // Each entry is a space-separated list of names keyed by troop info index.
-    fs::path leaderGenPath = engDir / "LeaderGeneration_ENG.sox";
-    if (fs::exists(leaderGenPath)) {
-        std::vector<std::string> rawPools;
-        if (loadIndexedTextSox(leaderGenPath.string(), rawPools)) {
-            leaderGenPools_.resize(rawPools.size());
-            for (size_t i = 0; i < rawPools.size(); ++i) {
-                if (rawPools[i].empty()) continue;
-                std::istringstream iss(rawPools[i]);
-                std::string name;
-                while (iss >> name) {
-                    leaderGenPools_[i].push_back(name);
-                }
-            }
-        }
-    }
+	// Load LeaderGeneration_ENG.sox — name pools for generated leaders.
+	// Each entry is a space-separated list of names keyed by troop info
+	// index.
+	fs::path leaderGenPath = engDir / "LeaderGeneration_ENG.sox";
+	if (fs::exists(leaderGenPath)) {
+		std::vector<std::string> rawPools;
+		if (loadIndexedTextSox(leaderGenPath.string(), rawPools)) {
+			leaderGenPools_.resize(rawPools.size());
+			for (size_t i = 0; i < rawPools.size(); ++i) {
+				if (rawPools[i].empty()) continue;
+				std::istringstream iss(rawPools[i]);
+				std::string name;
+				while (iss >> name) {
+					leaderGenPools_[i].push_back(name);
+				}
+			}
+		}
+	}
 
-    // Load SpecialNames paired format for prefix-match name resolution.
-    fs::path specialSoxPath = base / "SpecialNames.sox";
-    fs::path specialEngPath = engDir / "SpecialNames_ENG.sox";
-    if (fs::exists(specialSoxPath)) {
-        loadSpecialNamesSox(specialSoxPath.string(), specialEngPath.string());
-    }
+	// Load SpecialNames paired format for prefix-match name resolution.
+	fs::path specialSoxPath = base / "SpecialNames.sox";
+	fs::path specialEngPath = engDir / "SpecialNames_ENG.sox";
+	if (fs::exists(specialSoxPath)) {
+		loadSpecialNamesSox(specialSoxPath.string(),
+				    specialEngPath.string());
+	}
 
-    // Build Korean→English translation map from SpecialNames data.
-    for (const auto& entry : specialNames_) {
-        if (entry.keyBytes.empty() || entry.displayName.empty()) continue;
+	// Build Korean→English translation map from SpecialNames data.
+	for (const auto &entry : specialNames_) {
+		if (entry.keyBytes.empty() || entry.displayName.empty())
+			continue;
 
-        std::string rawKey(reinterpret_cast<const char*>(entry.keyBytes.data()), entry.keyBytes.size());
-        std::string korClean = stripDelimiters(rawKey);
-        std::string korUtf8 = cp949ToUtf8(korClean);
-        std::string engClean = stripDelimiters(entry.displayName);
+		std::string rawKey(
+		    reinterpret_cast<const char *>(entry.keyBytes.data()),
+		    entry.keyBytes.size());
+		std::string korClean = stripDelimiters(rawKey);
+		std::string korUtf8 = cp949ToUtf8(korClean);
+		std::string engClean = stripDelimiters(entry.displayName);
 
-        if (!korUtf8.empty() && !engClean.empty()) {
-            koreanToEnglish_[korUtf8] = engClean;
-        }
-    }
+		if (!korUtf8.empty() && !engClean.empty()) {
+			koreanToEnglish_[korUtf8] = engClean;
+		}
+	}
 
-    for (const auto& t : kStaticTranslations) {
-        koreanToEnglish_[t.korean] = t.english;
-    }
+	for (const auto &t : kStaticTranslations) {
+		koreanToEnglish_[t.korean] = t.english;
+	}
 
-    for (const auto& [korean, english] : koreanToEnglish_) {
-        englishToKorean_[english] = korean;
-    }
+	for (const auto &[korean, english] : koreanToEnglish_) {
+		englishToKorean_[english] = korean;
+	}
 
-    // Load equipment name data from Text/ and SOX/ENG/ directories.
-    fs::path textEngDir = base.parent_path() / "Text" / "ENG";
-    if (fs::is_directory(textEngDir)) {
-        loadWeaponNames(textEngDir.string());
-    }
-    loadItemAttInfo(engDir.string());
-    loadItemTypePrefixes(engDir.string());
+	// Load equipment name data from Text/ and SOX/ENG/ directories.
+	fs::path textEngDir = base.parent_path() / "Text" / "ENG";
+	if (fs::is_directory(textEngDir)) {
+		loadWeaponNames(textEngDir.string());
+	}
+	loadItemAttInfo(engDir.string());
+	loadItemTypePrefixes(engDir.string());
 
-    loaded_ = !troopInfoNames_.empty() || !charInfoNames_.empty() || !specialNames_.empty();
-    return loaded_;
+	loaded_ = !troopInfoNames_.empty() || !charInfoNames_.empty() ||
+		  !specialNames_.empty();
+	return loaded_;
 }
 
-const char* NameDictionary::troopInfoName(uint32_t index) const {
-    if (index < troopInfoNames_.size() && !troopInfoNames_[index].empty()) {
-        return troopInfoNames_[index].c_str();
-    }
-    return nullptr;
+const char *NameDictionary::troopInfoName(uint32_t index) const {
+	if (index < troopInfoNames_.size() && !troopInfoNames_[index].empty()) {
+		return troopInfoNames_[index].c_str();
+	}
+	return nullptr;
 }
 
-const char* NameDictionary::charInfoName(uint8_t jobType) const {
-    if (jobType < charInfoNames_.size() && !charInfoNames_[jobType].empty()) {
-        return charInfoNames_[jobType].c_str();
-    }
-    return nullptr;
+const char *NameDictionary::charInfoName(uint8_t jobType) const {
+	if (jobType < charInfoNames_.size() &&
+	    !charInfoNames_[jobType].empty()) {
+		return charInfoNames_[jobType].c_str();
+	}
+	return nullptr;
 }
 
-const char* NameDictionary::leaderGenName(uint32_t poolIndex, int32_t nameIndex) const {
-    if (nameIndex < 0) return nullptr;
-    if (poolIndex >= leaderGenPools_.size()) return nullptr;
-    const auto& pool = leaderGenPools_[poolIndex];
-    if (static_cast<size_t>(nameIndex) >= pool.size()) return nullptr;
-    return pool[nameIndex].c_str();
+const char *NameDictionary::leaderGenName(uint32_t poolIndex,
+					  int32_t nameIndex) const {
+	if (nameIndex < 0) return nullptr;
+	if (poolIndex >= leaderGenPools_.size()) return nullptr;
+	const auto &pool = leaderGenPools_[poolIndex];
+	if (static_cast<size_t>(nameIndex) >= pool.size()) return nullptr;
+	return pool[nameIndex].c_str();
 }
 
-std::string NameDictionary::translate(const std::string& korean) const {
-    if (korean.empty()) return {};
+std::string NameDictionary::translate(const std::string &korean) const {
+	if (korean.empty()) return {};
 
-    // Strip "--" delimiters from input (STG unit names can include them).
-    std::string cleaned = stripDelimiters(korean);
-    if (cleaned.empty()) cleaned = korean;
+	// Strip "--" delimiters from input (STG unit names can include them).
+	std::string cleaned = stripDelimiters(korean);
+	if (cleaned.empty()) cleaned = korean;
 
-    // Exact match.
-    auto it = koreanToEnglish_.find(cleaned);
-    if (it != koreanToEnglish_.end()) {
-        return it->second;
-    }
+	// Exact match.
+	auto it = koreanToEnglish_.find(cleaned);
+	if (it != koreanToEnglish_.end()) {
+		return it->second;
+	}
 
-    // Strip trailing digits and try again.
-    std::string base = stripTrailingDigits(cleaned);
-    if (!base.empty()) {
-        it = koreanToEnglish_.find(base);
-        if (it != koreanToEnglish_.end()) {
-            return it->second;
-        }
-    }
+	// Strip trailing digits and try again.
+	std::string base = stripTrailingDigits(cleaned);
+	if (!base.empty()) {
+		it = koreanToEnglish_.find(base);
+		if (it != koreanToEnglish_.end()) {
+			return it->second;
+		}
+	}
 
-    // Extract Korean substrings from mixed text and translate each one.
-    std::string result;
-    bool anyTranslated = false;
-    size_t i = 0;
-    while (i < cleaned.size()) {
-        if (isHangulUtf8(cleaned.c_str() + i, cleaned.size() - i)) {
-            size_t start = i;
-            size_t lastKoreanEnd = i;
-            while (i < cleaned.size()) {
-                if (isHangulUtf8(cleaned.c_str() + i, cleaned.size() - i)) {
-                    i += 3;
-                    lastKoreanEnd = i;
-                } else if (cleaned[i] == ' ' && i + 1 < cleaned.size() &&
-                           isHangulUtf8(cleaned.c_str() + i + 1, cleaned.size() - i - 1)) {
-                    i++;
-                } else {
-                    break;
-                }
-            }
-            i = lastKoreanEnd;
-            std::string segment = cleaned.substr(start, i - start);
-            auto segIt = koreanToEnglish_.find(segment);
-            if (segIt != koreanToEnglish_.end()) {
-                result += segIt->second;
-                anyTranslated = true;
-            } else {
-                result += segment;
-            }
-        } else {
-            result += cleaned[i];
-            i++;
-        }
-    }
-    if (anyTranslated) return result;
+	// Extract Korean substrings from mixed text and translate each one.
+	std::string result;
+	bool anyTranslated = false;
+	size_t i = 0;
+	while (i < cleaned.size()) {
+		if (isHangulUtf8(cleaned.c_str() + i, cleaned.size() - i)) {
+			size_t start = i;
+			size_t lastKoreanEnd = i;
+			while (i < cleaned.size()) {
+				if (isHangulUtf8(cleaned.c_str() + i,
+						 cleaned.size() - i)) {
+					i += 3;
+					lastKoreanEnd = i;
+				} else if (cleaned[i] == ' ' &&
+					   i + 1 < cleaned.size() &&
+					   isHangulUtf8(cleaned.c_str() + i + 1,
+							cleaned.size() - i -
+							    1)) {
+					i++;
+				} else {
+					break;
+				}
+			}
+			i = lastKoreanEnd;
+			std::string segment = cleaned.substr(start, i - start);
+			auto segIt = koreanToEnglish_.find(segment);
+			if (segIt != koreanToEnglish_.end()) {
+				result += segIt->second;
+				anyTranslated = true;
+			} else {
+				result += segment;
+			}
+		} else {
+			result += cleaned[i];
+			i++;
+		}
+	}
+	if (anyTranslated) return result;
 
-    return {};
+	return {};
 }
 
-std::string NameDictionary::reverseTranslate(const std::string& english) const {
-    if (english.empty()) return {};
+std::string NameDictionary::reverseTranslate(const std::string &english) const {
+	if (english.empty()) return {};
 
-    // Exact match.
-    auto it = englishToKorean_.find(english);
-    if (it != englishToKorean_.end()) {
-        return it->second;
-    }
+	// Exact match.
+	auto it = englishToKorean_.find(english);
+	if (it != englishToKorean_.end()) {
+		return it->second;
+	}
 
-    // Replace English phrases with their Korean equivalents.
-    std::string result = english;
-    bool anyReplaced = false;
-    for (const auto& [eng, kor] : englishToKorean_) {
-        size_t pos = result.find(eng);
-        if (pos != std::string::npos) {
-            result.replace(pos, eng.size(), kor);
-            anyReplaced = true;
-        }
-    }
-    if (anyReplaced) return result;
+	// Replace English phrases with their Korean equivalents.
+	std::string result = english;
+	bool anyReplaced = false;
+	for (const auto &[eng, kor] : englishToKorean_) {
+		size_t pos = result.find(eng);
+		if (pos != std::string::npos) {
+			result.replace(pos, eng.size(), kor);
+			anyReplaced = true;
+		}
+	}
+	if (anyReplaced) return result;
 
-    return {};
+	return {};
 }
 
-bool NameDictionary::loadWeaponNames(const std::string& textEngDir) {
-    fs::path path = fs::path(textEngDir) / "WeaponNames_ENG.txt";
-    if (!fs::exists(path)) return false;
+bool NameDictionary::loadWeaponNames(const std::string &textEngDir) {
+	fs::path path = fs::path(textEngDir) / "WeaponNames_ENG.txt";
+	if (!fs::exists(path)) return false;
 
-    std::ifstream file(path);
-    if (!file) return false;
+	std::ifstream file(path);
+	if (!file) return false;
 
-    std::string line;
-    if (!std::getline(file, line)) return false;
+	std::string line;
+	if (!std::getline(file, line)) return false;
 
-    int totalTypes = 0;
-    try { totalTypes = std::stoi(line); } catch (...) { return false; }
-    if (totalTypes <= 0) return false;
+	int totalTypes = 0;
+	try {
+		totalTypes = std::stoi(line);
+	} catch (...) {
+		return false;
+	}
+	if (totalTypes <= 0) return false;
 
-    weaponNames_.resize(static_cast<size_t>(totalTypes));
+	weaponNames_.resize(static_cast<size_t>(totalTypes));
 
-    for (int typeId = 0; typeId < totalTypes; ++typeId) {
-        // Skip blank lines.
-        while (std::getline(file, line)) {
-            if (!line.empty() && line.find_first_not_of(" \t\r\n") != std::string::npos)
-                break;
-        }
-        if (file.eof()) break;
+	for (int typeId = 0; typeId < totalTypes; ++typeId) {
+		// Skip blank lines.
+		while (std::getline(file, line)) {
+			if (!line.empty() &&
+			    line.find_first_not_of(" \t\r\n") !=
+				std::string::npos)
+				break;
+		}
+		if (file.eof()) break;
 
-        // Parse variant count from header (before // comment or tab).
-        int variantCount = 0;
-        auto tabPos = line.find('\t');
-        auto slashPos = line.find("//");
-        std::string countStr = line.substr(0, std::min(tabPos, slashPos));
-        // Trim whitespace.
-        while (!countStr.empty() && (countStr.back() == ' ' || countStr.back() == '\t' || countStr.back() == '\r'))
-            countStr.pop_back();
-        try { variantCount = std::stoi(countStr); } catch (...) { continue; }
+		// Parse variant count from header (before // comment or tab).
+		int variantCount = 0;
+		auto tabPos = line.find('\t');
+		auto slashPos = line.find("//");
+		std::string countStr =
+		    line.substr(0, std::min(tabPos, slashPos));
+		// Trim whitespace.
+		while (!countStr.empty() &&
+		       (countStr.back() == ' ' || countStr.back() == '\t' ||
+			countStr.back() == '\r'))
+			countStr.pop_back();
+		try {
+			variantCount = std::stoi(countStr);
+		} catch (...) {
+			continue;
+		}
 
-        std::vector<WeaponVariant>& variants = weaponNames_[typeId];
-        for (int v = 0; v < variantCount; ++v) {
-            WeaponVariant wv;
-            if (!std::getline(file, line)) break;
-            // Trim trailing whitespace.
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-                line.pop_back();
-            try { wv.id = std::stoi(line); } catch (...) { break; }
+		std::vector<WeaponVariant> &variants = weaponNames_[typeId];
+		for (int v = 0; v < variantCount; ++v) {
+			WeaponVariant wv;
+			if (!std::getline(file, line)) break;
+			// Trim trailing whitespace.
+			while (!line.empty() &&
+			       (line.back() == '\r' || line.back() == '\n'))
+				line.pop_back();
+			try {
+				wv.id = std::stoi(line);
+			} catch (...) {
+				break;
+			}
 
-            if (!std::getline(file, wv.shortName)) break;
-            while (!wv.shortName.empty() && (wv.shortName.back() == '\r' || wv.shortName.back() == '\n'))
-                wv.shortName.pop_back();
+			if (!std::getline(file, wv.shortName)) break;
+			while (!wv.shortName.empty() &&
+			       (wv.shortName.back() == '\r' ||
+				wv.shortName.back() == '\n'))
+				wv.shortName.pop_back();
 
-            if (!std::getline(file, wv.longName)) break;
-            while (!wv.longName.empty() && (wv.longName.back() == '\r' || wv.longName.back() == '\n'))
-                wv.longName.pop_back();
+			if (!std::getline(file, wv.longName)) break;
+			while (!wv.longName.empty() &&
+			       (wv.longName.back() == '\r' ||
+				wv.longName.back() == '\n'))
+				wv.longName.pop_back();
 
-            variants.push_back(std::move(wv));
-        }
-    }
+			variants.push_back(std::move(wv));
+		}
+	}
 
-    return !weaponNames_.empty();
+	return !weaponNames_.empty();
 }
 
-bool NameDictionary::loadItemAttInfo(const std::string& soxEngDir) {
-    fs::path path = fs::path(soxEngDir) / "ItemAttInfo_ENG.sox";
-    auto data = readSoxFile(path.string());
-    if (data.size() < 8) return false;
+bool NameDictionary::loadItemAttInfo(const std::string &soxEngDir) {
+	fs::path path = fs::path(soxEngDir) / "ItemAttInfo_ENG.sox";
+	auto data = readSoxFile(path.string());
+	if (data.size() < 8) return false;
 
-    uint32_t marker = readU32LE(data.data());
-    uint32_t count = readU32LE(data.data() + 4);
-    if (marker != 100 || count == 0) return false;
+	uint32_t marker = readU32LE(data.data());
+	uint32_t count = readU32LE(data.data() + 4);
+	if (marker != 100 || count == 0) return false;
 
-    size_t offset = 8;
-    for (uint32_t i = 0; i < count; ++i) {
-        if (offset + 6 > data.size()) break;
+	size_t offset = 8;
+	for (uint32_t i = 0; i < count; ++i) {
+		if (offset + 6 > data.size()) break;
 
-        uint32_t recId = readU32LE(data.data() + offset);
-        offset += 4;
+		uint32_t recId = readU32LE(data.data() + offset);
+		offset += 4;
 
-        uint16_t nameLen = readU16LE(data.data() + offset);
-        offset += 2;
-        if (offset + nameLen > data.size()) break;
-        std::string name(reinterpret_cast<const char*>(data.data() + offset), nameLen);
-        offset += nameLen;
+		uint16_t nameLen = readU16LE(data.data() + offset);
+		offset += 2;
+		if (offset + nameLen > data.size()) break;
+		std::string name(
+		    reinterpret_cast<const char *>(data.data() + offset),
+		    nameLen);
+		offset += nameLen;
 
-        if (offset + 2 > data.size()) break;
-        uint16_t descLen = readU16LE(data.data() + offset);
-        offset += 2;
-        if (offset + descLen > data.size()) break;
-        std::string desc(reinterpret_cast<const char*>(data.data() + offset), descLen);
-        offset += descLen;
+		if (offset + 2 > data.size()) break;
+		uint16_t descLen = readU16LE(data.data() + offset);
+		offset += 2;
+		if (offset + descLen > data.size()) break;
+		std::string desc(
+		    reinterpret_cast<const char *>(data.data() + offset),
+		    descLen);
+		offset += descLen;
 
-        if (i >= itemAttNames_.size()) {
-            itemAttNames_.resize(i + 1);
-        }
-        itemAttNames_[i] = {std::move(name), std::move(desc)};
-    }
+		if (i >= itemAttNames_.size()) {
+			itemAttNames_.resize(i + 1);
+		}
+		itemAttNames_[i] = {std::move(name), std::move(desc)};
+	}
 
-    return !itemAttNames_.empty();
+	return !itemAttNames_.empty();
 }
 
-bool NameDictionary::loadItemTypePrefixes(const std::string& soxEngDir) {
-    fs::path path = fs::path(soxEngDir) / "ItemTypeInfo_ENG.sox";
-    auto data = readSoxFile(path.string());
-    if (data.size() < 8) return false;
+bool NameDictionary::loadItemTypePrefixes(const std::string &soxEngDir) {
+	fs::path path = fs::path(soxEngDir) / "ItemTypeInfo_ENG.sox";
+	auto data = readSoxFile(path.string());
+	if (data.size() < 8) return false;
 
-    uint32_t marker = readU32LE(data.data());
-    uint32_t count = readU32LE(data.data() + 4);
-    if (marker != 100 || count == 0) return false;
+	uint32_t marker = readU32LE(data.data());
+	uint32_t count = readU32LE(data.data() + 4);
+	if (marker != 100 || count == 0) return false;
 
-    size_t offset = 8;
-    for (uint32_t i = 0; i < count; ++i) {
-        if (offset + 4 > data.size()) break;
+	size_t offset = 8;
+	for (uint32_t i = 0; i < count; ++i) {
+		if (offset + 4 > data.size()) break;
 
-        uint32_t recId = readU32LE(data.data() + offset);
-        offset += 4;
+		uint32_t recId = readU32LE(data.data() + offset);
+		offset += 4;
 
-        std::array<std::string, 3> tiers;
-        for (int t = 0; t < 3; ++t) {
-            if (offset + 2 > data.size()) break;
-            uint16_t strLen = readU16LE(data.data() + offset);
-            offset += 2;
-            if (offset + strLen > data.size()) break;
-            tiers[t] = std::string(reinterpret_cast<const char*>(data.data() + offset), strLen);
-            offset += strLen;
-        }
+		std::array<std::string, 3> tiers;
+		for (int t = 0; t < 3; ++t) {
+			if (offset + 2 > data.size()) break;
+			uint16_t strLen = readU16LE(data.data() + offset);
+			offset += 2;
+			if (offset + strLen > data.size()) break;
+			tiers[t] = std::string(reinterpret_cast<const char *>(
+						   data.data() + offset),
+					       strLen);
+			offset += strLen;
+		}
 
-        if (recId >= itemTypePrefixes_.size()) {
-            itemTypePrefixes_.resize(recId + 1);
-        }
-        itemTypePrefixes_[recId] = std::move(tiers);
-    }
+		if (recId >= itemTypePrefixes_.size()) {
+			itemTypePrefixes_.resize(recId + 1);
+		}
+		itemTypePrefixes_[recId] = std::move(tiers);
+	}
 
-    return !itemTypePrefixes_.empty();
+	return !itemTypePrefixes_.empty();
 }
 
-std::string NameDictionary::weaponName(int32_t itemTypeId, uint16_t variantIndex, int16_t enhancementTier) const {
-    if (itemTypeId < 0 || static_cast<size_t>(itemTypeId) >= weaponNames_.size())
-        return {};
+std::string NameDictionary::weaponName(int32_t itemTypeId,
+				       uint16_t variantIndex,
+				       int16_t enhancementTier) const {
+	if (itemTypeId < 0 ||
+	    static_cast<size_t>(itemTypeId) >= weaponNames_.size())
+		return {};
 
-    const auto& variants = weaponNames_[itemTypeId];
-    if (variants.empty()) return {};
+	const auto &variants = weaponNames_[itemTypeId];
+	if (variants.empty()) return {};
 
-    const WeaponVariant* variant = nullptr;
-    if (variantIndex < variants.size()) {
-        variant = &variants[variantIndex];
-    } else {
-        // Try matching by variant id.
-        for (const auto& v : variants) {
-            if (v.id == static_cast<int>(variantIndex) + 1) {
-                variant = &v;
-                break;
-            }
-        }
-        if (!variant) variant = &variants[0];
-    }
+	const WeaponVariant *variant = nullptr;
+	if (variantIndex < variants.size()) {
+		variant = &variants[variantIndex];
+	} else {
+		// Try matching by variant id.
+		for (const auto &v : variants) {
+			if (v.id == static_cast<int>(variantIndex) + 1) {
+				variant = &v;
+				break;
+			}
+		}
+		if (!variant) variant = &variants[0];
+	}
 
-    if (enhancementTier >= 0) {
-        if (static_cast<size_t>(itemTypeId) < itemTypePrefixes_.size()) {
-            const auto& tiers = itemTypePrefixes_[itemTypeId];
-            if (enhancementTier < 3 && !tiers[enhancementTier].empty()) {
-                const std::string& prefix = tiers[enhancementTier];
-                if (!prefix.empty() && prefix.back() != ' ')
-                    return prefix + " " + variant->shortName;
-                return prefix + variant->shortName;
-            }
-        }
-        return variant->shortName;
-    }
+	if (enhancementTier >= 0) {
+		if (static_cast<size_t>(itemTypeId) <
+		    itemTypePrefixes_.size()) {
+			const auto &tiers = itemTypePrefixes_[itemTypeId];
+			if (enhancementTier < 3 &&
+			    !tiers[enhancementTier].empty()) {
+				const std::string &prefix =
+				    tiers[enhancementTier];
+				if (!prefix.empty() && prefix.back() != ' ')
+					return prefix + " " +
+					       variant->shortName;
+				return prefix + variant->shortName;
+			}
+		}
+		return variant->shortName;
+	}
 
-    return variant->longName;
+	return variant->longName;
 }
 
 std::string NameDictionary::itemTypeBaseName(int32_t itemTypeId) const {
-    if (itemTypeId < 0 || static_cast<size_t>(itemTypeId) >= weaponNames_.size())
-        return {};
-    const auto& variants = weaponNames_[itemTypeId];
-    if (variants.empty()) return {};
-    return variants[0].shortName;
+	if (itemTypeId < 0 ||
+	    static_cast<size_t>(itemTypeId) >= weaponNames_.size())
+		return {};
+	const auto &variants = weaponNames_[itemTypeId];
+	if (variants.empty()) return {};
+	return variants[0].shortName;
 }
 
-const char* NameDictionary::itemAttName(int32_t attrIndex) const {
-    if (attrIndex < 0 || static_cast<size_t>(attrIndex) >= itemAttNames_.size())
-        return nullptr;
-    if (itemAttNames_[attrIndex].name.empty()) return nullptr;
-    return itemAttNames_[attrIndex].name.c_str();
+const char *NameDictionary::itemAttName(int32_t attrIndex) const {
+	if (attrIndex < 0 ||
+	    static_cast<size_t>(attrIndex) >= itemAttNames_.size())
+		return nullptr;
+	if (itemAttNames_[attrIndex].name.empty()) return nullptr;
+	return itemAttNames_[attrIndex].name.c_str();
 }
 
-const char* NameDictionary::itemAttDescription(int32_t attrIndex) const {
-    if (attrIndex < 0 || static_cast<size_t>(attrIndex) >= itemAttNames_.size())
-        return nullptr;
-    if (itemAttNames_[attrIndex].description.empty()) return nullptr;
-    return itemAttNames_[attrIndex].description.c_str();
+const char *NameDictionary::itemAttDescription(int32_t attrIndex) const {
+	if (attrIndex < 0 ||
+	    static_cast<size_t>(attrIndex) >= itemAttNames_.size())
+		return nullptr;
+	if (itemAttNames_[attrIndex].description.empty()) return nullptr;
+	return itemAttNames_[attrIndex].description.c_str();
 }
 
-std::string findGameDirectory(const std::string& stgFilePath) {
-    fs::path stgPath(stgFilePath);
-    fs::path dir = stgPath.parent_path();
+std::string findGameDirectory(const std::string &stgFilePath) {
+	fs::path stgPath(stgFilePath);
+	fs::path dir = stgPath.parent_path();
 
-    // Walk up from the file's directory looking for a sibling SOX/ folder.
-    for (int depth = 0; depth < 5; ++depth) {
-        if (dir.empty()) break;
+	// Walk up from the file's directory looking for a sibling SOX/ folder.
+	for (int depth = 0; depth < 5; ++depth) {
+		if (dir.empty()) break;
 
-        fs::path soxDir = dir / "SOX";
-        if (fs::is_directory(soxDir)) {
-            return soxDir.string();
-        }
+		fs::path soxDir = dir / "SOX";
+		if (fs::is_directory(soxDir)) {
+			return soxDir.string();
+		}
 
-        fs::path parent = dir.parent_path();
-        if (parent == dir) break;
-        dir = parent;
-    }
+		fs::path parent = dir.parent_path();
+		if (parent == dir) break;
+		dir = parent;
+	}
 
-    // Save files live in Documents, completely outside the game install.
-    // Fall back to scanning all drives for common Steam installation paths.
-    std::string steamSox = findSteamSoxDirectory();
-    if (!steamSox.empty()) return steamSox;
+	// Save files live in Documents, completely outside the game install.
+	// Fall back to scanning all drives for common Steam installation paths.
+	std::string steamSox = findSteamSoxDirectory();
+	if (!steamSox.empty()) return steamSox;
 
-    return {};
+	return {};
 }
 
 } // namespace kuf

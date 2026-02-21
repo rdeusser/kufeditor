@@ -11,106 +11,100 @@
 namespace kuf {
 
 // Unit Control Disposition - controls AI behavior.
-enum class UCD : uint8_t {
-    Player  = 0,
-    Enemy   = 1,
-    Ally    = 2,
-    Neutral = 3
-};
+enum class UCD : uint8_t { Player = 0, Enemy = 1, Ally = 2, Neutral = 3 };
 
 // Facing direction (counter-clockwise from East).
 enum class Direction : uint8_t {
-    East      = 0,
-    NorthEast = 1,
-    North     = 2,
-    NorthWest = 3,
-    West      = 4,
-    SouthWest = 5,
-    South     = 6,
-    SouthEast = 7
+	East = 0,
+	NorthEast = 1,
+	North = 2,
+	NorthWest = 3,
+	West = 4,
+	SouthWest = 5,
+	South = 6,
+	SouthEast = 7
 };
 
 // K2JobDef.h job type IDs (0-42). Values above 42 are extended model IDs
 // for hero characters and special unit animations.
 constexpr uint8_t kMaxStandardJobType = 42;
 
-// Skill slot: 1 byte skill ID + 1 byte level, packed into 2 bytes (4 slots = 8 bytes).
+// Skill slot: 1 byte skill ID + 1 byte level, packed into 2 bytes (4 slots = 8
+// bytes).
 struct SkillSlot {
-    uint8_t skillId = 0;
-    uint8_t level = 0;
+	uint8_t skillId = 0;
+	uint8_t level = 0;
 };
 
 // Officer data within a unit block.
 struct OfficerData {
-    uint8_t jobType = 0;
-    uint8_t modelId = 0;
-    uint8_t worldmapId = 0xFF;
-    uint8_t level = 1;
-    std::array<SkillSlot, 4> skills{};
-    std::array<int32_t, 23> abilities{};
+	uint8_t jobType = 0;
+	uint8_t modelId = 0;
+	uint8_t worldmapId = 0xFF;
+	uint8_t level = 1;
+	std::array<SkillSlot, 4> skills{};
+	std::array<int32_t, 23> abilities{};
 
-    OfficerData() {
-        abilities.fill(-1);
-    }
+	OfficerData() { abilities.fill(-1); }
 };
 
 // STG file header (628 bytes).
 struct StgHeader {
-    uint32_t formatMagic = 0x3E9;
-    std::string mapFile;
-    std::string bitmapFile;
-    std::string defaultCameraFile;
-    std::string userCameraFile;
-    std::string settingsFile;
-    std::string skyCloudEffects;
-    std::string aiScriptFile;
-    std::string cubemapTexture;
-    uint32_t unitCount = 0;
+	uint32_t formatMagic = 0x3E9;
+	std::string mapFile;
+	std::string bitmapFile;
+	std::string defaultCameraFile;
+	std::string userCameraFile;
+	std::string settingsFile;
+	std::string skyCloudEffects;
+	std::string aiScriptFile;
+	std::string cubemapTexture;
+	uint32_t unitCount = 0;
 
-    kuf_stg::StgHeader wire_{};
+	kuf_stg::StgHeader wire_{};
 };
 
 // STG unit block (544 bytes for Crusaders).
 struct StgUnit {
-    // Core unit data (84 bytes).
-    std::string unitName;
-    uint32_t uniqueId = 0;
-    UCD ucd = UCD::Enemy;
-    uint8_t isHero = 0;
-    uint8_t isEnabled = 1;
-    float leaderHpOverride = -1.0f;
-    float unitHpOverride = -1.0f;
-    float positionX = 0.0f;
-    float positionY = 0.0f;
-    Direction direction = Direction::East;
+	// Core unit data (84 bytes).
+	std::string unitName;
+	uint32_t uniqueId = 0;
+	UCD ucd = UCD::Enemy;
+	uint8_t isHero = 0;
+	uint8_t isEnabled = 1;
+	float leaderHpOverride = -1.0f;
+	float unitHpOverride = -1.0f;
+	float positionX = 0.0f;
+	float positionY = 0.0f;
+	Direction direction = Direction::East;
 
-    // Leader configuration (108 bytes).
-    uint8_t leaderJobType = 0;
-    uint8_t leaderModelId = 0;
-    uint8_t leaderWorldmapId = 0xFF;
-    uint8_t leaderLevel = 1;
-    std::array<SkillSlot, 4> leaderSkills{};
-    std::array<int32_t, 23> leaderAbilities{};
-    uint32_t officerCount = 0;
+	// Leader configuration (108 bytes).
+	uint8_t leaderJobType = 0;
+	uint8_t leaderModelId = 0;
+	uint8_t leaderWorldmapId = 0xFF;
+	uint8_t leaderLevel = 1;
+	std::array<SkillSlot, 4> leaderSkills{};
+	std::array<int32_t, 23> leaderAbilities{};
+	uint32_t officerCount = 0;
 
-    // Officers.
-    OfficerData officer1;
-    OfficerData officer2;
+	// Officers.
+	OfficerData officer1;
+	OfficerData officer2;
 
-    // Unit configuration (160 bytes).
-    int32_t troopInfoIndex = 0;
-    uint32_t formationType = 0;
-    uint32_t unitAnimConfig = 0;
-    uint32_t gridX = 1;
-    uint32_t gridY = 1;
-    std::array<float, 22> statOverrides{};
+	// Unit configuration (160 bytes).
+	int32_t troopInfoIndex = 0;
+	uint32_t formationType = 0;
+	uint32_t unitAnimConfig = 0;
+	uint32_t gridX = 1;
+	uint32_t gridY = 1;
+	std::array<float, 22> statOverrides{};
 
-    kuf_stg::UnitBlock wire_{};
+	kuf_stg::UnitBlock wire_{};
 
-    StgUnit() {
-        leaderAbilities.fill(-1);
-        statOverrides.fill(-1.0f);
-    }
+	StgUnit() {
+		leaderAbilities.fill(-1);
+		statOverrides.fill(-1.0f);
+	}
 };
 
 static constexpr size_t kStgHeaderSize = 628;
@@ -120,107 +114,106 @@ static constexpr size_t kStgEventDescriptionSize = 64;
 static constexpr size_t kStgVariableNameSize = 64;
 
 // Typed parameter value system (matches ReadSTGParamValue at 0x004847b0).
-enum class StgParamType : uint32_t {
-    Int    = 0,
-    Float  = 1,
-    String = 2,
-    Enum   = 3
-};
+enum class StgParamType : uint32_t { Int = 0, Float = 1, String = 2, Enum = 3 };
 
 struct StgParamValue {
-    StgParamType type = StgParamType::Int;
-    int32_t intValue = 0;
-    float floatValue = 0.0f;
-    std::string stringValue;
+	StgParamType type = StgParamType::Int;
+	int32_t intValue = 0;
+	float floatValue = 0.0f;
+	std::string stringValue;
 
-    size_t serializedSize() const {
-        if (type == StgParamType::String) {
-            return 8 + stringValue.size();
-        }
-        return 8;
-    }
+	size_t serializedSize() const {
+		if (type == StgParamType::String) {
+			return 8 + stringValue.size();
+		}
+		return 8;
+	}
 };
 
 struct StgScriptEntry {
-    uint32_t typeId = 0;
-    std::vector<StgParamValue> params;
+	uint32_t typeId = 0;
+	std::vector<StgParamValue> params;
 };
 
 struct StgEvent {
-    std::string description;
-    uint32_t eventId = 0;
-    std::vector<StgScriptEntry> conditions;
-    std::vector<StgScriptEntry> actions;
-    kuf_stg::StgEvent wire_{};
-    bool modified = false;
+	std::string description;
+	uint32_t eventId = 0;
+	std::vector<StgScriptEntry> conditions;
+	std::vector<StgScriptEntry> actions;
+	kuf_stg::StgEvent wire_{};
+	bool modified = false;
 };
 
 struct StgEventBlock {
-    uint32_t blockHeader = 0;
-    std::vector<StgEvent> events;
+	uint32_t blockHeader = 0;
+	std::vector<StgEvent> events;
 };
 
 struct StgVariable {
-    std::string name;
-    uint32_t variableId = 0;
-    StgParamValue initialValue;
+	std::string name;
+	uint32_t variableId = 0;
+	StgParamValue initialValue;
 };
 
 struct StgArea {
-    std::string description;
-    uint32_t areaId = 0;
-    float boundX1 = 0.0f;
-    float boundY1 = 0.0f;
-    float boundX2 = 0.0f;
-    float boundY2 = 0.0f;
-    kuf_stg::AreaEntry wire_{};
+	std::string description;
+	uint32_t areaId = 0;
+	float boundX1 = 0.0f;
+	float boundY1 = 0.0f;
+	float boundX2 = 0.0f;
+	float boundY2 = 0.0f;
+	kuf_stg::AreaEntry wire_{};
 };
 
 struct StgFooterEntry {
-    uint32_t field1 = 0;
-    uint32_t field2 = 0;
+	uint32_t field1 = 0;
+	uint32_t field2 = 0;
 };
 
 class StgFormat : public IFileFormat {
-public:
-    bool load(std::span<const std::byte> data) override;
-    std::vector<std::byte> save() const override;
-    std::string_view formatName() const override { return "STG Mission"; }
-    GameVersion detectedVersion() const override { return version_; }
-    std::vector<ValidationIssue> validate() const override;
+      public:
+	bool load(std::span<const std::byte> data) override;
+	std::vector<std::byte> save() const override;
+	std::string_view formatName() const override { return "STG Mission"; }
+	GameVersion detectedVersion() const override { return version_; }
+	std::vector<ValidationIssue> validate() const override;
 
-    const StgHeader& header() const { return header_; }
-    StgHeader& header() { return header_; }
+	const StgHeader &header() const { return header_; }
+	StgHeader &header() { return header_; }
 
-    size_t unitCount() const { return units_.size(); }
-    const std::vector<StgUnit>& units() const { return units_; }
-    std::vector<StgUnit>& units() { return units_; }
+	size_t unitCount() const { return units_.size(); }
+	const std::vector<StgUnit> &units() const { return units_; }
+	std::vector<StgUnit> &units() { return units_; }
 
-    const std::vector<StgArea>& areas() const { return areas_; }
-    std::vector<StgArea>& areas() { return areas_; }
+	const std::vector<StgArea> &areas() const { return areas_; }
+	std::vector<StgArea> &areas() { return areas_; }
 
-    const std::vector<StgEventBlock>& eventBlocks() const { return eventBlocks_; }
-    std::vector<StgEventBlock>& eventBlocks() { return eventBlocks_; }
+	const std::vector<StgEventBlock> &eventBlocks() const {
+		return eventBlocks_;
+	}
+	std::vector<StgEventBlock> &eventBlocks() { return eventBlocks_; }
 
-    const std::vector<StgVariable>& variables() const { return variables_; }
-    std::vector<StgVariable>& variables() { return variables_; }
+	const std::vector<StgVariable> &variables() const { return variables_; }
+	std::vector<StgVariable> &variables() { return variables_; }
 
-    const std::vector<StgFooterEntry>& footerEntries() const { return footerEntries_; }
-    std::vector<StgFooterEntry>& footerEntries() { return footerEntries_; }
+	const std::vector<StgFooterEntry> &footerEntries() const {
+		return footerEntries_;
+	}
+	std::vector<StgFooterEntry> &footerEntries() { return footerEntries_; }
 
-    size_t totalEventCount() const;
-    bool tailParsed() const { return tailParsed_; }
+	size_t totalEventCount() const;
+	bool tailParsed() const { return tailParsed_; }
 
-private:
-    StgHeader header_;
-    std::vector<StgUnit> units_;
-    std::vector<StgArea> areas_;
-    std::vector<StgVariable> variables_;
-    std::vector<StgEventBlock> eventBlocks_;
-    std::vector<StgFooterEntry> footerEntries_;
-    std::vector<std::byte> rawTail_;
-    bool tailParsed_ = false;
-    GameVersion version_ = GameVersion::Unknown;
+      private:
+	StgHeader header_;
+	std::vector<StgUnit> units_;
+	std::vector<StgArea> areas_;
+	std::vector<StgVariable> variables_;
+	std::vector<StgEventBlock> eventBlocks_;
+	std::vector<StgFooterEntry> footerEntries_;
+	std::vector<std::byte> rawTail_;
+	bool tailParsed_ = false;
+	GameVersion version_ = GameVersion::Unknown;
 };
 
 } // namespace kuf

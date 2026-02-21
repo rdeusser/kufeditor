@@ -8,27 +8,29 @@
 namespace kuf {
 
 class UndoStack {
-public:
-    void execute(CommandPtr cmd);
-    void undo();
-    void redo();
+      public:
+	void execute(CommandPtr cmd);
+	void undo();
+	void redo();
 
-    bool canUndo() const { return !undoStack_.empty(); }
-    bool canRedo() const { return !redoStack_.empty(); }
+	bool canUndo() const { return !undoStack_.empty(); }
+	bool canRedo() const { return !redoStack_.empty(); }
 
-    std::string undoDescription() const;
-    std::string redoDescription() const;
+	std::string undoDescription() const;
+	std::string redoDescription() const;
 
-    void clear();
+	void clear();
 
-    void setOnChange(std::function<void()> callback) { onChange_ = std::move(callback); }
+	void setOnChange(std::function<void()> callback) {
+		onChange_ = std::move(callback);
+	}
 
-private:
-    void notifyChange();
+      private:
+	void notifyChange();
 
-    std::vector<CommandPtr> undoStack_;
-    std::vector<CommandPtr> redoStack_;
-    std::function<void()> onChange_;
+	std::vector<CommandPtr> undoStack_;
+	std::vector<CommandPtr> redoStack_;
+	std::function<void()> onChange_;
 };
 
 } // namespace kuf

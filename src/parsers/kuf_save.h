@@ -3,147 +3,150 @@
 
 #include <cstdint>
 #include <cstring>
-#include <string>
-#include <vector>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace kuf_save {
 
 enum class SkillType : int32_t {
-    NONE = -1,
-    Melee = 0,
-    Range = 1,
-    Frontal = 2,
-    Riding = 3,
-    Teamwork = 4,
-    Scout = 5,
-    Gunpowder = 6,
-    Taming = 7,
-    Fire = 8,
-    Lightning = 9,
-    Ice = 10,
-    Holy = 11,
-    Earth = 12,
-    Curse = 13,
-    Elemental = 14,
+	NONE = -1,
+	Melee = 0,
+	Range = 1,
+	Frontal = 2,
+	Riding = 3,
+	Teamwork = 4,
+	Scout = 5,
+	Gunpowder = 6,
+	Taming = 7,
+	Fire = 8,
+	Lightning = 9,
+	Ice = 10,
+	Holy = 11,
+	Earth = 12,
+	Curse = 13,
+	Elemental = 14,
 };
 
 enum class ResistType : int32_t {
-    NONE = -1,
-    Melee = 0,
-    Ranged = 1,
-    Explosion = 2,
-    Frontal = 3,
-    Fire = 4,
-    Lightning = 5,
-    Ice = 6,
-    Holy = 7,
-    Poison = 8,
-    Curse = 9,
+	NONE = -1,
+	Melee = 0,
+	Ranged = 1,
+	Explosion = 2,
+	Frontal = 3,
+	Fire = 4,
+	Lightning = 5,
+	Ice = 6,
+	Holy = 7,
+	Poison = 8,
+	Curse = 9,
 };
 
 enum class UCD : uint32_t {
-    Player = 0,
-    Enemy = 1,
-    Ally = 2,
-    Neutral = 3,
+	Player = 0,
+	Enemy = 1,
+	Ally = 2,
+	Neutral = 3,
 };
 
 struct EquipmentSlot {
-    uint32_t auto_id;
-    int32_t item_type_id;
-    uint16_t level;
-    int16_t enhancement_tier;
-    uint16_t variant_index;
-    int16_t item_power;
-    uint16_t equipped_flag;
-    uint16_t reserved;
-    int32_t attribute1_index;
-    int32_t attribute2_index;
-    SkillType skill_type_1;
-    int32_t skill_bonus_1;
-    SkillType skill_type_2;
-    int32_t skill_bonus_2;
-    ResistType resist_type_1;
-    int32_t resist_bonus_1;
-    ResistType resist_type_2;
-    int32_t resist_bonus_2;
-    int32_t slot_category;
+	uint32_t auto_id;
+	int32_t item_type_id;
+	uint16_t level;
+	int16_t enhancement_tier;
+	uint16_t variant_index;
+	int16_t item_power;
+	uint16_t equipped_flag;
+	uint16_t reserved;
+	int32_t attribute1_index;
+	int32_t attribute2_index;
+	SkillType skill_type_1;
+	int32_t skill_bonus_1;
+	SkillType skill_type_2;
+	int32_t skill_bonus_2;
+	ResistType resist_type_1;
+	int32_t resist_bonus_1;
+	ResistType resist_type_2;
+	int32_t resist_bonus_2;
+	int32_t slot_category;
 
-    static EquipmentSlot parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
-    static std::unordered_map<std::string, std::string> refs();
+	static EquipmentSlot parse(const uint8_t *buf, size_t len,
+				   size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
+	static std::unordered_map<std::string, std::string> refs();
 };
 
 struct UnitSaveData {
-    int32_t leader_name_index;
-    uint32_t troop_info_index;
-    uint32_t job_type;
-    uint32_t model_id;
-    uint32_t stg_field_190;
-    uint32_t stg_field_192;
-    uint32_t stg_field_194;
-    uint32_t stg_field_198;
-    uint32_t char_id;
-    uint32_t troop_info_index_2;
-    UCD ucd;
-    uint32_t formation_type;
-    uint32_t grid_config;
-    uint32_t skill_level;
-    uint8_t byte_58;
-    uint8_t hero_flag;
-    uint8_t byte_5a;
-    uint32_t field_60;
-    uint32_t field_64;
-    uint32_t field_68;
-    uint8_t skill_data[24];
-    EquipmentSlot leader_weapon;
-    EquipmentSlot leader_accessory;
-    EquipmentSlot leader_armor;
-    EquipmentSlot troop_weapon;
-    EquipmentSlot troop_accessory;
-    EquipmentSlot troop_armor;
-    uint32_t field_504;
+	int32_t leader_name_index;
+	uint32_t troop_info_index;
+	uint32_t job_type;
+	uint32_t model_id;
+	uint32_t stg_field_190;
+	uint32_t stg_field_192;
+	uint32_t stg_field_194;
+	uint32_t stg_field_198;
+	uint32_t char_id;
+	uint32_t troop_info_index_2;
+	UCD ucd;
+	uint32_t formation_type;
+	uint32_t grid_config;
+	uint32_t skill_level;
+	uint8_t byte_58;
+	uint8_t hero_flag;
+	uint8_t byte_5a;
+	uint32_t field_60;
+	uint32_t field_64;
+	uint32_t field_68;
+	uint8_t skill_data[24];
+	EquipmentSlot leader_weapon;
+	EquipmentSlot leader_accessory;
+	EquipmentSlot leader_armor;
+	EquipmentSlot troop_weapon;
+	EquipmentSlot troop_accessory;
+	EquipmentSlot troop_armor;
+	uint32_t field_504;
 
-    static UnitSaveData parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static UnitSaveData parse(const uint8_t *buf, size_t len,
+				  size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct WorldMapNodeState {
-    uint8_t byte_61;
-    uint8_t byte_60;
-    uint8_t byte_62;
-    uint8_t byte_63;
-    uint32_t uint_64;
+	uint8_t byte_61;
+	uint8_t byte_60;
+	uint8_t byte_62;
+	uint8_t byte_63;
+	uint32_t uint_64;
 
-    static WorldMapNodeState parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static WorldMapNodeState parse(const uint8_t *buf, size_t len,
+				       size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-    uint32_t size_prefix;
-    uint32_t magic;
-    uint8_t context_data[1080];
-    uint32_t campaign_index;
-    uint8_t main_save_block[340];
-    uint32_t unit_count;
-    std::vector<UnitSaveData> units;
-    uint32_t selected_unit_ref;
-    uint32_t roster_count;
-    std::vector<WorldMapNodeState> roster_entries;
-    uint32_t second_array_count;
-    std::vector<uint32_t> second_array;
-    std::vector<uint32_t> mission_completion;
-    uint32_t current_mission_slot;
-    std::vector<uint8_t> tail_data;
+	uint32_t size_prefix;
+	uint32_t magic;
+	uint8_t context_data[1080];
+	uint32_t campaign_index;
+	uint8_t main_save_block[340];
+	uint32_t unit_count;
+	std::vector<UnitSaveData> units;
+	uint32_t selected_unit_ref;
+	uint32_t roster_count;
+	std::vector<WorldMapNodeState> roster_entries;
+	uint32_t second_array_count;
+	std::vector<uint32_t> second_array;
+	std::vector<uint32_t> mission_completion;
+	uint32_t current_mission_slot;
+	std::vector<uint8_t> tail_data;
 
-    static File parse(const uint8_t* buf, size_t len, size_t& offset);
-    std::string to_json() const;
-    std::vector<uint8_t> to_bytes() const;
+	static File parse(const uint8_t *buf, size_t len, size_t &offset);
+	std::string to_json() const;
+	std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace kuf_save

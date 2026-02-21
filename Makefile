@@ -1,4 +1,4 @@
-.PHONY: all build run test clean configure rebuild generate
+.PHONY: all build run test clean configure rebuild generate tidy
 
 BUILD_DIR := build
 BUILD_TYPE := Release
@@ -43,6 +43,9 @@ build-verbose: configure
 test-only:
 	@cd $(BUILD_DIR) && ctest -C $(BUILD_TYPE) --output-on-failure
 
+tidy:
+	@fd -e cpp -e h . src test | xargs clang-format -i
+
 help:
 	@echo "Available targets:"
 	@echo "  build         - Build the project (default)"
@@ -56,4 +59,5 @@ help:
 	@echo "  build-verbose - Build with verbose output"
 	@echo "  test-only     - Run tests without rebuilding"
 	@echo "  generate      - Regenerate C++ from .clv specs"
+	@echo "  tidy          - Format all .cpp and .h files with clang-format"
 	@echo "  help          - Show this help message"

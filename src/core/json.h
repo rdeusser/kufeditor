@@ -10,10 +10,11 @@ namespace kuf {
 
 struct InstalledModInfo;
 
-std::optional<ModMetadata> parseModJson(const std::string& text);
-std::string serializeModJson(const ModMetadata& meta);
+std::optional<ModMetadata> parseModJson(const std::string &text);
+std::string serializeModJson(const ModMetadata &meta);
 
-std::vector<InstalledModInfo> parseInstalledModsJson(const std::string& text);
-std::string serializeInstalledModsJson(const std::vector<InstalledModInfo>& mods);
+std::vector<InstalledModInfo> parseInstalledModsJson(const std::string &text);
+std::string
+serializeInstalledModsJson(const std::vector<InstalledModInfo> &mods);
 
 } // namespace kuf

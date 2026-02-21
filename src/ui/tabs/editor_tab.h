@@ -12,33 +12,35 @@ namespace kuf {
 
 /// Base class for file-backed editor tabs.
 class EditorTab {
-public:
-    explicit EditorTab(std::shared_ptr<OpenDocument> doc)
-        : document_(std::move(doc)), tabId_(nextTabId_++) {}
-    virtual ~EditorTab() = default;
+      public:
+	explicit EditorTab(std::shared_ptr<OpenDocument> doc)
+	    : document_(std::move(doc)), tabId_(nextTabId_++) {}
+	virtual ~EditorTab() = default;
 
-    virtual void drawContent() = 0;
+	virtual void drawContent() = 0;
 
-    std::string tabTitle() const {
-        if (!document_) return "Untitled";
-        std::string title = document_->filename;
-        if (document_->dirty) title += "*";
-        return title;
-    }
+	std::string tabTitle() const {
+		if (!document_) return "Untitled";
+		std::string title = document_->filename;
+		if (document_->dirty) title += "*";
+		return title;
+	}
 
-    std::shared_ptr<OpenDocument> document() { return document_; }
-    const std::shared_ptr<OpenDocument>& document() const { return document_; }
+	std::shared_ptr<OpenDocument> document() { return document_; }
+	const std::shared_ptr<OpenDocument> &document() const {
+		return document_;
+	}
 
-    bool& isOpen() { return open_; }
-    int tabId() const { return tabId_; }
+	bool &isOpen() { return open_; }
+	int tabId() const { return tabId_; }
 
-protected:
-    std::shared_ptr<OpenDocument> document_;
-    bool open_ = true;
-    int tabId_;
+      protected:
+	std::shared_ptr<OpenDocument> document_;
+	bool open_ = true;
+	int tabId_;
 
-private:
-    static inline std::atomic<int> nextTabId_{1};
+      private:
+	static inline std::atomic<int> nextTabId_{1};
 };
 
 } // namespace kuf

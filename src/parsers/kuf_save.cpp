@@ -3,862 +3,868 @@
 
 namespace kuf_save {
 
-EquipmentSlot EquipmentSlot::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    EquipmentSlot result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.auto_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.item_type_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.level, buf + offset, 2);
-    offset += 2;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.enhancement_tier, buf + offset, 2);
-    offset += 2;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.variant_index, buf + offset, 2);
-    offset += 2;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.item_power, buf + offset, 2);
-    offset += 2;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.equipped_flag, buf + offset, 2);
-    offset += 2;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.reserved, buf + offset, 2);
-    offset += 2;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.attribute1_index, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.attribute2_index, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t skill_type_1;
-    std::memcpy(&skill_type_1, buf + offset, 4);
-    offset += 4;
-    result.skill_type_1 = static_cast<SkillType>(skill_type_1);
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.skill_bonus_1, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t skill_type_2;
-    std::memcpy(&skill_type_2, buf + offset, 4);
-    offset += 4;
-    result.skill_type_2 = static_cast<SkillType>(skill_type_2);
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.skill_bonus_2, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t resist_type_1;
-    std::memcpy(&resist_type_1, buf + offset, 4);
-    offset += 4;
-    result.resist_type_1 = static_cast<ResistType>(resist_type_1);
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.resist_bonus_1, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t resist_type_2;
-    std::memcpy(&resist_type_2, buf + offset, 4);
-    offset += 4;
-    result.resist_type_2 = static_cast<ResistType>(resist_type_2);
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.resist_bonus_2, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.slot_category, buf + offset, 4);
-    offset += 4;
-    return result;
+EquipmentSlot EquipmentSlot::parse(const uint8_t *buf, size_t len,
+				   size_t &offset) {
+	EquipmentSlot result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.auto_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.item_type_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.level, buf + offset, 2);
+	offset += 2;
+	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.enhancement_tier, buf + offset, 2);
+	offset += 2;
+	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.variant_index, buf + offset, 2);
+	offset += 2;
+	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.item_power, buf + offset, 2);
+	offset += 2;
+	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.equipped_flag, buf + offset, 2);
+	offset += 2;
+	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.reserved, buf + offset, 2);
+	offset += 2;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.attribute1_index, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.attribute2_index, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	int32_t skill_type_1;
+	std::memcpy(&skill_type_1, buf + offset, 4);
+	offset += 4;
+	result.skill_type_1 = static_cast<SkillType>(skill_type_1);
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.skill_bonus_1, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	int32_t skill_type_2;
+	std::memcpy(&skill_type_2, buf + offset, 4);
+	offset += 4;
+	result.skill_type_2 = static_cast<SkillType>(skill_type_2);
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.skill_bonus_2, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	int32_t resist_type_1;
+	std::memcpy(&resist_type_1, buf + offset, 4);
+	offset += 4;
+	result.resist_type_1 = static_cast<ResistType>(resist_type_1);
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.resist_bonus_1, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	int32_t resist_type_2;
+	std::memcpy(&resist_type_2, buf + offset, 4);
+	offset += 4;
+	result.resist_type_2 = static_cast<ResistType>(resist_type_2);
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.resist_bonus_2, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.slot_category, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string EquipmentSlot::to_json() const {
-    std::string s = "{";
-    s += "\"auto_id\":";
-    s += std::to_string(auto_id);
-    s += ",";
-    s += "\"item_type_id\":";
-    s += std::to_string(item_type_id);
-    s += ",";
-    s += "\"level\":";
-    s += std::to_string(level);
-    s += ",";
-    s += "\"enhancement_tier\":";
-    s += std::to_string(enhancement_tier);
-    s += ",";
-    s += "\"variant_index\":";
-    s += std::to_string(variant_index);
-    s += ",";
-    s += "\"item_power\":";
-    s += std::to_string(item_power);
-    s += ",";
-    s += "\"equipped_flag\":";
-    s += std::to_string(equipped_flag);
-    s += ",";
-    s += "\"reserved\":";
-    s += std::to_string(reserved);
-    s += ",";
-    s += "\"attribute1_index\":";
-    s += std::to_string(attribute1_index);
-    s += ",";
-    s += "\"attribute2_index\":";
-    s += std::to_string(attribute2_index);
-    s += ",";
-    s += "\"skill_type_1\":";
-    s += std::to_string(static_cast<int>(skill_type_1));
-    s += ",";
-    s += "\"skill_bonus_1\":";
-    s += std::to_string(skill_bonus_1);
-    s += ",";
-    s += "\"skill_type_2\":";
-    s += std::to_string(static_cast<int>(skill_type_2));
-    s += ",";
-    s += "\"skill_bonus_2\":";
-    s += std::to_string(skill_bonus_2);
-    s += ",";
-    s += "\"resist_type_1\":";
-    s += std::to_string(static_cast<int>(resist_type_1));
-    s += ",";
-    s += "\"resist_bonus_1\":";
-    s += std::to_string(resist_bonus_1);
-    s += ",";
-    s += "\"resist_type_2\":";
-    s += std::to_string(static_cast<int>(resist_type_2));
-    s += ",";
-    s += "\"resist_bonus_2\":";
-    s += std::to_string(resist_bonus_2);
-    s += ",";
-    s += "\"slot_category\":";
-    s += std::to_string(slot_category);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"auto_id\":";
+	s += std::to_string(auto_id);
+	s += ",";
+	s += "\"item_type_id\":";
+	s += std::to_string(item_type_id);
+	s += ",";
+	s += "\"level\":";
+	s += std::to_string(level);
+	s += ",";
+	s += "\"enhancement_tier\":";
+	s += std::to_string(enhancement_tier);
+	s += ",";
+	s += "\"variant_index\":";
+	s += std::to_string(variant_index);
+	s += ",";
+	s += "\"item_power\":";
+	s += std::to_string(item_power);
+	s += ",";
+	s += "\"equipped_flag\":";
+	s += std::to_string(equipped_flag);
+	s += ",";
+	s += "\"reserved\":";
+	s += std::to_string(reserved);
+	s += ",";
+	s += "\"attribute1_index\":";
+	s += std::to_string(attribute1_index);
+	s += ",";
+	s += "\"attribute2_index\":";
+	s += std::to_string(attribute2_index);
+	s += ",";
+	s += "\"skill_type_1\":";
+	s += std::to_string(static_cast<int>(skill_type_1));
+	s += ",";
+	s += "\"skill_bonus_1\":";
+	s += std::to_string(skill_bonus_1);
+	s += ",";
+	s += "\"skill_type_2\":";
+	s += std::to_string(static_cast<int>(skill_type_2));
+	s += ",";
+	s += "\"skill_bonus_2\":";
+	s += std::to_string(skill_bonus_2);
+	s += ",";
+	s += "\"resist_type_1\":";
+	s += std::to_string(static_cast<int>(resist_type_1));
+	s += ",";
+	s += "\"resist_bonus_1\":";
+	s += std::to_string(resist_bonus_1);
+	s += ",";
+	s += "\"resist_type_2\":";
+	s += std::to_string(static_cast<int>(resist_type_2));
+	s += ",";
+	s += "\"resist_bonus_2\":";
+	s += std::to_string(resist_bonus_2);
+	s += ",";
+	s += "\"slot_category\":";
+	s += std::to_string(slot_category);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> EquipmentSlot::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = auto_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = item_type_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint16_t _tmp = level;
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    {
-        int16_t _tmp = enhancement_tier;
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    {
-        uint16_t _tmp = variant_index;
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    {
-        int16_t _tmp = item_power;
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    {
-        uint16_t _tmp = equipped_flag;
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    {
-        uint16_t _tmp = reserved;
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    {
-        int32_t _tmp = attribute1_index;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = attribute2_index;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = static_cast<int32_t>(skill_type_1);
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = skill_bonus_1;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = static_cast<int32_t>(skill_type_2);
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = skill_bonus_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = static_cast<int32_t>(resist_type_1);
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = resist_bonus_1;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = static_cast<int32_t>(resist_type_2);
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = resist_bonus_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = slot_category;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint32_t _tmp = auto_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = item_type_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint16_t _tmp = level;
+		uint8_t _raw[2];
+		std::memcpy(_raw, &_tmp, 2);
+		_buf.insert(_buf.end(), _raw, _raw + 2);
+	}
+	{
+		int16_t _tmp = enhancement_tier;
+		uint8_t _raw[2];
+		std::memcpy(_raw, &_tmp, 2);
+		_buf.insert(_buf.end(), _raw, _raw + 2);
+	}
+	{
+		uint16_t _tmp = variant_index;
+		uint8_t _raw[2];
+		std::memcpy(_raw, &_tmp, 2);
+		_buf.insert(_buf.end(), _raw, _raw + 2);
+	}
+	{
+		int16_t _tmp = item_power;
+		uint8_t _raw[2];
+		std::memcpy(_raw, &_tmp, 2);
+		_buf.insert(_buf.end(), _raw, _raw + 2);
+	}
+	{
+		uint16_t _tmp = equipped_flag;
+		uint8_t _raw[2];
+		std::memcpy(_raw, &_tmp, 2);
+		_buf.insert(_buf.end(), _raw, _raw + 2);
+	}
+	{
+		uint16_t _tmp = reserved;
+		uint8_t _raw[2];
+		std::memcpy(_raw, &_tmp, 2);
+		_buf.insert(_buf.end(), _raw, _raw + 2);
+	}
+	{
+		int32_t _tmp = attribute1_index;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = attribute2_index;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = static_cast<int32_t>(skill_type_1);
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = skill_bonus_1;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = static_cast<int32_t>(skill_type_2);
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = skill_bonus_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = static_cast<int32_t>(resist_type_1);
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = resist_bonus_1;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = static_cast<int32_t>(resist_type_2);
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = resist_bonus_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = slot_category;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
 std::unordered_map<std::string, std::string> EquipmentSlot::refs() {
-    return {
-        {"item_type_id", "ItemTypeInfoRecord.field_00"},
-        {"attribute1_index", "ItemAttInfoRecord.attribute_id"},
-        {"attribute2_index", "ItemAttInfoRecord.attribute_id"},
-    };
+	return {
+	    {"item_type_id", "ItemTypeInfoRecord.field_00"},
+	    {"attribute1_index", "ItemAttInfoRecord.attribute_id"},
+	    {"attribute2_index", "ItemAttInfoRecord.attribute_id"},
+	};
 }
 
-UnitSaveData UnitSaveData::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    UnitSaveData result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.leader_name_index, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.troop_info_index, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.job_type, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.model_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.stg_field_190, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.stg_field_192, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.stg_field_194, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.stg_field_198, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.char_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.troop_info_index_2, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    uint32_t ucd;
-    std::memcpy(&ucd, buf + offset, 4);
-    offset += 4;
-    result.ucd = static_cast<UCD>(ucd);
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.formation_type, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.grid_config, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.skill_level, buf + offset, 4);
-    offset += 4;
-    if (offset + 1 > len) throw std::runtime_error("buffer overflow");
-    result.byte_58 = static_cast<uint8_t>(buf[offset]);
-    offset += 1;
-    if (offset + 1 > len) throw std::runtime_error("buffer overflow");
-    result.hero_flag = static_cast<uint8_t>(buf[offset]);
-    offset += 1;
-    if (offset + 1 > len) throw std::runtime_error("buffer overflow");
-    result.byte_5a = static_cast<uint8_t>(buf[offset]);
-    offset += 1;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_60, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_64, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_68, buf + offset, 4);
-    offset += 4;
-    if (offset + 24 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(result.skill_data, buf + offset, 24);
-    offset += 24;
-    result.leader_weapon = EquipmentSlot::parse(buf, len, offset);
-    result.leader_accessory = EquipmentSlot::parse(buf, len, offset);
-    result.leader_armor = EquipmentSlot::parse(buf, len, offset);
-    result.troop_weapon = EquipmentSlot::parse(buf, len, offset);
-    result.troop_accessory = EquipmentSlot::parse(buf, len, offset);
-    result.troop_armor = EquipmentSlot::parse(buf, len, offset);
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_504, buf + offset, 4);
-    offset += 4;
-    return result;
+UnitSaveData UnitSaveData::parse(const uint8_t *buf, size_t len,
+				 size_t &offset) {
+	UnitSaveData result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.leader_name_index, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.troop_info_index, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.job_type, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.model_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.stg_field_190, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.stg_field_192, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.stg_field_194, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.stg_field_198, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.char_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.troop_info_index_2, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	uint32_t ucd;
+	std::memcpy(&ucd, buf + offset, 4);
+	offset += 4;
+	result.ucd = static_cast<UCD>(ucd);
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.formation_type, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.grid_config, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.skill_level, buf + offset, 4);
+	offset += 4;
+	if (offset + 1 > len) throw std::runtime_error("buffer overflow");
+	result.byte_58 = static_cast<uint8_t>(buf[offset]);
+	offset += 1;
+	if (offset + 1 > len) throw std::runtime_error("buffer overflow");
+	result.hero_flag = static_cast<uint8_t>(buf[offset]);
+	offset += 1;
+	if (offset + 1 > len) throw std::runtime_error("buffer overflow");
+	result.byte_5a = static_cast<uint8_t>(buf[offset]);
+	offset += 1;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_60, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_64, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_68, buf + offset, 4);
+	offset += 4;
+	if (offset + 24 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(result.skill_data, buf + offset, 24);
+	offset += 24;
+	result.leader_weapon = EquipmentSlot::parse(buf, len, offset);
+	result.leader_accessory = EquipmentSlot::parse(buf, len, offset);
+	result.leader_armor = EquipmentSlot::parse(buf, len, offset);
+	result.troop_weapon = EquipmentSlot::parse(buf, len, offset);
+	result.troop_accessory = EquipmentSlot::parse(buf, len, offset);
+	result.troop_armor = EquipmentSlot::parse(buf, len, offset);
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_504, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string UnitSaveData::to_json() const {
-    std::string s = "{";
-    s += "\"leader_name_index\":";
-    s += std::to_string(leader_name_index);
-    s += ",";
-    s += "\"troop_info_index\":";
-    s += std::to_string(troop_info_index);
-    s += ",";
-    s += "\"job_type\":";
-    s += std::to_string(job_type);
-    s += ",";
-    s += "\"model_id\":";
-    s += std::to_string(model_id);
-    s += ",";
-    s += "\"stg_field_190\":";
-    s += std::to_string(stg_field_190);
-    s += ",";
-    s += "\"stg_field_192\":";
-    s += std::to_string(stg_field_192);
-    s += ",";
-    s += "\"stg_field_194\":";
-    s += std::to_string(stg_field_194);
-    s += ",";
-    s += "\"stg_field_198\":";
-    s += std::to_string(stg_field_198);
-    s += ",";
-    s += "\"char_id\":";
-    s += std::to_string(char_id);
-    s += ",";
-    s += "\"troop_info_index_2\":";
-    s += std::to_string(troop_info_index_2);
-    s += ",";
-    s += "\"ucd\":";
-    s += std::to_string(static_cast<int>(ucd));
-    s += ",";
-    s += "\"formation_type\":";
-    s += std::to_string(formation_type);
-    s += ",";
-    s += "\"grid_config\":";
-    s += std::to_string(grid_config);
-    s += ",";
-    s += "\"skill_level\":";
-    s += std::to_string(skill_level);
-    s += ",";
-    s += "\"byte_58\":";
-    s += std::to_string(byte_58);
-    s += ",";
-    s += "\"hero_flag\":";
-    s += std::to_string(hero_flag);
-    s += ",";
-    s += "\"byte_5a\":";
-    s += std::to_string(byte_5a);
-    s += ",";
-    s += "\"field_60\":";
-    s += std::to_string(field_60);
-    s += ",";
-    s += "\"field_64\":";
-    s += std::to_string(field_64);
-    s += ",";
-    s += "\"field_68\":";
-    s += std::to_string(field_68);
-    s += ",";
-    s += "\"skill_data\":";
-    s += "[";
-    for (size_t i = 0; i < 24; ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(skill_data[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"leader_weapon\":";
-    s += leader_weapon.to_json();
-    s += ",";
-    s += "\"leader_accessory\":";
-    s += leader_accessory.to_json();
-    s += ",";
-    s += "\"leader_armor\":";
-    s += leader_armor.to_json();
-    s += ",";
-    s += "\"troop_weapon\":";
-    s += troop_weapon.to_json();
-    s += ",";
-    s += "\"troop_accessory\":";
-    s += troop_accessory.to_json();
-    s += ",";
-    s += "\"troop_armor\":";
-    s += troop_armor.to_json();
-    s += ",";
-    s += "\"field_504\":";
-    s += std::to_string(field_504);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"leader_name_index\":";
+	s += std::to_string(leader_name_index);
+	s += ",";
+	s += "\"troop_info_index\":";
+	s += std::to_string(troop_info_index);
+	s += ",";
+	s += "\"job_type\":";
+	s += std::to_string(job_type);
+	s += ",";
+	s += "\"model_id\":";
+	s += std::to_string(model_id);
+	s += ",";
+	s += "\"stg_field_190\":";
+	s += std::to_string(stg_field_190);
+	s += ",";
+	s += "\"stg_field_192\":";
+	s += std::to_string(stg_field_192);
+	s += ",";
+	s += "\"stg_field_194\":";
+	s += std::to_string(stg_field_194);
+	s += ",";
+	s += "\"stg_field_198\":";
+	s += std::to_string(stg_field_198);
+	s += ",";
+	s += "\"char_id\":";
+	s += std::to_string(char_id);
+	s += ",";
+	s += "\"troop_info_index_2\":";
+	s += std::to_string(troop_info_index_2);
+	s += ",";
+	s += "\"ucd\":";
+	s += std::to_string(static_cast<int>(ucd));
+	s += ",";
+	s += "\"formation_type\":";
+	s += std::to_string(formation_type);
+	s += ",";
+	s += "\"grid_config\":";
+	s += std::to_string(grid_config);
+	s += ",";
+	s += "\"skill_level\":";
+	s += std::to_string(skill_level);
+	s += ",";
+	s += "\"byte_58\":";
+	s += std::to_string(byte_58);
+	s += ",";
+	s += "\"hero_flag\":";
+	s += std::to_string(hero_flag);
+	s += ",";
+	s += "\"byte_5a\":";
+	s += std::to_string(byte_5a);
+	s += ",";
+	s += "\"field_60\":";
+	s += std::to_string(field_60);
+	s += ",";
+	s += "\"field_64\":";
+	s += std::to_string(field_64);
+	s += ",";
+	s += "\"field_68\":";
+	s += std::to_string(field_68);
+	s += ",";
+	s += "\"skill_data\":";
+	s += "[";
+	for (size_t i = 0; i < 24; ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(skill_data[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"leader_weapon\":";
+	s += leader_weapon.to_json();
+	s += ",";
+	s += "\"leader_accessory\":";
+	s += leader_accessory.to_json();
+	s += ",";
+	s += "\"leader_armor\":";
+	s += leader_armor.to_json();
+	s += ",";
+	s += "\"troop_weapon\":";
+	s += troop_weapon.to_json();
+	s += ",";
+	s += "\"troop_accessory\":";
+	s += troop_accessory.to_json();
+	s += ",";
+	s += "\"troop_armor\":";
+	s += troop_armor.to_json();
+	s += ",";
+	s += "\"field_504\":";
+	s += std::to_string(field_504);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> UnitSaveData::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        int32_t _tmp = leader_name_index;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = troop_info_index;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = job_type;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = model_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = stg_field_190;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = stg_field_192;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = stg_field_194;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = stg_field_198;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = char_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = troop_info_index_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = static_cast<uint32_t>(ucd);
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = formation_type;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = grid_config;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = skill_level;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    _buf.push_back(static_cast<uint8_t>(byte_58));
-    _buf.push_back(static_cast<uint8_t>(hero_flag));
-    _buf.push_back(static_cast<uint8_t>(byte_5a));
-    {
-        uint32_t _tmp = field_60;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_64;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_68;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    _buf.insert(_buf.end(), skill_data, skill_data + 24);
-    {
-        auto _tmp = leader_weapon.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        auto _tmp = leader_accessory.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        auto _tmp = leader_armor.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        auto _tmp = troop_weapon.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        auto _tmp = troop_accessory.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        auto _tmp = troop_armor.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        uint32_t _tmp = field_504;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		int32_t _tmp = leader_name_index;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = troop_info_index;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = job_type;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = model_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = stg_field_190;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = stg_field_192;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = stg_field_194;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = stg_field_198;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = char_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = troop_info_index_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = static_cast<uint32_t>(ucd);
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = formation_type;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = grid_config;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = skill_level;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	_buf.push_back(static_cast<uint8_t>(byte_58));
+	_buf.push_back(static_cast<uint8_t>(hero_flag));
+	_buf.push_back(static_cast<uint8_t>(byte_5a));
+	{
+		uint32_t _tmp = field_60;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_64;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_68;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	_buf.insert(_buf.end(), skill_data, skill_data + 24);
+	{
+		auto _tmp = leader_weapon.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		auto _tmp = leader_accessory.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		auto _tmp = leader_armor.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		auto _tmp = troop_weapon.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		auto _tmp = troop_accessory.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		auto _tmp = troop_armor.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		uint32_t _tmp = field_504;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
-WorldMapNodeState WorldMapNodeState::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    WorldMapNodeState result;
-    if (offset + 1 > len) throw std::runtime_error("buffer overflow");
-    result.byte_61 = static_cast<uint8_t>(buf[offset]);
-    offset += 1;
-    if (offset + 1 > len) throw std::runtime_error("buffer overflow");
-    result.byte_60 = static_cast<uint8_t>(buf[offset]);
-    offset += 1;
-    if (offset + 1 > len) throw std::runtime_error("buffer overflow");
-    result.byte_62 = static_cast<uint8_t>(buf[offset]);
-    offset += 1;
-    if (offset + 1 > len) throw std::runtime_error("buffer overflow");
-    result.byte_63 = static_cast<uint8_t>(buf[offset]);
-    offset += 1;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.uint_64, buf + offset, 4);
-    offset += 4;
-    return result;
+WorldMapNodeState WorldMapNodeState::parse(const uint8_t *buf, size_t len,
+					   size_t &offset) {
+	WorldMapNodeState result;
+	if (offset + 1 > len) throw std::runtime_error("buffer overflow");
+	result.byte_61 = static_cast<uint8_t>(buf[offset]);
+	offset += 1;
+	if (offset + 1 > len) throw std::runtime_error("buffer overflow");
+	result.byte_60 = static_cast<uint8_t>(buf[offset]);
+	offset += 1;
+	if (offset + 1 > len) throw std::runtime_error("buffer overflow");
+	result.byte_62 = static_cast<uint8_t>(buf[offset]);
+	offset += 1;
+	if (offset + 1 > len) throw std::runtime_error("buffer overflow");
+	result.byte_63 = static_cast<uint8_t>(buf[offset]);
+	offset += 1;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.uint_64, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string WorldMapNodeState::to_json() const {
-    std::string s = "{";
-    s += "\"byte_61\":";
-    s += std::to_string(byte_61);
-    s += ",";
-    s += "\"byte_60\":";
-    s += std::to_string(byte_60);
-    s += ",";
-    s += "\"byte_62\":";
-    s += std::to_string(byte_62);
-    s += ",";
-    s += "\"byte_63\":";
-    s += std::to_string(byte_63);
-    s += ",";
-    s += "\"uint_64\":";
-    s += std::to_string(uint_64);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"byte_61\":";
+	s += std::to_string(byte_61);
+	s += ",";
+	s += "\"byte_60\":";
+	s += std::to_string(byte_60);
+	s += ",";
+	s += "\"byte_62\":";
+	s += std::to_string(byte_62);
+	s += ",";
+	s += "\"byte_63\":";
+	s += std::to_string(byte_63);
+	s += ",";
+	s += "\"uint_64\":";
+	s += std::to_string(uint_64);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> WorldMapNodeState::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    _buf.push_back(static_cast<uint8_t>(byte_61));
-    _buf.push_back(static_cast<uint8_t>(byte_60));
-    _buf.push_back(static_cast<uint8_t>(byte_62));
-    _buf.push_back(static_cast<uint8_t>(byte_63));
-    {
-        uint32_t _tmp = uint_64;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	_buf.push_back(static_cast<uint8_t>(byte_61));
+	_buf.push_back(static_cast<uint8_t>(byte_60));
+	_buf.push_back(static_cast<uint8_t>(byte_62));
+	_buf.push_back(static_cast<uint8_t>(byte_63));
+	{
+		uint32_t _tmp = uint_64;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
-File File::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    File result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.size_prefix, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.magic, buf + offset, 4);
-    offset += 4;
-    if (!((result.magic == 110))) {
-        throw std::runtime_error("save magic must be 0x6E");
-    }
-    if (offset + 1080 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(result.context_data, buf + offset, 1080);
-    offset += 1080;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.campaign_index, buf + offset, 4);
-    offset += 4;
-    if (!((result.campaign_index <= 3))) {
-        throw std::runtime_error("campaign index must be at most 3");
-    }
-    if (offset + 340 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(result.main_save_block, buf + offset, 340);
-    offset += 340;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.unit_count, buf + offset, 4);
-    offset += 4;
-    for (size_t i = 0; i < result.unit_count; ++i) {
-        result.units.push_back(UnitSaveData::parse(buf, len, offset));
-    }
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.selected_unit_ref, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.roster_count, buf + offset, 4);
-    offset += 4;
-    for (size_t i = 0; i < result.roster_count; ++i) {
-        result.roster_entries.push_back(WorldMapNodeState::parse(buf, len, offset));
-    }
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.second_array_count, buf + offset, 4);
-    offset += 4;
-    for (size_t i = 0; i < result.second_array_count; ++i) {
-        uint32_t val;
-        if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-        std::memcpy(&val, buf + offset, 4);
-        offset += 4;
-        result.second_array.push_back(val);
-    }
-    for (int i = 0; i < 20; ++i) {
-        uint32_t val;
-        if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-        std::memcpy(&val, buf + offset, 4);
-        offset += 4;
-        result.mission_completion.push_back(val);
-    }
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.current_mission_slot, buf + offset, 4);
-    offset += 4;
-    if (offset < len) {
-        result.tail_data.assign(buf + offset, buf + len);
-        offset = len;
-    }
-    return result;
+File File::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	File result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.size_prefix, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.magic, buf + offset, 4);
+	offset += 4;
+	if (!((result.magic == 110))) {
+		throw std::runtime_error("save magic must be 0x6E");
+	}
+	if (offset + 1080 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(result.context_data, buf + offset, 1080);
+	offset += 1080;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.campaign_index, buf + offset, 4);
+	offset += 4;
+	if (!((result.campaign_index <= 3))) {
+		throw std::runtime_error("campaign index must be at most 3");
+	}
+	if (offset + 340 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(result.main_save_block, buf + offset, 340);
+	offset += 340;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.unit_count, buf + offset, 4);
+	offset += 4;
+	for (size_t i = 0; i < result.unit_count; ++i) {
+		result.units.push_back(UnitSaveData::parse(buf, len, offset));
+	}
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.selected_unit_ref, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.roster_count, buf + offset, 4);
+	offset += 4;
+	for (size_t i = 0; i < result.roster_count; ++i) {
+		result.roster_entries.push_back(
+		    WorldMapNodeState::parse(buf, len, offset));
+	}
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.second_array_count, buf + offset, 4);
+	offset += 4;
+	for (size_t i = 0; i < result.second_array_count; ++i) {
+		uint32_t val;
+		if (offset + 4 > len)
+			throw std::runtime_error("buffer overflow");
+		std::memcpy(&val, buf + offset, 4);
+		offset += 4;
+		result.second_array.push_back(val);
+	}
+	for (int i = 0; i < 20; ++i) {
+		uint32_t val;
+		if (offset + 4 > len)
+			throw std::runtime_error("buffer overflow");
+		std::memcpy(&val, buf + offset, 4);
+		offset += 4;
+		result.mission_completion.push_back(val);
+	}
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.current_mission_slot, buf + offset, 4);
+	offset += 4;
+	if (offset < len) {
+		result.tail_data.assign(buf + offset, buf + len);
+		offset = len;
+	}
+	return result;
 }
 
 std::string File::to_json() const {
-    std::string s = "{";
-    s += "\"size_prefix\":";
-    s += std::to_string(size_prefix);
-    s += ",";
-    s += "\"magic\":";
-    s += std::to_string(magic);
-    s += ",";
-    s += "\"context_data\":";
-    s += "[";
-    for (size_t i = 0; i < 1080; ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(context_data[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"campaign_index\":";
-    s += std::to_string(campaign_index);
-    s += ",";
-    s += "\"main_save_block\":";
-    s += "[";
-    for (size_t i = 0; i < 340; ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(main_save_block[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"unit_count\":";
-    s += std::to_string(unit_count);
-    s += ",";
-    s += "\"units\":";
-    s += "[";
-    for (size_t i = 0; i < units.size(); ++i) {
-        if (i > 0) s += ",";
-        s += units[i].to_json();
-    }
-    s += "]";
-    s += ",";
-    s += "\"selected_unit_ref\":";
-    s += std::to_string(selected_unit_ref);
-    s += ",";
-    s += "\"roster_count\":";
-    s += std::to_string(roster_count);
-    s += ",";
-    s += "\"roster_entries\":";
-    s += "[";
-    for (size_t i = 0; i < roster_entries.size(); ++i) {
-        if (i > 0) s += ",";
-        s += roster_entries[i].to_json();
-    }
-    s += "]";
-    s += ",";
-    s += "\"second_array_count\":";
-    s += std::to_string(second_array_count);
-    s += ",";
-    s += "\"second_array\":";
-    s += "[";
-    for (size_t i = 0; i < second_array.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(second_array[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"mission_completion\":";
-    s += "[";
-    for (size_t i = 0; i < mission_completion.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(mission_completion[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"current_mission_slot\":";
-    s += std::to_string(current_mission_slot);
-    s += ",";
-    s += "\"tail_data\":";
-    s += "[";
-    for (size_t i = 0; i < tail_data.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(tail_data[i]);
-    }
-    s += "]";
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"size_prefix\":";
+	s += std::to_string(size_prefix);
+	s += ",";
+	s += "\"magic\":";
+	s += std::to_string(magic);
+	s += ",";
+	s += "\"context_data\":";
+	s += "[";
+	for (size_t i = 0; i < 1080; ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(context_data[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"campaign_index\":";
+	s += std::to_string(campaign_index);
+	s += ",";
+	s += "\"main_save_block\":";
+	s += "[";
+	for (size_t i = 0; i < 340; ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(main_save_block[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"unit_count\":";
+	s += std::to_string(unit_count);
+	s += ",";
+	s += "\"units\":";
+	s += "[";
+	for (size_t i = 0; i < units.size(); ++i) {
+		if (i > 0) s += ",";
+		s += units[i].to_json();
+	}
+	s += "]";
+	s += ",";
+	s += "\"selected_unit_ref\":";
+	s += std::to_string(selected_unit_ref);
+	s += ",";
+	s += "\"roster_count\":";
+	s += std::to_string(roster_count);
+	s += ",";
+	s += "\"roster_entries\":";
+	s += "[";
+	for (size_t i = 0; i < roster_entries.size(); ++i) {
+		if (i > 0) s += ",";
+		s += roster_entries[i].to_json();
+	}
+	s += "]";
+	s += ",";
+	s += "\"second_array_count\":";
+	s += std::to_string(second_array_count);
+	s += ",";
+	s += "\"second_array\":";
+	s += "[";
+	for (size_t i = 0; i < second_array.size(); ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(second_array[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"mission_completion\":";
+	s += "[";
+	for (size_t i = 0; i < mission_completion.size(); ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(mission_completion[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"current_mission_slot\":";
+	s += std::to_string(current_mission_slot);
+	s += ",";
+	s += "\"tail_data\":";
+	s += "[";
+	for (size_t i = 0; i < tail_data.size(); ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(tail_data[i]);
+	}
+	s += "]";
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> File::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = size_prefix;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = magic;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    _buf.insert(_buf.end(), context_data, context_data + 1080);
-    {
-        uint32_t _tmp = campaign_index;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    _buf.insert(_buf.end(), main_save_block, main_save_block + 340);
-    {
-        uint32_t _tmp = static_cast<uint32_t>(units.size());
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    for (const auto& _item : units) {
-        auto _tmp = _item.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        uint32_t _tmp = selected_unit_ref;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = static_cast<uint32_t>(roster_entries.size());
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    for (const auto& _item : roster_entries) {
-        auto _tmp = _item.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        uint32_t _tmp = static_cast<uint32_t>(second_array.size());
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    for (const auto& _v : second_array) {
-        {
-            uint32_t _tmp = _v;
-            uint8_t _raw[4];
-            std::memcpy(_raw, &_tmp, 4);
-            _buf.insert(_buf.end(), _raw, _raw + 4);
-        }
-    }
-    for (const auto& _v : mission_completion) {
-        {
-            uint32_t _tmp = _v;
-            uint8_t _raw[4];
-            std::memcpy(_raw, &_tmp, 4);
-            _buf.insert(_buf.end(), _raw, _raw + 4);
-        }
-    }
-    {
-        uint32_t _tmp = current_mission_slot;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    _buf.insert(_buf.end(), tail_data.begin(), tail_data.end());
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint32_t _tmp = size_prefix;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = magic;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	_buf.insert(_buf.end(), context_data, context_data + 1080);
+	{
+		uint32_t _tmp = campaign_index;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	_buf.insert(_buf.end(), main_save_block, main_save_block + 340);
+	{
+		uint32_t _tmp = static_cast<uint32_t>(units.size());
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	for (const auto &_item : units) {
+		auto _tmp = _item.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		uint32_t _tmp = selected_unit_ref;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = static_cast<uint32_t>(roster_entries.size());
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	for (const auto &_item : roster_entries) {
+		auto _tmp = _item.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	{
+		uint32_t _tmp = static_cast<uint32_t>(second_array.size());
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	for (const auto &_v : second_array) {
+		{
+			uint32_t _tmp = _v;
+			uint8_t _raw[4];
+			std::memcpy(_raw, &_tmp, 4);
+			_buf.insert(_buf.end(), _raw, _raw + 4);
+		}
+	}
+	for (const auto &_v : mission_completion) {
+		{
+			uint32_t _tmp = _v;
+			uint8_t _raw[4];
+			std::memcpy(_raw, &_tmp, 4);
+			_buf.insert(_buf.end(), _raw, _raw + 4);
+		}
+	}
+	{
+		uint32_t _tmp = current_mission_slot;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	_buf.insert(_buf.end(), tail_data.begin(), tail_data.end());
+	return _buf;
 }
 
 } // namespace kuf_save

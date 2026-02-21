@@ -3,527 +3,534 @@
 
 namespace sox_item_type_info {
 
-Lps Lps::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    Lps result;
-    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.length, buf + offset, 2);
-    offset += 2;
-    if (offset + result.length > len) throw std::runtime_error("buffer overflow");
-    result.value.assign(buf + offset, buf + offset + result.length);
-    offset += result.length;
-    return result;
+Lps Lps::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	Lps result;
+	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.length, buf + offset, 2);
+	offset += 2;
+	if (offset + result.length > len)
+		throw std::runtime_error("buffer overflow");
+	result.value.assign(buf + offset, buf + offset + result.length);
+	offset += result.length;
+	return result;
 }
 
 std::string Lps::to_json() const {
-    std::string s = "{";
-    s += "\"length\":";
-    s += std::to_string(length);
-    s += ",";
-    s += "\"value\":";
-    s += "[";
-    for (size_t i = 0; i < value.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(value[i]);
-    }
-    s += "]";
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"length\":";
+	s += std::to_string(length);
+	s += ",";
+	s += "\"value\":";
+	s += "[";
+	for (size_t i = 0; i < value.size(); ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(value[i]);
+	}
+	s += "]";
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> Lps::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint16_t _tmp = static_cast<uint16_t>(value.size());
-        uint8_t _raw[2];
-        std::memcpy(_raw, &_tmp, 2);
-        _buf.insert(_buf.end(), _raw, _raw + 2);
-    }
-    _buf.insert(_buf.end(), value.begin(), value.end());
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint16_t _tmp = static_cast<uint16_t>(value.size());
+		uint8_t _raw[2];
+		std::memcpy(_raw, &_tmp, 2);
+		_buf.insert(_buf.end(), _raw, _raw + 2);
+	}
+	_buf.insert(_buf.end(), value.begin(), value.end());
+	return _buf;
 }
 
-ItemTypeInfoHeader ItemTypeInfoHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    ItemTypeInfoHeader result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.marker, buf + offset, 4);
-    offset += 4;
-    if (!((result.marker == 2))) {
-        throw std::runtime_error("ItemTypeInfo marker must be 2");
-    }
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.record_count, buf + offset, 4);
-    offset += 4;
-    return result;
+ItemTypeInfoHeader ItemTypeInfoHeader::parse(const uint8_t *buf, size_t len,
+					     size_t &offset) {
+	ItemTypeInfoHeader result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.marker, buf + offset, 4);
+	offset += 4;
+	if (!((result.marker == 2))) {
+		throw std::runtime_error("ItemTypeInfo marker must be 2");
+	}
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.record_count, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string ItemTypeInfoHeader::to_json() const {
-    std::string s = "{";
-    s += "\"marker\":";
-    s += std::to_string(marker);
-    s += ",";
-    s += "\"record_count\":";
-    s += std::to_string(record_count);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"marker\":";
+	s += std::to_string(marker);
+	s += ",";
+	s += "\"record_count\":";
+	s += std::to_string(record_count);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> ItemTypeInfoHeader::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = marker;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = record_count;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint32_t _tmp = marker;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = record_count;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
-ItemTypeInfoRecord ItemTypeInfoRecord::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    ItemTypeInfoRecord result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_00, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_01, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_02, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_a0_0, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_a0_1, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_a0_2, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_a1_0, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_a1_1, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_a1_2, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_09, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_10, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_11, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_12, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_13, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_14, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_15, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_b0_0, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_b0_1, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_b0_2, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_b1_0, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_b1_1, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.pair_b1_2, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_22, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_23, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_24, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.field_25, buf + offset, 4);
-    offset += 4;
-    for (int i = 0; i < 6; ++i) {
-        uint32_t val;
-        if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-        std::memcpy(&val, buf + offset, 4);
-        offset += 4;
-        result.equip_slot_0.push_back(val);
-    }
-    for (int i = 0; i < 6; ++i) {
-        uint32_t val;
-        if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-        std::memcpy(&val, buf + offset, 4);
-        offset += 4;
-        result.equip_slot_1.push_back(val);
-    }
-    for (int i = 0; i < 6; ++i) {
-        uint32_t val;
-        if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-        std::memcpy(&val, buf + offset, 4);
-        offset += 4;
-        result.equip_slot_2.push_back(val);
-    }
-    result.name = Lps::parse(buf, len, offset);
-    return result;
+ItemTypeInfoRecord ItemTypeInfoRecord::parse(const uint8_t *buf, size_t len,
+					     size_t &offset) {
+	ItemTypeInfoRecord result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_00, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_01, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_02, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_a0_0, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_a0_1, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_a0_2, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_a1_0, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_a1_1, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_a1_2, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_09, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_10, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_11, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_12, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_13, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_14, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_15, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_b0_0, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_b0_1, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_b0_2, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_b1_0, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_b1_1, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.pair_b1_2, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_22, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_23, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_24, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.field_25, buf + offset, 4);
+	offset += 4;
+	for (int i = 0; i < 6; ++i) {
+		uint32_t val;
+		if (offset + 4 > len)
+			throw std::runtime_error("buffer overflow");
+		std::memcpy(&val, buf + offset, 4);
+		offset += 4;
+		result.equip_slot_0.push_back(val);
+	}
+	for (int i = 0; i < 6; ++i) {
+		uint32_t val;
+		if (offset + 4 > len)
+			throw std::runtime_error("buffer overflow");
+		std::memcpy(&val, buf + offset, 4);
+		offset += 4;
+		result.equip_slot_1.push_back(val);
+	}
+	for (int i = 0; i < 6; ++i) {
+		uint32_t val;
+		if (offset + 4 > len)
+			throw std::runtime_error("buffer overflow");
+		std::memcpy(&val, buf + offset, 4);
+		offset += 4;
+		result.equip_slot_2.push_back(val);
+	}
+	result.name = Lps::parse(buf, len, offset);
+	return result;
 }
 
 std::string ItemTypeInfoRecord::to_json() const {
-    std::string s = "{";
-    s += "\"field_00\":";
-    s += std::to_string(field_00);
-    s += ",";
-    s += "\"field_01\":";
-    s += std::to_string(field_01);
-    s += ",";
-    s += "\"field_02\":";
-    s += std::to_string(field_02);
-    s += ",";
-    s += "\"pair_a0_0\":";
-    s += std::to_string(pair_a0_0);
-    s += ",";
-    s += "\"pair_a0_1\":";
-    s += std::to_string(pair_a0_1);
-    s += ",";
-    s += "\"pair_a0_2\":";
-    s += std::to_string(pair_a0_2);
-    s += ",";
-    s += "\"pair_a1_0\":";
-    s += std::to_string(pair_a1_0);
-    s += ",";
-    s += "\"pair_a1_1\":";
-    s += std::to_string(pair_a1_1);
-    s += ",";
-    s += "\"pair_a1_2\":";
-    s += std::to_string(pair_a1_2);
-    s += ",";
-    s += "\"field_09\":";
-    s += std::to_string(field_09);
-    s += ",";
-    s += "\"field_10\":";
-    s += std::to_string(field_10);
-    s += ",";
-    s += "\"field_11\":";
-    s += std::to_string(field_11);
-    s += ",";
-    s += "\"field_12\":";
-    s += std::to_string(field_12);
-    s += ",";
-    s += "\"field_13\":";
-    s += std::to_string(field_13);
-    s += ",";
-    s += "\"field_14\":";
-    s += std::to_string(field_14);
-    s += ",";
-    s += "\"field_15\":";
-    s += std::to_string(field_15);
-    s += ",";
-    s += "\"pair_b0_0\":";
-    s += std::to_string(pair_b0_0);
-    s += ",";
-    s += "\"pair_b0_1\":";
-    s += std::to_string(pair_b0_1);
-    s += ",";
-    s += "\"pair_b0_2\":";
-    s += std::to_string(pair_b0_2);
-    s += ",";
-    s += "\"pair_b1_0\":";
-    s += std::to_string(pair_b1_0);
-    s += ",";
-    s += "\"pair_b1_1\":";
-    s += std::to_string(pair_b1_1);
-    s += ",";
-    s += "\"pair_b1_2\":";
-    s += std::to_string(pair_b1_2);
-    s += ",";
-    s += "\"field_22\":";
-    s += std::to_string(field_22);
-    s += ",";
-    s += "\"field_23\":";
-    s += std::to_string(field_23);
-    s += ",";
-    s += "\"field_24\":";
-    s += std::to_string(field_24);
-    s += ",";
-    s += "\"field_25\":";
-    s += std::to_string(field_25);
-    s += ",";
-    s += "\"equip_slot_0\":";
-    s += "[";
-    for (size_t i = 0; i < equip_slot_0.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(equip_slot_0[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"equip_slot_1\":";
-    s += "[";
-    for (size_t i = 0; i < equip_slot_1.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(equip_slot_1[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"equip_slot_2\":";
-    s += "[";
-    for (size_t i = 0; i < equip_slot_2.size(); ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(equip_slot_2[i]);
-    }
-    s += "]";
-    s += ",";
-    s += "\"name\":";
-    s += name.to_json();
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"field_00\":";
+	s += std::to_string(field_00);
+	s += ",";
+	s += "\"field_01\":";
+	s += std::to_string(field_01);
+	s += ",";
+	s += "\"field_02\":";
+	s += std::to_string(field_02);
+	s += ",";
+	s += "\"pair_a0_0\":";
+	s += std::to_string(pair_a0_0);
+	s += ",";
+	s += "\"pair_a0_1\":";
+	s += std::to_string(pair_a0_1);
+	s += ",";
+	s += "\"pair_a0_2\":";
+	s += std::to_string(pair_a0_2);
+	s += ",";
+	s += "\"pair_a1_0\":";
+	s += std::to_string(pair_a1_0);
+	s += ",";
+	s += "\"pair_a1_1\":";
+	s += std::to_string(pair_a1_1);
+	s += ",";
+	s += "\"pair_a1_2\":";
+	s += std::to_string(pair_a1_2);
+	s += ",";
+	s += "\"field_09\":";
+	s += std::to_string(field_09);
+	s += ",";
+	s += "\"field_10\":";
+	s += std::to_string(field_10);
+	s += ",";
+	s += "\"field_11\":";
+	s += std::to_string(field_11);
+	s += ",";
+	s += "\"field_12\":";
+	s += std::to_string(field_12);
+	s += ",";
+	s += "\"field_13\":";
+	s += std::to_string(field_13);
+	s += ",";
+	s += "\"field_14\":";
+	s += std::to_string(field_14);
+	s += ",";
+	s += "\"field_15\":";
+	s += std::to_string(field_15);
+	s += ",";
+	s += "\"pair_b0_0\":";
+	s += std::to_string(pair_b0_0);
+	s += ",";
+	s += "\"pair_b0_1\":";
+	s += std::to_string(pair_b0_1);
+	s += ",";
+	s += "\"pair_b0_2\":";
+	s += std::to_string(pair_b0_2);
+	s += ",";
+	s += "\"pair_b1_0\":";
+	s += std::to_string(pair_b1_0);
+	s += ",";
+	s += "\"pair_b1_1\":";
+	s += std::to_string(pair_b1_1);
+	s += ",";
+	s += "\"pair_b1_2\":";
+	s += std::to_string(pair_b1_2);
+	s += ",";
+	s += "\"field_22\":";
+	s += std::to_string(field_22);
+	s += ",";
+	s += "\"field_23\":";
+	s += std::to_string(field_23);
+	s += ",";
+	s += "\"field_24\":";
+	s += std::to_string(field_24);
+	s += ",";
+	s += "\"field_25\":";
+	s += std::to_string(field_25);
+	s += ",";
+	s += "\"equip_slot_0\":";
+	s += "[";
+	for (size_t i = 0; i < equip_slot_0.size(); ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(equip_slot_0[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"equip_slot_1\":";
+	s += "[";
+	for (size_t i = 0; i < equip_slot_1.size(); ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(equip_slot_1[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"equip_slot_2\":";
+	s += "[";
+	for (size_t i = 0; i < equip_slot_2.size(); ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(equip_slot_2[i]);
+	}
+	s += "]";
+	s += ",";
+	s += "\"name\":";
+	s += name.to_json();
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> ItemTypeInfoRecord::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = field_00;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_01;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_02;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_a0_0;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_a0_1;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_a0_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_a1_0;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_a1_1;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_a1_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_09;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_10;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_11;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_12;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_13;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_14;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_15;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_b0_0;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_b0_1;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_b0_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_b1_0;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_b1_1;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = pair_b1_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_22;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_23;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_24;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = field_25;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    for (const auto& _v : equip_slot_0) {
-        {
-            uint32_t _tmp = _v;
-            uint8_t _raw[4];
-            std::memcpy(_raw, &_tmp, 4);
-            _buf.insert(_buf.end(), _raw, _raw + 4);
-        }
-    }
-    for (const auto& _v : equip_slot_1) {
-        {
-            uint32_t _tmp = _v;
-            uint8_t _raw[4];
-            std::memcpy(_raw, &_tmp, 4);
-            _buf.insert(_buf.end(), _raw, _raw + 4);
-        }
-    }
-    for (const auto& _v : equip_slot_2) {
-        {
-            uint32_t _tmp = _v;
-            uint8_t _raw[4];
-            std::memcpy(_raw, &_tmp, 4);
-            _buf.insert(_buf.end(), _raw, _raw + 4);
-        }
-    }
-    {
-        auto _tmp = name.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint32_t _tmp = field_00;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_01;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_02;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_a0_0;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_a0_1;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_a0_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_a1_0;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_a1_1;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_a1_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_09;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_10;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_11;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_12;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_13;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_14;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_15;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_b0_0;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_b0_1;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_b0_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_b1_0;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_b1_1;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = pair_b1_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_22;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_23;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_24;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = field_25;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	for (const auto &_v : equip_slot_0) {
+		{
+			uint32_t _tmp = _v;
+			uint8_t _raw[4];
+			std::memcpy(_raw, &_tmp, 4);
+			_buf.insert(_buf.end(), _raw, _raw + 4);
+		}
+	}
+	for (const auto &_v : equip_slot_1) {
+		{
+			uint32_t _tmp = _v;
+			uint8_t _raw[4];
+			std::memcpy(_raw, &_tmp, 4);
+			_buf.insert(_buf.end(), _raw, _raw + 4);
+		}
+	}
+	for (const auto &_v : equip_slot_2) {
+		{
+			uint32_t _tmp = _v;
+			uint8_t _raw[4];
+			std::memcpy(_raw, &_tmp, 4);
+			_buf.insert(_buf.end(), _raw, _raw + 4);
+		}
+	}
+	{
+		auto _tmp = name.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	return _buf;
 }
 
-File File::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    File result;
-    result.header = ItemTypeInfoHeader::parse(buf, len, offset);
-    for (size_t i = 0; i < result.header.record_count; ++i) {
-        result.records.push_back(ItemTypeInfoRecord::parse(buf, len, offset));
-    }
-    return result;
+File File::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	File result;
+	result.header = ItemTypeInfoHeader::parse(buf, len, offset);
+	for (size_t i = 0; i < result.header.record_count; ++i) {
+		result.records.push_back(
+		    ItemTypeInfoRecord::parse(buf, len, offset));
+	}
+	return result;
 }
 
 std::string File::to_json() const {
-    std::string s = "{";
-    s += "\"header\":";
-    s += header.to_json();
-    s += ",";
-    s += "\"records\":";
-    s += "[";
-    for (size_t i = 0; i < records.size(); ++i) {
-        if (i > 0) s += ",";
-        s += records[i].to_json();
-    }
-    s += "]";
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"header\":";
+	s += header.to_json();
+	s += ",";
+	s += "\"records\":";
+	s += "[";
+	for (size_t i = 0; i < records.size(); ++i) {
+		if (i > 0) s += ",";
+		s += records[i].to_json();
+	}
+	s += "]";
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> File::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        auto _tmp = header.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    for (const auto& _item : records) {
-        auto _tmp = _item.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		auto _tmp = header.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	for (const auto &_item : records) {
+		auto _tmp = _item.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	return _buf;
 }
 
 } // namespace sox_item_type_info

@@ -1,40 +1,71 @@
 #pragma once
 
-#include "ui/tabs/editor_tab.h"
 #include "formats/sox_binary.h"
+#include "ui/tabs/editor_tab.h"
 
 #include <memory>
 
 namespace kuf {
 
 class TroopEditorTab : public EditorTab {
-public:
-    explicit TroopEditorTab(std::shared_ptr<OpenDocument> doc);
+      public:
+	explicit TroopEditorTab(std::shared_ptr<OpenDocument> doc);
 
-    void drawContent() override;
+	void drawContent() override;
 
-    void selectTroop(size_t index);
-    int selectedTroop() const { return selectedTroop_; }
+	void selectTroop(size_t index);
+	int selectedTroop() const { return selectedTroop_; }
 
-private:
-    void drawTroopTable();
-    void drawTroopDetails(size_t index);
+      private:
+	void drawTroopTable();
+	void drawTroopDetails(size_t index);
 
-    int selectedTroop_ = -1;
+	int selectedTroop_ = -1;
 
-    static constexpr const char* TROOP_NAMES[] = {
-        "Archer", "Longbows", "Infantry", "Spearman", "Heavy Infantry",
-        "Knight", "Paladin", "Cavalry", "Heavy Cavalry", "Storm Riders",
-        "Sappers", "Pyro Techs", "Bomber Wings", "Mortar", "Ballista",
-        "Harpoon", "Catapult", "Battaloon", "Dark Elves Archer",
-        "Dark Elves Cavalry Archers", "Dark Elves Infantry", "Dark Elves Knights",
-        "Dark Elves Cavalry", "Orc Infantry", "Orc Riders", "Orc Heavy Riders",
-        "Orc Axe Man", "Orc Heavy Infantry", "Orc Sappers", "Orc Scorpion",
-        "Orc Swamp Mammoth", "Orc Dirigible", "Orc Black Wyverns", "Orc Ghouls",
-        "Orc Bone Dragon", "Wall Archers (Humans)", "Scouts", "Ghoul Selfdestruct",
-        "Encablossa Monster (Melee)", "Encablossa Flying Monster",
-        "Encablossa Monster (Ranged)", "Wall Archers (Elves)", "Encablossa Main"
-    };
+	static constexpr const char *TROOP_NAMES[] = {
+	    "Archer",
+	    "Longbows",
+	    "Infantry",
+	    "Spearman",
+	    "Heavy Infantry",
+	    "Knight",
+	    "Paladin",
+	    "Cavalry",
+	    "Heavy Cavalry",
+	    "Storm Riders",
+	    "Sappers",
+	    "Pyro Techs",
+	    "Bomber Wings",
+	    "Mortar",
+	    "Ballista",
+	    "Harpoon",
+	    "Catapult",
+	    "Battaloon",
+	    "Dark Elves Archer",
+	    "Dark Elves Cavalry Archers",
+	    "Dark Elves Infantry",
+	    "Dark Elves Knights",
+	    "Dark Elves Cavalry",
+	    "Orc Infantry",
+	    "Orc Riders",
+	    "Orc Heavy Riders",
+	    "Orc Axe Man",
+	    "Orc Heavy Infantry",
+	    "Orc Sappers",
+	    "Orc Scorpion",
+	    "Orc Swamp Mammoth",
+	    "Orc Dirigible",
+	    "Orc Black Wyverns",
+	    "Orc Ghouls",
+	    "Orc Bone Dragon",
+	    "Wall Archers (Humans)",
+	    "Scouts",
+	    "Ghoul Selfdestruct",
+	    "Encablossa Monster (Melee)",
+	    "Encablossa Flying Monster",
+	    "Encablossa Monster (Ranged)",
+	    "Wall Archers (Elves)",
+	    "Encablossa Main"};
 };
 
 } // namespace kuf

@@ -3,195 +3,197 @@
 
 namespace sox_worldmap_troop_info {
 
-SoxHeader SoxHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    SoxHeader result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.marker, buf + offset, 4);
-    offset += 4;
-    if (!((result.marker == 100))) {
-        throw std::runtime_error("SOX marker must be 100");
-    }
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.record_count, buf + offset, 4);
-    offset += 4;
-    return result;
+SoxHeader SoxHeader::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	SoxHeader result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.marker, buf + offset, 4);
+	offset += 4;
+	if (!((result.marker == 100))) {
+		throw std::runtime_error("SOX marker must be 100");
+	}
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.record_count, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string SoxHeader::to_json() const {
-    std::string s = "{";
-    s += "\"marker\":";
-    s += std::to_string(marker);
-    s += ",";
-    s += "\"record_count\":";
-    s += std::to_string(record_count);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"marker\":";
+	s += std::to_string(marker);
+	s += ",";
+	s += "\"record_count\":";
+	s += std::to_string(record_count);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> SoxHeader::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        uint32_t _tmp = marker;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        uint32_t _tmp = record_count;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		uint32_t _tmp = marker;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		uint32_t _tmp = record_count;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
-WorldmapTroopInfoRecord WorldmapTroopInfoRecord::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    WorldmapTroopInfoRecord result;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.troop_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.primary_ref_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.secondary_ref_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.tertiary_ref_id, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.unknown_4, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.icon_id_1, buf + offset, 4);
-    offset += 4;
-    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(&result.icon_id_2, buf + offset, 4);
-    offset += 4;
-    return result;
+WorldmapTroopInfoRecord
+WorldmapTroopInfoRecord::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	WorldmapTroopInfoRecord result;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.troop_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.primary_ref_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.secondary_ref_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.tertiary_ref_id, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.unknown_4, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.icon_id_1, buf + offset, 4);
+	offset += 4;
+	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(&result.icon_id_2, buf + offset, 4);
+	offset += 4;
+	return result;
 }
 
 std::string WorldmapTroopInfoRecord::to_json() const {
-    std::string s = "{";
-    s += "\"troop_id\":";
-    s += std::to_string(troop_id);
-    s += ",";
-    s += "\"primary_ref_id\":";
-    s += std::to_string(primary_ref_id);
-    s += ",";
-    s += "\"secondary_ref_id\":";
-    s += std::to_string(secondary_ref_id);
-    s += ",";
-    s += "\"tertiary_ref_id\":";
-    s += std::to_string(tertiary_ref_id);
-    s += ",";
-    s += "\"unknown_4\":";
-    s += std::to_string(unknown_4);
-    s += ",";
-    s += "\"icon_id_1\":";
-    s += std::to_string(icon_id_1);
-    s += ",";
-    s += "\"icon_id_2\":";
-    s += std::to_string(icon_id_2);
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"troop_id\":";
+	s += std::to_string(troop_id);
+	s += ",";
+	s += "\"primary_ref_id\":";
+	s += std::to_string(primary_ref_id);
+	s += ",";
+	s += "\"secondary_ref_id\":";
+	s += std::to_string(secondary_ref_id);
+	s += ",";
+	s += "\"tertiary_ref_id\":";
+	s += std::to_string(tertiary_ref_id);
+	s += ",";
+	s += "\"unknown_4\":";
+	s += std::to_string(unknown_4);
+	s += ",";
+	s += "\"icon_id_1\":";
+	s += std::to_string(icon_id_1);
+	s += ",";
+	s += "\"icon_id_2\":";
+	s += std::to_string(icon_id_2);
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> WorldmapTroopInfoRecord::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        int32_t _tmp = troop_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = primary_ref_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = secondary_ref_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = tertiary_ref_id;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = unknown_4;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = icon_id_1;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    {
-        int32_t _tmp = icon_id_2;
-        uint8_t _raw[4];
-        std::memcpy(_raw, &_tmp, 4);
-        _buf.insert(_buf.end(), _raw, _raw + 4);
-    }
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		int32_t _tmp = troop_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = primary_ref_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = secondary_ref_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = tertiary_ref_id;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = unknown_4;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = icon_id_1;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	{
+		int32_t _tmp = icon_id_2;
+		uint8_t _raw[4];
+		std::memcpy(_raw, &_tmp, 4);
+		_buf.insert(_buf.end(), _raw, _raw + 4);
+	}
+	return _buf;
 }
 
-File File::parse(const uint8_t* buf, size_t len, size_t& offset) {
-    File result;
-    result.header = SoxHeader::parse(buf, len, offset);
-    for (size_t i = 0; i < result.header.record_count; ++i) {
-        result.records.push_back(WorldmapTroopInfoRecord::parse(buf, len, offset));
-    }
-    if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    std::memcpy(result.footer, buf + offset, 64);
-    offset += 64;
-    return result;
+File File::parse(const uint8_t *buf, size_t len, size_t &offset) {
+	File result;
+	result.header = SoxHeader::parse(buf, len, offset);
+	for (size_t i = 0; i < result.header.record_count; ++i) {
+		result.records.push_back(
+		    WorldmapTroopInfoRecord::parse(buf, len, offset));
+	}
+	if (offset + 64 > len) throw std::runtime_error("buffer overflow");
+	std::memcpy(result.footer, buf + offset, 64);
+	offset += 64;
+	return result;
 }
 
 std::string File::to_json() const {
-    std::string s = "{";
-    s += "\"header\":";
-    s += header.to_json();
-    s += ",";
-    s += "\"records\":";
-    s += "[";
-    for (size_t i = 0; i < records.size(); ++i) {
-        if (i > 0) s += ",";
-        s += records[i].to_json();
-    }
-    s += "]";
-    s += ",";
-    s += "\"footer\":";
-    s += "[";
-    for (size_t i = 0; i < 64; ++i) {
-        if (i > 0) s += ",";
-        s += std::to_string(footer[i]);
-    }
-    s += "]";
-    s += "}";
-    return s;
+	std::string s = "{";
+	s += "\"header\":";
+	s += header.to_json();
+	s += ",";
+	s += "\"records\":";
+	s += "[";
+	for (size_t i = 0; i < records.size(); ++i) {
+		if (i > 0) s += ",";
+		s += records[i].to_json();
+	}
+	s += "]";
+	s += ",";
+	s += "\"footer\":";
+	s += "[";
+	for (size_t i = 0; i < 64; ++i) {
+		if (i > 0) s += ",";
+		s += std::to_string(footer[i]);
+	}
+	s += "]";
+	s += "}";
+	return s;
 }
 
 std::vector<uint8_t> File::to_bytes() const {
-    std::vector<uint8_t> _buf;
-    {
-        auto _tmp = header.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    for (const auto& _item : records) {
-        auto _tmp = _item.to_bytes();
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    _buf.insert(_buf.end(), footer, footer + 64);
-    return _buf;
+	std::vector<uint8_t> _buf;
+	{
+		auto _tmp = header.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	for (const auto &_item : records) {
+		auto _tmp = _item.to_bytes();
+		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+	}
+	_buf.insert(_buf.end(), footer, footer + 64);
+	return _buf;
 }
 
 } // namespace sox_worldmap_troop_info
