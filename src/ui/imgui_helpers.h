@@ -17,6 +17,9 @@ inline bool InputTextCentered(const char *label, char *buf, size_t bufSize,
 	ImGuiID id = window->GetID(label);
 	bool active = g.ActiveId == id;
 
+	// Capture resolved field width before InputText consumes it.
+	float fieldWidth = ImGui::CalcItemWidth();
+
 	// When not active, suppress InputText's own text rendering.
 	if (!active) {
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));
@@ -30,16 +33,15 @@ inline bool InputTextCentered(const char *label, char *buf, size_t bufSize,
 
 		ImVec2 frameMin = ImGui::GetItemRectMin();
 		float frameHeight = ImGui::GetItemRectMax().y - frameMin.y;
-		float frameWidth = ImGui::CalcItemWidth();
 
 		ImVec2 textSize = ImGui::CalcTextSize(buf);
-		float centeredX = frameMin.x + (frameWidth - textSize.x) * 0.5f;
+		float centeredX = frameMin.x + (fieldWidth - textSize.x) * 0.5f;
 		float minX = frameMin.x + style.FramePadding.x;
 		ImVec2 textPos(std::max(centeredX, minX),
 			       frameMin.y + style.FramePadding.y);
 
 		ImDrawList *drawList = ImGui::GetWindowDrawList();
-		ImVec4 clipRect(frameMin.x, frameMin.y, frameMin.x + frameWidth,
+		ImVec4 clipRect(frameMin.x, frameMin.y, frameMin.x + fieldWidth,
 				frameMin.y + frameHeight);
 		ImU32 textCol = ImColor(style.Colors[ImGuiCol_Text]);
 		drawList->AddText(nullptr, 0.0f, textPos, textCol, buf, nullptr,
@@ -50,7 +52,7 @@ inline bool InputTextCentered(const char *label, char *buf, size_t bufSize,
 		ImVec2 labelSize = ImGui::CalcTextSize(label, labelEnd, true);
 		if (labelSize.x > 0.0f) {
 			float labelX =
-			    frameMin.x + frameWidth + style.ItemInnerSpacing.x;
+			    frameMin.x + fieldWidth + style.ItemInnerSpacing.x;
 			ImVec2 labelPos(labelX,
 					frameMin.y + style.FramePadding.y);
 			drawList->AddText(labelPos, textCol, label, labelEnd);
@@ -64,24 +66,28 @@ inline bool BeginComboCentered(const char *label, const char *previewValue,
 			       ImGuiComboFlags flags = 0) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 
+	// Capture resolved field width before BeginCombo consumes it.
+	float fieldWidth = ImGui::CalcItemWidth();
+
 	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));
 	bool open = ImGui::BeginCombo(label, previewValue, flags);
 	ImGui::PopStyleColor();
 
 	ImVec2 frameMin = ImGui::GetItemRectMin();
 	float frameHeight = ImGui::GetItemRectMax().y - frameMin.y;
-	float frameWidth = ImGui::CalcItemWidth();
 	float arrowWidth = ImGui::GetFrameHeight();
-	float availWidth = frameWidth - arrowWidth;
 
+	// Center within the full combo width (matching DragInt behavior),
+	// but clip at the arrow boundary.
 	ImVec2 textSize = ImGui::CalcTextSize(previewValue);
-	float centeredX = frameMin.x + (frameWidth - textSize.x) * 0.5f;
+	float centeredX = frameMin.x + (fieldWidth - textSize.x) * 0.5f;
 	float minX = frameMin.x + style.FramePadding.x;
 	ImVec2 textPos(std::max(centeredX, minX),
 		       frameMin.y + style.FramePadding.y);
 
 	ImDrawList *drawList = ImGui::GetWindowDrawList();
-	ImVec4 clipRect(frameMin.x, frameMin.y, frameMin.x + availWidth,
+	ImVec4 clipRect(frameMin.x, frameMin.y,
+			frameMin.x + fieldWidth - arrowWidth,
 			frameMin.y + frameHeight);
 	ImU32 textCol = ImColor(style.Colors[ImGuiCol_Text]);
 	drawList->AddText(nullptr, 0.0f, textPos, textCol, previewValue,
@@ -91,7 +97,7 @@ inline bool BeginComboCentered(const char *label, const char *previewValue,
 	ImVec2 labelSize = ImGui::CalcTextSize(label, labelEnd, true);
 	if (labelSize.x > 0.0f) {
 		float labelX =
-		    frameMin.x + frameWidth + style.ItemInnerSpacing.x;
+		    frameMin.x + fieldWidth + style.ItemInnerSpacing.x;
 		ImVec2 labelPos(labelX, frameMin.y + style.FramePadding.y);
 		drawList->AddText(labelPos, textCol, label, labelEnd);
 	}

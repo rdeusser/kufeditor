@@ -98,6 +98,9 @@ std::string resolveDisplayName(const StgUnit &unit,
 	std::string translated = dict.translate(unit.unitName);
 	if (!translated.empty()) return translated;
 
+	// 5. Show the internal name rather than a meaningless "Unknown".
+	if (!unit.unitName.empty()) return unit.unitName;
+
 	return "Unknown";
 }
 
@@ -177,6 +180,13 @@ void drawJobTypeCombo(const char *label, uint8_t &current,
 		}
 		ImGui::EndCombo();
 	}
+}
+
+bool isTroopIdHint(const char *hint) {
+	if (!hint) return false;
+	return std::strstr(hint, "TroopID") != nullptr ||
+	       std::strcmp(hint, "TargetID") == 0 ||
+	       std::strcmp(hint, "AttackerID") == 0;
 }
 
 const char *paramTypeName(StgParamType type) {
@@ -613,27 +623,45 @@ void StgEditorTab::drawUnitDetails(size_t index) {
 			snprintf(skillLabel, sizeof(skillLabel), "Skill %d",
 				 i + 1);
 
-			int skillId = unit.leaderSkills[i].skillId;
-			int skillLv = unit.leaderSkills[i].level;
+			if (unit.leaderSkills[i].skillId == 255) {
+				ImGui::TextDisabled("%s: Empty", skillLabel);
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Set")) {
+					unit.leaderSkills[i].skillId = 0;
+					unit.leaderSkills[i].level = 1;
+					document_->dirty = true;
+				}
+			} else {
+				int skillId = unit.leaderSkills[i].skillId;
+				int skillLv = unit.leaderSkills[i].level;
 
-			ImGui::Text("%s:", skillLabel);
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(120);
-			if (ImGui::DragInt("##id", &skillId, 1, 0, 255)) {
-				unit.leaderSkills[i].skillId =
-				    static_cast<uint8_t>(
-					std::clamp(skillId, 0, 255));
-				document_->dirty = true;
-			}
-			ImGui::SameLine();
-			ImGui::Text("Lv:");
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(80);
-			if (ImGui::DragInt("##lv", &skillLv, 1, 0, 255)) {
-				unit.leaderSkills[i].level =
-				    static_cast<uint8_t>(
-					std::clamp(skillLv, 0, 255));
-				document_->dirty = true;
+				ImGui::Text("%s:", skillLabel);
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(120);
+				if (ImGui::DragInt("##id", &skillId, 1, 0,
+						   254)) {
+					unit.leaderSkills[i].skillId =
+					    static_cast<uint8_t>(
+						std::clamp(skillId, 0, 254));
+					document_->dirty = true;
+				}
+				ImGui::SameLine();
+				ImGui::Text("Lv:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(80);
+				if (ImGui::DragInt("##lv", &skillLv, 1, 0,
+						   255)) {
+					unit.leaderSkills[i].level =
+					    static_cast<uint8_t>(
+						std::clamp(skillLv, 0, 255));
+					document_->dirty = true;
+				}
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Clear")) {
+					unit.leaderSkills[i].skillId = 255;
+					unit.leaderSkills[i].level = 255;
+					document_->dirty = true;
+				}
 			}
 			ImGui::PopID();
 		}
@@ -1289,10 +1317,13 @@ void StgEditorTab::drawScriptEntry(const char *entryLabel,
 				 entry.typeId);
 		}
 
+		constexpr float kTypeComboWidth = 70.0f;
+
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextUnformatted("Type");
 		ImGui::SameLine(kParamLabelWidth);
-		ImGui::SetNextItemWidth(-1);
+		ImGui::SetNextItemWidth(
+		    -(kTypeComboWidth + ImGui::GetStyle().ItemSpacing.x));
 		if (BeginComboCentered("##typeId", preview)) {
 			for (size_t ci = 0; ci < catalogSize; ++ci) {
 				char itemLabel[64];
@@ -1357,11 +1388,6 @@ void StgEditorTab::drawParamValue(const char *label, StgParamValue &param,
 	constexpr float kLabelWidth = 120.0f;
 	constexpr float kTypeComboWidth = 70.0f;
 
-	bool isTroopParam = paramHint &&
-			    std::strcmp(paramHint, "TroopID") == 0 &&
-			    (param.type == StgParamType::Int ||
-			     param.type == StgParamType::Enum);
-
 	// Label text on the left.
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextUnformatted(label);
@@ -1371,83 +1397,92 @@ void StgEditorTab::drawParamValue(const char *label, StgParamValue &param,
 	ImGui::SetNextItemWidth(
 	    -(kTypeComboWidth + ImGui::GetStyle().ItemSpacing.x));
 	ImGui::PushID("val");
-	if (isTroopParam) {
-		const auto &units = document_->stgData->units();
-		char preview[64];
-
-		// Find the unit matching this ID for the preview.
-		bool found = false;
-		for (const auto &unit : units) {
-			if (static_cast<int>(unit.uniqueId) == param.intValue) {
-				std::string displayName =
-				    resolveDisplayName(unit, nameDictionary_);
-				snprintf(preview, sizeof(preview), "%s (%u)",
-					 displayName.c_str(), unit.uniqueId);
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
-			snprintf(preview, sizeof(preview), "Unknown (%d)",
-				 param.intValue);
-		}
-
-		if (BeginComboCentered("##v", preview)) {
-			for (const auto &unit : units) {
-				std::string displayName =
-				    resolveDisplayName(unit, nameDictionary_);
-				char itemLabel[64];
-				snprintf(itemLabel, sizeof(itemLabel),
-					 "%s (%u)", displayName.c_str(),
-					 unit.uniqueId);
-				bool selected =
-				    (static_cast<int>(unit.uniqueId) ==
-				     param.intValue);
-				if (ImGui::Selectable(itemLabel, selected)) {
-					param.intValue =
-					    static_cast<int>(unit.uniqueId);
-					event.modified = true;
-					document_->dirty = true;
+	switch (param.type) {
+		case StgParamType::Int:
+		case StgParamType::Enum: {
+			if (isTroopIdHint(paramHint) && document_->stgData) {
+				auto &units = document_->stgData->units();
+				char preview[64];
+				bool found = false;
+				for (const auto &u : units) {
+					if (static_cast<int32_t>(u.uniqueId) ==
+					    param.intValue) {
+						std::string name =
+						    resolveDisplayName(
+							u, nameDictionary_);
+						snprintf(
+						    preview, sizeof(preview),
+						    "%s (%d)", name.c_str(),
+						    param.intValue);
+						found = true;
+						break;
+					}
 				}
-				if (selected) ImGui::SetItemDefaultFocus();
-			}
-			ImGui::EndCombo();
-		}
-	} else
-		switch (param.type) {
-			case StgParamType::Int:
-			case StgParamType::Enum: {
+				if (!found) {
+					snprintf(preview, sizeof(preview),
+						 "ID: %d", param.intValue);
+				}
+				if (BeginComboCentered("##v", preview)) {
+					for (const auto &u : units) {
+						std::string name =
+						    resolveDisplayName(
+							u, nameDictionary_);
+						char itemLabel[64];
+						snprintf(itemLabel,
+							 sizeof(itemLabel),
+							 "%s (%u)",
+							 name.c_str(),
+							 u.uniqueId);
+						bool selected =
+						    static_cast<int32_t>(
+							u.uniqueId) ==
+						    param.intValue;
+						if (ImGui::Selectable(
+							itemLabel, selected)) {
+							param.intValue =
+							    static_cast<
+								int32_t>(
+								u.uniqueId);
+							event.modified = true;
+							document_->dirty = true;
+						}
+						if (selected)
+							ImGui::
+							    SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
+			} else {
 				int val = param.intValue;
 				if (ImGui::DragInt("##v", &val, 1, 0, 0)) {
 					param.intValue = val;
 					event.modified = true;
 					document_->dirty = true;
 				}
-				break;
 			}
-			case StgParamType::Float: {
-				if (ImGui::DragFloat("##v", &param.floatValue,
-						     0.1f, 0.0f, 0.0f,
-						     "%.3f")) {
-					event.modified = true;
-					document_->dirty = true;
-				}
-				break;
-			}
-			case StgParamType::String: {
-				char strBuf[256];
-				std::memset(strBuf, 0, sizeof(strBuf));
-				std::strncpy(strBuf, param.stringValue.c_str(),
-					     sizeof(strBuf) - 1);
-				if (ImGui::InputText("##v", strBuf,
-						     sizeof(strBuf))) {
-					param.stringValue = strBuf;
-					event.modified = true;
-					document_->dirty = true;
-				}
-				break;
-			}
+			break;
 		}
+		case StgParamType::Float: {
+			if (ImGui::DragFloat("##v", &param.floatValue, 0.1f,
+					     0.0f, 0.0f, "%.3f")) {
+				event.modified = true;
+				document_->dirty = true;
+			}
+			break;
+		}
+		case StgParamType::String: {
+			char strBuf[256];
+			std::memset(strBuf, 0, sizeof(strBuf));
+			std::strncpy(strBuf, param.stringValue.c_str(),
+				     sizeof(strBuf) - 1);
+			if (InputTextCentered("##v", strBuf, sizeof(strBuf))) {
+				param.stringValue = strBuf;
+				event.modified = true;
+				document_->dirty = true;
+			}
+			break;
+		}
+	}
 	ImGui::PopID();
 
 	// Type selector on the right.

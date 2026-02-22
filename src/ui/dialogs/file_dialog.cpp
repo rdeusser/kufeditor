@@ -2,9 +2,11 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+// clang-format off
+#include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
-#include <windows.h>
+// clang-format on
 #endif
 
 #ifdef __APPLE__
