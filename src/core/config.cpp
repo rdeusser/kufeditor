@@ -53,6 +53,20 @@ AppConfig loadConfig() {
 		cfg.lookupValue("fontSize", config.fontSize);
 		cfg.lookupValue("maxRecentFiles", config.maxRecentFiles);
 
+		int activeGame = 0;
+		if (cfg.lookupValue("activeGame", activeGame) &&
+		    activeGame >= 0 && activeGame <= 2) {
+			config.activeGame = static_cast<ActiveGame>(activeGame);
+		}
+
+		std::string crusadersPath, heroesPath;
+		if (cfg.lookupValue("crusadersPath", crusadersPath)) {
+			config.crusadersPath = crusadersPath;
+		}
+		if (cfg.lookupValue("heroesPath", heroesPath)) {
+			config.heroesPath = heroesPath;
+		}
+
 		if (cfg.exists("recentFiles")) {
 			const libconfig::Setting &files =
 			    cfg.lookup("recentFiles");
@@ -79,6 +93,12 @@ void saveConfig(const AppConfig &config) {
 	    static_cast<double>(config.fontSize);
 	root.add("maxRecentFiles", libconfig::Setting::TypeInt) =
 	    config.maxRecentFiles;
+	root.add("activeGame", libconfig::Setting::TypeInt) =
+	    static_cast<int>(config.activeGame);
+	root.add("crusadersPath", libconfig::Setting::TypeString) =
+	    config.crusadersPath;
+	root.add("heroesPath", libconfig::Setting::TypeString) =
+	    config.heroesPath;
 
 	libconfig::Setting &files =
 	    root.add("recentFiles", libconfig::Setting::TypeArray);

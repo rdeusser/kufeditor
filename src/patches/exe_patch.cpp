@@ -1,5 +1,6 @@
 #include "patches/exe_patch.h"
 
+#include <cmath>
 #include <fstream>
 
 namespace kuf {
@@ -192,6 +193,61 @@ std::vector<uint8_t> terrainBoundsWrapper() {
 	};
 }
 
+// Fire rate patch site file offsets (derived from PE section mappings).
+constexpr uint32_t kBaseDelayOffset = 0x07191A;
+constexpr uint32_t kBaseDelayCtxOffset = 0x071914;
+constexpr uint32_t kMultOffset = 0x0747D5;
+constexpr uint32_t kMultCtxOffset = 0x0747CF;
+constexpr uint32_t kMultPostCtxOffset = 0x0747D8;
+constexpr uint32_t kFactorOffset = 0x2C0CB4;
+
+bool validateFireRateContext(const std::filesystem::path &exe) {
+	std::vector<uint8_t> buf(6);
+
+	if (!readBytes(exe, kBaseDelayCtxOffset, buf.data(), 6)) return false;
+	if (buf != std::vector<uint8_t>{0xC7, 0x86, 0xD0, 0x0A, 0x00, 0x00})
+		return false;
+
+	if (!readBytes(exe, kMultCtxOffset, buf.data(), 6)) return false;
+	if (buf != std::vector<uint8_t>{0x8B, 0x87, 0xDC, 0x0A, 0x00, 0x00})
+		return false;
+
+	if (!readBytes(exe, kMultPostCtxOffset, buf.data(), 6)) return false;
+	if (buf != std::vector<uint8_t>{0x89, 0x87, 0xD4, 0x0A, 0x00, 0x00})
+		return false;
+
+	return true;
+}
+
+int decodeMultiplier(const uint8_t bytes[3]) {
+	if (bytes[0] == 0x8D && bytes[1] == 0x04 && bytes[2] == 0x40) return 3;
+	if (bytes[0] == 0x8D && bytes[1] == 0x04 && bytes[2] == 0x00) return 2;
+	if (bytes[0] == 0x89 && bytes[1] == 0xC0 && bytes[2] == 0x90) return 1;
+	return -1;
+}
+
+bool encodeMultiplier(int value, uint8_t out[3]) {
+	switch (value) {
+		case 3:
+			out[0] = 0x8D;
+			out[1] = 0x04;
+			out[2] = 0x40;
+			return true;
+		case 2:
+			out[0] = 0x8D;
+			out[1] = 0x04;
+			out[2] = 0x00;
+			return true;
+		case 1:
+			out[0] = 0x89;
+			out[1] = 0xC0;
+			out[2] = 0x90;
+			return true;
+		default:
+			return false;
+	}
+}
+
 } // namespace
 
 std::vector<ExePatch> exePatches() {
@@ -261,6 +317,79 @@ bool revertPatch(const std::filesystem::path &exe, const ExePatch &patch) {
 				bp.original.size()))
 			return false;
 	}
+	return true;
+}
+
+std::vector<FireRatePreset> fireRatePresets() {
+	return {
+	    {"Original", "Unpatched fire rate", {5, 3, -0.009f}},
+	    {"Fast",
+	     "~2x faster: multiplier x3 to x1, delay 5 to 2",
+	     {2, 1, -0.009f}},
+	    {"Rapid",
+	     "~4x faster: x1 multiplier, delay 1, half distance factor",
+	     {1, 1, -0.0045f}},
+	    {"Turbo",
+	     "Nearly continuous fire: minimal delays, quarter distance "
+	     "factor",
+	     {1, 1, -0.00225f}},
+	};
+}
+
+FireRateValues readFireRateValues(const std::filesystem::path &exe) {
+	FireRateValues values{};
+
+	readBytes(exe, kBaseDelayOffset,
+		  reinterpret_cast<uint8_t *>(&values.baseDelay), 4);
+
+	uint8_t multBytes[3]{};
+	readBytes(exe, kMultOffset, multBytes, 3);
+	values.multiplier = decodeMultiplier(multBytes);
+
+	readBytes(exe, kFactorOffset,
+		  reinterpret_cast<uint8_t *>(&values.distanceFactor), 4);
+
+	return values;
+}
+
+FireRateStatus checkFireRate(const std::filesystem::path &exe) {
+	if (!validateFireRateContext(exe)) return FireRateStatus::Unknown;
+
+	auto values = readFireRateValues(exe);
+	if (values.multiplier == -1) return FireRateStatus::Unknown;
+
+	auto presets = fireRatePresets();
+	for (size_t i = 0; i < presets.size(); ++i) {
+		const auto &pv = presets[i].values;
+		if (values.baseDelay == pv.baseDelay &&
+		    values.multiplier == pv.multiplier &&
+		    std::abs(values.distanceFactor - pv.distanceFactor) <
+			1e-7f) {
+			return static_cast<FireRateStatus>(i);
+		}
+	}
+	return FireRateStatus::Custom;
+}
+
+bool applyFireRate(const std::filesystem::path &exe,
+		   const FireRateValues &values) {
+	if (!validateFireRateContext(exe)) return false;
+	if (!createBackup(exe)) return false;
+
+	if (!writeBytes(exe, kBaseDelayOffset,
+			reinterpret_cast<const uint8_t *>(&values.baseDelay),
+			4))
+		return false;
+
+	uint8_t multBytes[3];
+	if (!encodeMultiplier(values.multiplier, multBytes)) return false;
+	if (!writeBytes(exe, kMultOffset, multBytes, 3)) return false;
+
+	if (!writeBytes(
+		exe, kFactorOffset,
+		reinterpret_cast<const uint8_t *>(&values.distanceFactor), 4))
+		return false;
+
 	return true;
 }
 

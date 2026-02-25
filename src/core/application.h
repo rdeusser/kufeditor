@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/config.h"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,8 +32,9 @@ class Application {
 	void drawTabBar();
 	void drawDockspace();
 	void openFile(const std::string &path);
-	void setGameDirectory(const std::string &dir);
+	std::string activeGameDirectory() const;
 	std::string soxDirectory() const;
+	void onActiveGameChanged();
 	void saveActiveDocument();
 	void handleKeyboardShortcuts();
 	void updateValidationLog();
@@ -46,13 +49,13 @@ class Application {
 	std::unique_ptr<ModManagerView> modManagerView_;
 	std::unique_ptr<PatchEditorView> patchEditorView_;
 
-	std::string gameDirectory_;
 	std::string pendingPopupMessage_;
 	bool running_ = true;
 	bool showHomeTab_ = true;
 	bool showModManager_ = true;
 	bool showPatchEditor_ = true;
 	bool showErrorPopup_ = false;
+	bool showAboutDialog_ = false;
 };
 
 } // namespace kuf

@@ -73,9 +73,10 @@ Application::Application() {
 	settingsDialog_->setOnFontSizeChanged(
 	    [this](float size) { imgui_->setFontSize(size); });
 
-	// Set up callbacks.
-	homeView_->setOnSelectGameDirectory(
-	    [this](const std::string &dir) { setGameDirectory(dir); });
+	settingsDialog_->setOnGamePathsChanged(
+	    [this]() { onActiveGameChanged(); });
+
+	onActiveGameChanged();
 
 	tabManager_->setOnDocumentOpened([this](OpenDocument *doc) {
 		if (doc && !doc->path.empty()) {
@@ -131,6 +132,50 @@ void Application::run() {
 			ImGui::EndPopup();
 		}
 
+		// About dialog.
+		if (showAboutDialog_) {
+			ImGui::OpenPopup("About KUF Editor");
+			showAboutDialog_ = false;
+		}
+		if (ImGui::BeginPopupModal("About KUF Editor", nullptr,
+					   ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::Text("KUF Editor");
+			ImGui::Spacing();
+			ImGui::TextWrapped(
+			    "A modding tool for Kingdom Under Fire: "
+			    "Crusaders and Heroes.");
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+			ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f),
+					   "github.com/rdeusser/kufeditor");
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+				ImGui::SetTooltip(
+				    "https://github.com/rdeusser/kufeditor");
+			}
+			if (ImGui::IsItemClicked()) {
+#if defined(__APPLE__)
+				system("open "
+				       "https://github.com/rdeusser/"
+				       "kufeditor");
+#elif defined(_WIN32)
+				system("start "
+				       "https://github.com/rdeusser/"
+				       "kufeditor");
+#else
+				system("xdg-open "
+				       "https://github.com/rdeusser/"
+				       "kufeditor");
+#endif
+			}
+			ImGui::Spacing();
+			if (ImGui::Button("OK", ImVec2(120, 0))) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
 		imgui_->endFrame();
 
 		glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
@@ -155,16 +200,31 @@ void Application::openFile(const std::string &path) {
 	updateValidationLog();
 }
 
-void Application::setGameDirectory(const std::string &dir) {
-	gameDirectory_ = dir;
-	modManagerView_->setGameDirectory(soxDirectory());
-	patchEditorView_->setGameDirectory(dir);
+std::string Application::activeGameDirectory() const {
+	const auto &config = settingsDialog_->config();
+	switch (config.activeGame) {
+		case ActiveGame::Crusaders:
+			return config.crusadersPath;
+		case ActiveGame::Heroes:
+			return config.heroesPath;
+		case ActiveGame::None:
+			return {};
+	}
+	return {};
 }
 
 std::string Application::soxDirectory() const {
-	if (gameDirectory_.empty()) return {};
-	return (std::filesystem::path(gameDirectory_) / "Data" / "SOX")
-	    .string();
+	auto dir = activeGameDirectory();
+	if (dir.empty()) return {};
+	return (std::filesystem::path(dir) / "Data" / "SOX").string();
+}
+
+void Application::onActiveGameChanged() {
+	auto dir = activeGameDirectory();
+	auto game = settingsDialog_->config().activeGame;
+	modManagerView_->setGameDirectory(soxDirectory());
+	patchEditorView_->setGameDirectory(dir);
+	patchEditorView_->setActiveGame(game);
 }
 
 void Application::saveActiveDocument() {
@@ -244,12 +304,6 @@ void Application::drawMenuBar() {
 				}
 			}
 
-			if (ImGui::MenuItem("Set Game Directory...")) {
-				if (auto path = FileDialog::openFolder()) {
-					setGameDirectory(*path);
-				}
-			}
-
 			if (ImGui::BeginMenu("Open Recent",
 					     !recentFiles_->empty())) {
 				for (const auto &path : recentFiles_->files()) {
@@ -323,7 +377,8 @@ void Application::drawMenuBar() {
 			}
 			ImGui::Separator();
 			if (ImGui::MenuItem("Restore from Backup...", nullptr,
-					    false, !gameDirectory_.empty())) {
+					    false,
+					    !activeGameDirectory().empty())) {
 				modManagerView_->restoreLatestBackup();
 			}
 			ImGui::Separator();
@@ -337,15 +392,42 @@ void Application::drawMenuBar() {
 			ImGui::MenuItem("Home", nullptr, &showHomeTab_);
 			ImGui::MenuItem("Mod Manager", nullptr,
 					&showModManager_);
-			ImGui::MenuItem("Patch Editor", nullptr,
+			ImGui::MenuItem("Patch Manager", nullptr,
 					&showPatchEditor_);
 			ImGui::MenuItem("Validation Log", nullptr,
 					&validationLog_->isOpen());
 			ImGui::EndMenu();
 		}
 
+		auto &config = settingsDialog_->config();
+		if (ImGui::BeginMenu("Game")) {
+			if (ImGui::MenuItem("None", nullptr,
+					    config.activeGame ==
+						ActiveGame::None)) {
+				config.activeGame = ActiveGame::None;
+				settingsDialog_->save();
+				onActiveGameChanged();
+			}
+			if (ImGui::MenuItem("Crusaders", nullptr,
+					    config.activeGame ==
+						ActiveGame::Crusaders)) {
+				config.activeGame = ActiveGame::Crusaders;
+				settingsDialog_->save();
+				onActiveGameChanged();
+			}
+			if (ImGui::MenuItem("Heroes", nullptr,
+					    config.activeGame ==
+						ActiveGame::Heroes)) {
+				config.activeGame = ActiveGame::Heroes;
+				settingsDialog_->save();
+				onActiveGameChanged();
+			}
+			ImGui::EndMenu();
+		}
+
 		if (ImGui::BeginMenu("Help")) {
 			if (ImGui::MenuItem("About")) {
+				showAboutDialog_ = true;
 			}
 			ImGui::EndMenu();
 		}
@@ -395,10 +477,10 @@ void Application::drawTabBar() {
 			}
 		}
 
-		// Patch Editor tab header.
+		// Patch Manager tab header.
 		if (showPatchEditor_) {
 			bool patchOpen = true;
-			if (ImGui::BeginTabItem("Patch Editor", &patchOpen)) {
+			if (ImGui::BeginTabItem("Patch Manager", &patchOpen)) {
 				activeContent = ActiveContent::PatchEditor;
 				ImGui::EndTabItem();
 			}
@@ -437,7 +519,7 @@ void Application::drawTabBar() {
 		ImGui::EndTabBar();
 	}
 
-	// Draw active tab content in a child window that reserves 24px for the
+	// Draw active tab content in a child window that reserves space for the
 	// status bar.
 	ImGui::BeginChild("TabContent", ImVec2(0, -24.0f));
 	switch (activeContent) {
@@ -530,8 +612,6 @@ void Application::drawDockspace() {
 			ImGui::Text("%s | Unknown format | %zu bytes",
 				    doc->path.c_str(), doc->rawData.size());
 		}
-	} else if (showHomeTab_) {
-		ImGui::Text("Ready - Select a game or open a file");
 	} else {
 		ImGui::Text("Ready");
 	}

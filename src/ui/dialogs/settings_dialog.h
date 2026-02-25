@@ -34,6 +34,10 @@ class SettingsDialog {
 		onFontSizeChanged_ = std::move(callback);
 	}
 
+	void setOnGamePathsChanged(std::function<void()> callback) {
+		onGamePathsChanged_ = std::move(callback);
+	}
+
       private:
 	void applyTheme();
 	void applyDarkTheme();
@@ -44,7 +48,10 @@ class SettingsDialog {
 	AppConfig pendingConfig_;
 	bool open_ = false;
 	float appliedFontSize_ = 17.0f;
+	char crusadersPathBuf_[512] = {};
+	char heroesPathBuf_[512] = {};
 	std::function<void(float)> onFontSizeChanged_;
+	std::function<void()> onGamePathsChanged_;
 };
 
 } // namespace kuf
