@@ -2,6 +2,7 @@
 
 #include "core/name_dictionary.h"
 #include "formats/stg_format.h"
+#include "ui/node_graph/stg_node_graph.h"
 #include "ui/tabs/editor_tab.h"
 
 #include <memory>
@@ -32,23 +33,13 @@ class StgEditorTab : public EditorTab {
 	void drawAreaDetails(size_t index);
 	void drawVariableList();
 	void drawVariableDetails(size_t index);
-	void drawEventList();
-	void drawEventDetails(size_t blockIdx, size_t eventIdx);
-	void drawScriptEntry(const char *entryLabel, StgScriptEntry &entry,
-			     bool isCondition, StgEvent &event,
-			     const char *dragPayloadType = nullptr,
-			     int dragIndex = -1, int *dragSrc = nullptr,
-			     int *dragDst = nullptr);
-	void drawParamValue(const char *label, StgParamValue &param,
-			    StgEvent &event, const char *paramHint = nullptr);
 
 	Section currentSection_ = Section::Units;
 	int selectedUnit_ = -1;
 	int selectedArea_ = -1;
 	int selectedVariable_ = -1;
-	int selectedBlock_ = 0;
-	int selectedEvent_ = -1;
 	NameDictionary nameDictionary_;
+	StgNodeGraph nodeGraph_;
 };
 
 } // namespace kuf

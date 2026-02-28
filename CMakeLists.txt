@@ -109,6 +109,24 @@ target_include_directories(imgui PUBLIC
 )
 target_link_libraries(imgui PUBLIC glfw)
 
+# imgui-node-editor
+FetchContent_Declare(
+    imgui_node_editor
+    GIT_REPOSITORY https://github.com/thedmd/imgui-node-editor.git
+    GIT_TAG develop
+    PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/patch_node_editor.cmake
+)
+FetchContent_MakeAvailable(imgui_node_editor)
+
+add_library(imgui_node_editor_lib STATIC
+    ${imgui_node_editor_SOURCE_DIR}/imgui_node_editor.cpp
+    ${imgui_node_editor_SOURCE_DIR}/imgui_node_editor_api.cpp
+    ${imgui_node_editor_SOURCE_DIR}/imgui_canvas.cpp
+    ${imgui_node_editor_SOURCE_DIR}/crude_json.cpp
+)
+target_include_directories(imgui_node_editor_lib PUBLIC ${imgui_node_editor_SOURCE_DIR})
+target_link_libraries(imgui_node_editor_lib PUBLIC imgui)
+
 # Platform-specific OpenGL linking
 if(WIN32)
     target_link_libraries(imgui PUBLIC opengl32)
@@ -155,6 +173,7 @@ add_executable(kufeditor
     src/ui/tabs/text_editor_tab.cpp
     src/ui/tabs/save_editor_tab.cpp
     src/ui/tabs/stg_editor_tab.cpp
+    src/ui/node_graph/stg_node_graph.cpp
     src/ui/dialogs/settings_dialog.cpp
     src/undo/undo_stack.cpp
     src/core/json.cpp
@@ -169,6 +188,7 @@ add_executable(kufeditor
 )
 target_link_libraries(kufeditor PRIVATE
     imgui
+    imgui_node_editor_lib
     glfw
     Iconv::Iconv
     ${LIBCONFIG_LINK_TARGET}
