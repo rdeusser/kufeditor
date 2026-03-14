@@ -901,7 +901,7 @@ TEST_CASE("StgFormat area modification round-trip", "[stg][areas]") {
 TEST_CASE("Script catalog lookups", "[stg][catalog]") {
 	auto *condInfo = kuf::findConditionInfo(19);
 	REQUIRE(condInfo != nullptr);
-	REQUIRE(std::string(condInfo->name) == "CON_VAR_INT_COMPARE");
+	REQUIRE(std::string(condInfo->name) == "CON_VAR");
 	REQUIRE(condInfo->paramCount == 3);
 	REQUIRE(std::string(condInfo->paramNames[0]) == "VariableID");
 

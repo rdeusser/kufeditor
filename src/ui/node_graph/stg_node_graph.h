@@ -47,6 +47,17 @@ class StgNodeGraph {
 	void drawParamValue(const char *label, StgParamValue &param,
 			    StgEvent &event, const char *paramHint);
 
+	template <typename Container, typename IdFn, typename NameFn>
+	void drawIdDropdown(const char *label, StgParamValue &param,
+			    StgEvent &event, const char *popupPrefix,
+			    const Container &items, IdFn idFn, NameFn nameFn);
+
+	void openIdPopup(const char *label, StgParamValue &param,
+			 const char *preview, const char *popupPrefix,
+			 std::function<void()> renderFn);
+	void drawEventIdParam(const char *label, StgParamValue &param,
+			      StgEvent &event);
+
 	void handleContextMenus();
 	void renderDeferredPopups();
 
@@ -66,6 +77,12 @@ class StgNodeGraph {
 	ed::NodeId contextNodeId_;
 	size_t contextBlockIdx_ = 0;
 	size_t contextEventIdx_ = 0;
+
+	// Drag-to-create state.
+	bool createNodePending_ = false;
+	size_t createBlockIdx_ = 0;
+	size_t createEventIdx_ = 0;
+	bool createIsAction_ = true;
 };
 
 } // namespace kuf

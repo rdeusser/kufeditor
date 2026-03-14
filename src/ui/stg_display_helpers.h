@@ -102,4 +102,24 @@ inline bool isTroopIdHint(const char *hint) {
 	       std::strcmp(hint, "AttackerID") == 0;
 }
 
+inline bool isAreaIdHint(const char *hint) {
+	if (!hint) return false;
+	return std::strcmp(hint, "AreaID") == 0;
+}
+
+inline bool isVariableIdHint(const char *hint) {
+	if (!hint) return false;
+	return std::strcmp(hint, "VariableID") == 0;
+}
+
+inline bool isEventIdHint(const char *hint) {
+	if (!hint) return false;
+	return std::strcmp(hint, "EventID") == 0;
+}
+
+inline bool isTriggerIdHint(const char *hint) {
+	if (!hint) return false;
+	return std::strcmp(hint, "TriggerID") == 0;
+}
+
 } // namespace kuf

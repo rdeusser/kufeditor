@@ -14,6 +14,40 @@ namespace kuf {
 
 namespace ed = ax::NodeEditor;
 
+static void drawPinIcon() {
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+	ImVec2 pos = ImGui::GetCursorScreenPos();
+	float lineH = ImGui::GetTextLineHeight();
+	float r = 5.0f;
+	ImVec2 center(pos.x + r, pos.y + lineH * 0.5f);
+	dl->AddCircleFilled(center, r, IM_COL32(200, 200, 200, 255));
+	ImGui::Dummy(ImVec2(r * 2.0f, lineH));
+}
+
+static std::string translateName(const NameDictionary *dict,
+				 const std::string &raw) {
+	std::string t = dict->translate(raw);
+	return t.empty() ? raw : t;
+}
+
+static void drawChangeTypeMenu(StgScriptEntry &entry, StgEvent &event,
+			       const ScriptEntryInfo *catalog, size_t count,
+			       bool &dirty) {
+	if (ImGui::BeginMenu("Change Type")) {
+		for (size_t i = 0; i < count; ++i) {
+			bool selected = entry.typeId == catalog[i].id;
+			if (ImGui::MenuItem(catalog[i].name, nullptr,
+					    selected)) {
+				entry.typeId = catalog[i].id;
+				entry.params.resize(catalog[i].paramCount);
+				event.modified = true;
+				dirty = true;
+			}
+		}
+		ImGui::EndMenu();
+	}
+}
+
 static ImColor eventColor(size_t eventIdx) {
 	constexpr ImColor palette[] = {
 	    ImColor(100, 160, 255, 200), ImColor(255, 160, 100, 200),
@@ -22,6 +56,106 @@ static ImColor eventColor(size_t eventIdx) {
 	    ImColor(100, 255, 255, 200), ImColor(255, 100, 255, 200),
 	};
 	return palette[eventIdx % 8];
+}
+
+void StgNodeGraph::openIdPopup(const char *label, StgParamValue &param,
+			       const char *preview, const char *popupPrefix,
+			       std::function<void()> renderFn) {
+	char btnId[128];
+	snprintf(btnId, sizeof(btnId), "%s##btn", preview);
+	if (ImGui::Button(btnId, ImVec2(120, 0))) {
+		char popupId[64];
+		snprintf(popupId, sizeof(popupId), "%s_%p_%s", popupPrefix,
+			 static_cast<void *>(&param), label);
+		DeferredPopup popup;
+		popup.id = popupId;
+		popup.shouldOpen = true;
+		popup.render = std::move(renderFn);
+		deferredPopups_.push_back(std::move(popup));
+	}
+}
+
+template <typename Container, typename IdFn, typename NameFn>
+void StgNodeGraph::drawIdDropdown(const char *label, StgParamValue &param,
+				  StgEvent &event, const char *popupPrefix,
+				  const Container &items, IdFn idFn,
+				  NameFn nameFn) {
+	char preview[128];
+	bool found = false;
+	for (const auto &item : items) {
+		if (static_cast<int32_t>(idFn(item)) == param.intValue) {
+			snprintf(preview, sizeof(preview), "%s (%d)",
+				 nameFn(item).c_str(), param.intValue);
+			found = true;
+			break;
+		}
+	}
+	if (!found) {
+		snprintf(preview, sizeof(preview), "ID: %d", param.intValue);
+	}
+
+	openIdPopup(
+	    label, param, preview, popupPrefix,
+	    [this, &param, &event, &items, idFn, nameFn]() {
+		    for (const auto &item : items) {
+			    std::string name = nameFn(item);
+			    char il[128];
+			    snprintf(il, sizeof(il), "%s (%u)", name.c_str(),
+				     static_cast<uint32_t>(idFn(item)));
+			    if (ImGui::MenuItem(il)) {
+				    param.intValue =
+					static_cast<int32_t>(idFn(item));
+				    event.modified = true;
+				    document_->dirty = true;
+			    }
+		    }
+	    });
+}
+
+void StgNodeGraph::drawEventIdParam(const char *label, StgParamValue &param,
+				    StgEvent &event) {
+	auto &blocks = document_->stgData->eventBlocks();
+
+	char preview[128];
+	bool found = false;
+	for (const auto &b : blocks) {
+		for (const auto &ev : b.events) {
+			if (static_cast<int32_t>(ev.eventId) ==
+			    param.intValue) {
+				snprintf(
+				    preview, sizeof(preview), "%s (%d)",
+				    translateName(nameDict_, ev.description)
+					.c_str(),
+				    param.intValue);
+				found = true;
+				break;
+			}
+		}
+		if (found) break;
+	}
+	if (!found) {
+		snprintf(preview, sizeof(preview), "ID: %d", param.intValue);
+	}
+
+	openIdPopup(label, param, preview, "evt",
+		    [this, &param, &event, &blocks]() {
+			    for (const auto &b : blocks) {
+				    for (const auto &ev : b.events) {
+					    auto name = translateName(
+						nameDict_, ev.description);
+					    char il[128];
+					    snprintf(il, sizeof(il), "%s (%u)",
+						     name.c_str(), ev.eventId);
+					    if (ImGui::MenuItem(il)) {
+						    param.intValue =
+							static_cast<int32_t>(
+							    ev.eventId);
+						    event.modified = true;
+						    document_->dirty = true;
+					    }
+				    }
+			    }
+		    });
 }
 
 StgNodeGraph::StgNodeGraph() = default;
@@ -95,6 +229,30 @@ void StgNodeGraph::draw() {
 		}
 	}
 
+	// Handle drag-to-create.
+	if (ed::BeginCreate()) {
+		ed::PinId pinId;
+		if (ed::QueryNewNode(&pinId)) {
+			if (ed::AcceptNewItem()) {
+				uint64_t rawPin = pinId.Get();
+				createNodePending_ = true;
+				createBlockIdx_ =
+				    static_cast<size_t>(decodeBlock(rawPin));
+				createEventIdx_ =
+				    static_cast<size_t>(decodeEvent(rawPin));
+				createIsAction_ = (decodeSub(rawPin) == 0);
+			}
+		}
+
+		ed::PinId startId, endId;
+		if (ed::QueryNewLink(&startId, &endId)) {
+			// Links are implicit (all conditions <-> all actions
+			// per event), so reject all direct pin-to-pin drags.
+			ed::RejectNewItem();
+		}
+		ed::EndCreate();
+	}
+
 	handleContextMenus();
 
 	ed::End();
@@ -150,19 +308,37 @@ void StgNodeGraph::drawConditionNode(size_t blockIdx, size_t eventIdx,
 	const ScriptEntryInfo *info = findConditionInfo(entry.typeId);
 	const char *name = info ? info->name : "Unknown";
 
+	ImGui::BeginGroup();
+
 	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.85f, 1.0f, 1.0f));
 	ImGui::Text("%s", name);
 	ImGui::PopStyleColor();
-	ImGui::Separator();
 
+	ImVec2 separatorPos = ImGui::GetCursorScreenPos();
+	ImGui::Dummy(ImVec2(0, 1));
+
+	// Two-column layout: params left, output pin right.
+	ImGui::BeginGroup();
 	drawParamWidgets(entry, true, event);
+	if (entry.params.empty()) ImGui::Dummy(ImVec2(120.0f, 0));
+	ImGui::EndGroup();
 
-	// Output pin on the right.
+	ImGui::SameLine(0, 16.0f);
+
+	ImGui::BeginGroup();
 	ed::BeginPin(
 	    ed::PinId(conditionOutputPin(blockIdx, eventIdx, entryIdx)),
 	    ed::PinKind::Output);
-	ImGui::TextUnformatted(">>>");
+	drawPinIcon();
 	ed::EndPin();
+	ImGui::EndGroup();
+
+	ImGui::EndGroup();
+
+	float contentWidth = ImGui::GetItemRectSize().x;
+	ImGui::GetWindowDrawList()->AddLine(
+	    separatorPos, ImVec2(separatorPos.x + contentWidth, separatorPos.y),
+	    IM_COL32(60, 100, 160, 230), 1.0f);
 
 	ImGui::PopID();
 	ImGui::PopID();
@@ -184,22 +360,39 @@ void StgNodeGraph::drawActionNode(size_t blockIdx, size_t eventIdx,
 	ImGui::PushID(static_cast<int>(nodeId >> 32));
 	ImGui::PushID(static_cast<int>(nodeId & 0xFFFFFFFF));
 
-	// Input pin on the left.
-	ed::BeginPin(ed::PinId(actionInputPin(blockIdx, eventIdx, entryIdx)),
-		     ed::PinKind::Input);
-	ImGui::TextUnformatted(">>>");
-	ed::EndPin();
-	ImGui::SameLine();
-
 	const ScriptEntryInfo *info = findActionInfo(entry.typeId);
 	const char *name = info ? info->name : "Unknown";
+
+	ImGui::BeginGroup();
 
 	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.6f, 1.0f));
 	ImGui::Text("%s", name);
 	ImGui::PopStyleColor();
-	ImGui::Separator();
 
+	ImVec2 separatorPos = ImGui::GetCursorScreenPos();
+	ImGui::Dummy(ImVec2(0, 1));
+
+	// Two-column layout: input pin left, params right.
+	ImGui::BeginGroup();
+	ed::BeginPin(ed::PinId(actionInputPin(blockIdx, eventIdx, entryIdx)),
+		     ed::PinKind::Input);
+	drawPinIcon();
+	ed::EndPin();
+	ImGui::EndGroup();
+
+	ImGui::SameLine(0, 8.0f);
+
+	ImGui::BeginGroup();
 	drawParamWidgets(entry, false, event);
+	if (entry.params.empty()) ImGui::Dummy(ImVec2(120.0f, 0));
+	ImGui::EndGroup();
+
+	ImGui::EndGroup();
+
+	float contentWidth = ImGui::GetItemRectSize().x;
+	ImGui::GetWindowDrawList()->AddLine(
+	    separatorPos, ImVec2(separatorPos.x + contentWidth, separatorPos.y),
+	    IM_COL32(160, 100, 40, 230), 1.0f);
 
 	ImGui::PopID();
 	ImGui::PopID();
@@ -242,70 +435,41 @@ void StgNodeGraph::drawParamValue(const char *label, StgParamValue &param,
 		case StgParamType::Enum: {
 			if (isTroopIdHint(paramHint) && document_->stgData) {
 				auto &units = document_->stgData->units();
-				char preview[64];
-				bool found = false;
-				for (const auto &u : units) {
-					if (static_cast<int32_t>(u.uniqueId) ==
-					    param.intValue) {
-						std::string dispName =
-						    resolveDisplayName(
-							u, *nameDict_);
-						snprintf(
-						    preview, sizeof(preview),
-						    "%s (%d)", dispName.c_str(),
-						    param.intValue);
-						found = true;
-						break;
-					}
-				}
-				if (!found) {
-					snprintf(preview, sizeof(preview),
-						 "ID: %d", param.intValue);
-				}
-
-				// Deferred popup for troop combos inside nodes.
-				char btnId[64];
-				snprintf(btnId, sizeof(btnId), "%s##btn",
-					 preview);
-				if (ImGui::Button(btnId, ImVec2(120, 0))) {
-					char popupId[64];
-					snprintf(popupId, sizeof(popupId),
-						 "troop_%p_%s",
-						 static_cast<void *>(&param),
-						 label);
-					DeferredPopup popup;
-					popup.id = popupId;
-					popup.shouldOpen = true;
-					popup.render = [this, &param, &event,
-							&units]() {
-						for (const auto &u : units) {
-							std::string name =
-							    resolveDisplayName(
-								u, *nameDict_);
-							char itemLabel[64];
-							snprintf(
-							    itemLabel,
-							    sizeof(itemLabel),
-							    "%s (%u)",
-							    name.c_str(),
-							    u.uniqueId);
-							if (ImGui::MenuItem(
-								itemLabel)) {
-								param.intValue =
-								    static_cast<
-									int32_t>(
-									u.uniqueId);
-								event.modified =
-								    true;
-								document_
-								    ->dirty =
-								    true;
-							}
-						}
-					};
-					deferredPopups_.push_back(
-					    std::move(popup));
-				}
+				drawIdDropdown(
+				    label, param, event, "troop", units,
+				    [](const StgUnit &u) { return u.uniqueId; },
+				    [this](const StgUnit &u) {
+					    return resolveDisplayName(
+						u, *nameDict_);
+				    });
+			} else if (isAreaIdHint(paramHint) &&
+				   document_->stgData) {
+				drawIdDropdown(
+				    label, param, event, "area",
+				    document_->stgData->areas(),
+				    [](const StgArea &a) { return a.areaId; },
+				    [this](const StgArea &a) {
+					    return translateName(nameDict_,
+								 a.description);
+				    });
+			} else if (isVariableIdHint(paramHint) &&
+				   document_->stgData) {
+				drawIdDropdown(
+				    label, param, event, "var",
+				    document_->stgData->variables(),
+				    [](const StgVariable &v) {
+					    return v.variableId;
+				    },
+				    [this](const StgVariable &v) {
+					    return translateName(nameDict_,
+								 v.name);
+				    });
+			} else if (isEventIdHint(paramHint) &&
+				   document_->stgData) {
+				drawEventIdParam(label, param, event);
+			} else if (isTriggerIdHint(paramHint) &&
+				   document_->stgData) {
+				drawEventIdParam(label, param, event);
 			} else {
 				int val = param.intValue;
 				if (ImGui::DragInt("##v", &val, 1, 0, 0)) {
@@ -361,7 +525,37 @@ void StgNodeGraph::handleContextMenus() {
 		}
 	}
 
+	if (createNodePending_) {
+		ImGui::OpenPopup("CreateNodeMenu");
+		createNodePending_ = false;
+	}
+
 	ed::Suspend();
+
+	if (ImGui::BeginPopup("CreateNodeMenu")) {
+		auto &blocks = document_->stgData->eventBlocks();
+		if (createBlockIdx_ < blocks.size() &&
+		    createEventIdx_ < blocks[createBlockIdx_].events.size()) {
+			auto &ev =
+			    blocks[createBlockIdx_].events[createEventIdx_];
+			auto addItem = [&](const char *lbl,
+					   std::vector<StgScriptEntry> &v) {
+				if (ImGui::MenuItem(lbl)) {
+					v.push_back({});
+					ev.modified = true;
+					document_->dirty = true;
+				}
+			};
+			if (createIsAction_) {
+				addItem("Add Action", ev.actions);
+				addItem("Add Condition", ev.conditions);
+			} else {
+				addItem("Add Condition", ev.conditions);
+				addItem("Add Action", ev.actions);
+			}
+		}
+		ImGui::EndPopup();
+	}
 
 	if (ImGui::BeginPopup("BackgroundMenu")) {
 		if (ImGui::MenuItem("Add Event")) {
@@ -415,10 +609,26 @@ void StgNodeGraph::handleContextMenus() {
 
 		auto &blocks = document_->stgData->eventBlocks();
 
-		if (ImGui::MenuItem("Delete")) {
-			if (blockIdx < blocks.size() &&
-			    eventIdx < blocks[blockIdx].events.size()) {
-				auto &event = blocks[blockIdx].events[eventIdx];
+		if (blockIdx < blocks.size() &&
+		    eventIdx < blocks[blockIdx].events.size()) {
+			auto &event = blocks[blockIdx].events[eventIdx];
+
+			if (type == NodeType::Condition &&
+			    entryIdx < event.conditions.size()) {
+				drawChangeTypeMenu(event.conditions[entryIdx],
+						   event, kConditions,
+						   kConditionCount,
+						   document_->dirty);
+			} else if (type == NodeType::Action &&
+				   entryIdx < event.actions.size()) {
+				drawChangeTypeMenu(
+				    event.actions[entryIdx], event, kActions,
+				    kActionCount, document_->dirty);
+			}
+
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Delete")) {
 				if (type == NodeType::Condition &&
 				    entryIdx < event.conditions.size()) {
 					event.conditions.erase(
