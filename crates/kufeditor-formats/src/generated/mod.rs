@@ -12,6 +12,7 @@
     reason = "cleave keeps one composable Result API for all generated encoders"
 )]
 
+pub(crate) mod kuf_save;
 pub(crate) mod sox_ability_by_job;
 pub(crate) mod sox_ability_info;
 pub(crate) mod sox_char_info;
@@ -30,3 +31,15 @@ pub(crate) mod sox_unit_uv_info;
 pub(crate) mod sox_unit_uvid;
 pub(crate) mod sox_worldmap_char_info;
 pub(crate) mod sox_worldmap_troop_info;
+
+#[cfg(test)]
+mod save_contract_tests {
+    use super::kuf_save::{EquipmentSlot, UnitSaveData};
+
+    #[test]
+    fn save_discriminants_use_raw_integer_storage() {
+        let _ucd: fn(&UnitSaveData) -> u32 = |unit| unit.ucd;
+        let _skill: fn(&EquipmentSlot) -> i32 = |slot| slot.skill_type_1;
+        let _resist: fn(&EquipmentSlot) -> i32 = |slot| slot.resist_type_1;
+    }
+}

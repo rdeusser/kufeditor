@@ -10,39 +10,6 @@
 
 namespace kuf_save {
 
-enum class SkillType : int32_t {
-    NONE = -1,
-    Melee = 0,
-    Range = 1,
-    Frontal = 2,
-    Riding = 3,
-    Teamwork = 4,
-    Scout = 5,
-    Gunpowder = 6,
-    Taming = 7,
-    Fire = 8,
-    Lightning = 9,
-    Ice = 10,
-    Holy = 11,
-    Earth = 12,
-    Curse = 13,
-    Elemental = 14,
-};
-
-enum class ResistType : int32_t {
-    NONE = -1,
-    Melee = 0,
-    Ranged = 1,
-    Explosion = 2,
-    Frontal = 3,
-    Fire = 4,
-    Lightning = 5,
-    Ice = 6,
-    Holy = 7,
-    Poison = 8,
-    Curse = 9,
-};
-
 enum class UCD : uint32_t {
     Player = 0,
     Enemy = 1,
@@ -61,13 +28,13 @@ struct EquipmentSlot {
     uint16_t reserved;
     int32_t attribute1_index;
     int32_t attribute2_index;
-    SkillType skill_type_1;
+    int32_t skill_type_1;
     int32_t skill_bonus_1;
-    SkillType skill_type_2;
+    int32_t skill_type_2;
     int32_t skill_bonus_2;
-    ResistType resist_type_1;
+    int32_t resist_type_1;
     int32_t resist_bonus_1;
-    ResistType resist_type_2;
+    int32_t resist_type_2;
     int32_t resist_bonus_2;
     int32_t slot_category;
 
@@ -88,7 +55,7 @@ struct UnitSaveData {
     uint32_t stg_field_198;
     uint32_t char_id;
     uint32_t troop_info_index_2;
-    UCD ucd;
+    uint32_t ucd;
     uint32_t formation_type;
     uint32_t grid_config;
     uint32_t skill_level;

@@ -42,13 +42,13 @@ struct EquipmentSlot {
     reserved         u16;
     attribute1_index i32  [ref = ItemAttInfoRecord.attribute_id];
     attribute2_index i32  [ref = ItemAttInfoRecord.attribute_id];
-    skill_type_1     SkillType;
+    skill_type_1     i32;
     skill_bonus_1    i32;
-    skill_type_2     SkillType;
+    skill_type_2     i32;
     skill_bonus_2    i32;
-    resist_type_1    ResistType;
+    resist_type_1    i32;
     resist_bonus_1   i32;
-    resist_type_2    ResistType;
+    resist_type_2    i32;
     resist_bonus_2   i32;
     slot_category    i32;
 }
@@ -81,7 +81,7 @@ struct UnitSaveData {
 // Runtime 0x48, from STG offset 0x1C0
     troop_info_index_2    u32;
 // Runtime 0x4C
-    ucd                   UCD;
+    ucd                   u32;
 // Runtime 0x44 (written out of sequential order)
     formation_type        u32;
 // Runtime 0x50

@@ -61,13 +61,13 @@ SaveEquipmentSlot wireToSlot(const kuf_save::EquipmentSlot &w) {
 	s.reserved = w.reserved;
 	s.attribute1Index = w.attribute1_index;
 	s.attribute2Index = w.attribute2_index;
-	s.skillType1 = static_cast<int32_t>(w.skill_type_1);
+	s.skillType1 = w.skill_type_1;
 	s.skillBonus1 = w.skill_bonus_1;
-	s.skillType2 = static_cast<int32_t>(w.skill_type_2);
+	s.skillType2 = w.skill_type_2;
 	s.skillBonus2 = w.skill_bonus_2;
-	s.resistType1 = static_cast<int32_t>(w.resist_type_1);
+	s.resistType1 = w.resist_type_1;
 	s.resistBonus1 = w.resist_bonus_1;
-	s.resistType2 = static_cast<int32_t>(w.resist_type_2);
+	s.resistType2 = w.resist_type_2;
 	s.resistBonus2 = w.resist_bonus_2;
 	s.slotCategory = w.slot_category;
 	return s;
@@ -85,13 +85,13 @@ kuf_save::EquipmentSlot slotToWire(const SaveEquipmentSlot &s) {
 	w.reserved = s.reserved;
 	w.attribute1_index = s.attribute1Index;
 	w.attribute2_index = s.attribute2Index;
-	w.skill_type_1 = static_cast<kuf_save::SkillType>(s.skillType1);
+	w.skill_type_1 = s.skillType1;
 	w.skill_bonus_1 = s.skillBonus1;
-	w.skill_type_2 = static_cast<kuf_save::SkillType>(s.skillType2);
+	w.skill_type_2 = s.skillType2;
 	w.skill_bonus_2 = s.skillBonus2;
-	w.resist_type_1 = static_cast<kuf_save::ResistType>(s.resistType1);
+	w.resist_type_1 = s.resistType1;
 	w.resist_bonus_1 = s.resistBonus1;
-	w.resist_type_2 = static_cast<kuf_save::ResistType>(s.resistType2);
+	w.resist_type_2 = s.resistType2;
 	w.resist_bonus_2 = s.resistBonus2;
 	w.slot_category = s.slotCategory;
 	return w;
@@ -109,7 +109,7 @@ kuf_save::UnitSaveData unitToWire(const SaveUnit &u) {
 	w.stg_field_198 = u.stgField40;
 	w.char_id = static_cast<uint32_t>(u.charId);
 	w.troop_info_index_2 = static_cast<uint32_t>(u.troopInfoIndex2);
-	w.ucd = static_cast<kuf_save::UCD>(u.ucd);
+	w.ucd = u.ucd;
 	w.formation_type = u.formationType;
 	w.grid_config = u.gridConfig;
 	w.skill_level = u.skillLevel;
@@ -412,7 +412,7 @@ bool SaveFormat::load(std::span<const std::byte> data) {
 			unit.charId = static_cast<int32_t>(ku.char_id);
 			unit.troopInfoIndex2 =
 			    static_cast<int32_t>(ku.troop_info_index_2);
-			unit.ucd = static_cast<uint32_t>(ku.ucd);
+			unit.ucd = ku.ucd;
 			unit.formationType = ku.formation_type;
 			unit.gridConfig = ku.grid_config;
 			unit.skillLevel = ku.skill_level;

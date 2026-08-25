@@ -245,6 +245,38 @@ TEST_CASE("SaveFormat modified fields survive round-trip", "[save]") {
 	REQUIRE(save2.units()[0].jobType == 6);
 }
 
+TEST_CASE("SaveFormat preserves unknown raw discriminants across edits",
+	  "[save]") {
+	auto data = createMinimalSave(0, 1);
+
+	constexpr size_t unitOffset = 4 + 4 + kuf::kSaveContextSize + 4 +
+				      kuf::kSaveMainBlockSize + 4;
+	constexpr size_t ucdOffset = unitOffset + 40;
+	constexpr size_t leaderWeaponOffset = unitOffset + 95;
+	constexpr size_t skillType1Offset = leaderWeaponOffset + 28;
+	constexpr size_t resistType1Offset = leaderWeaponOffset + 44;
+	const uint32_t unknownUCD = 99;
+	const int32_t unknownSkillType = 1234;
+	const int32_t unknownResistType = -99;
+	std::memcpy(data.data() + ucdOffset, &unknownUCD, 4);
+	std::memcpy(data.data() + skillType1Offset, &unknownSkillType, 4);
+	std::memcpy(data.data() + resistType1Offset, &unknownResistType, 4);
+
+	kuf::SaveFormat save;
+	REQUIRE(save.load(data));
+	save.units()[0].skillLevel = 77;
+
+	auto saved = save.save();
+	kuf::SaveFormat reloaded;
+	REQUIRE(reloaded.load(saved));
+
+	const auto &unit = reloaded.units()[0];
+	REQUIRE(unit.ucd == 99);
+	REQUIRE(unit.primaryWeapon.skillType1 == 1234);
+	REQUIRE(unit.primaryWeapon.resistType1 == -99);
+	REQUIRE(unit.skillLevel == 77);
+}
+
 TEST_CASE("SaveFormat pads to 32KB", "[save]") {
 	kuf::SaveFormat save;
 	auto data = createMinimalSave();

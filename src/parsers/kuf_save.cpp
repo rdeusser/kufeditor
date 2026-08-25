@@ -36,34 +36,26 @@ EquipmentSlot EquipmentSlot::parse(const uint8_t* buf, size_t len, size_t& offse
     std::memcpy(&result.attribute2_index, buf + offset, 4);
     offset += 4;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t skill_type_1;
-    std::memcpy(&skill_type_1, buf + offset, 4);
+    std::memcpy(&result.skill_type_1, buf + offset, 4);
     offset += 4;
-    result.skill_type_1 = static_cast<SkillType>(skill_type_1);
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.skill_bonus_1, buf + offset, 4);
     offset += 4;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t skill_type_2;
-    std::memcpy(&skill_type_2, buf + offset, 4);
+    std::memcpy(&result.skill_type_2, buf + offset, 4);
     offset += 4;
-    result.skill_type_2 = static_cast<SkillType>(skill_type_2);
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.skill_bonus_2, buf + offset, 4);
     offset += 4;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t resist_type_1;
-    std::memcpy(&resist_type_1, buf + offset, 4);
+    std::memcpy(&result.resist_type_1, buf + offset, 4);
     offset += 4;
-    result.resist_type_1 = static_cast<ResistType>(resist_type_1);
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.resist_bonus_1, buf + offset, 4);
     offset += 4;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    int32_t resist_type_2;
-    std::memcpy(&resist_type_2, buf + offset, 4);
+    std::memcpy(&result.resist_type_2, buf + offset, 4);
     offset += 4;
-    result.resist_type_2 = static_cast<ResistType>(resist_type_2);
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.resist_bonus_2, buf + offset, 4);
     offset += 4;
@@ -106,25 +98,25 @@ std::string EquipmentSlot::to_json() const {
     s += std::to_string(attribute2_index);
     s += ",";
     s += "\"skill_type_1\":";
-    s += std::to_string(static_cast<int>(skill_type_1));
+    s += std::to_string(skill_type_1);
     s += ",";
     s += "\"skill_bonus_1\":";
     s += std::to_string(skill_bonus_1);
     s += ",";
     s += "\"skill_type_2\":";
-    s += std::to_string(static_cast<int>(skill_type_2));
+    s += std::to_string(skill_type_2);
     s += ",";
     s += "\"skill_bonus_2\":";
     s += std::to_string(skill_bonus_2);
     s += ",";
     s += "\"resist_type_1\":";
-    s += std::to_string(static_cast<int>(resist_type_1));
+    s += std::to_string(resist_type_1);
     s += ",";
     s += "\"resist_bonus_1\":";
     s += std::to_string(resist_bonus_1);
     s += ",";
     s += "\"resist_type_2\":";
-    s += std::to_string(static_cast<int>(resist_type_2));
+    s += std::to_string(resist_type_2);
     s += ",";
     s += "\"resist_bonus_2\":";
     s += std::to_string(resist_bonus_2);
@@ -198,7 +190,7 @@ std::vector<uint8_t> EquipmentSlot::to_bytes() const {
         _buf.insert(_buf.end(), _raw, _raw + 4);
     }
     {
-        int32_t _tmp = static_cast<int32_t>(skill_type_1);
+        int32_t _tmp = skill_type_1;
         uint8_t _raw[4];
         std::memcpy(_raw, &_tmp, 4);
         _buf.insert(_buf.end(), _raw, _raw + 4);
@@ -210,7 +202,7 @@ std::vector<uint8_t> EquipmentSlot::to_bytes() const {
         _buf.insert(_buf.end(), _raw, _raw + 4);
     }
     {
-        int32_t _tmp = static_cast<int32_t>(skill_type_2);
+        int32_t _tmp = skill_type_2;
         uint8_t _raw[4];
         std::memcpy(_raw, &_tmp, 4);
         _buf.insert(_buf.end(), _raw, _raw + 4);
@@ -222,7 +214,7 @@ std::vector<uint8_t> EquipmentSlot::to_bytes() const {
         _buf.insert(_buf.end(), _raw, _raw + 4);
     }
     {
-        int32_t _tmp = static_cast<int32_t>(resist_type_1);
+        int32_t _tmp = resist_type_1;
         uint8_t _raw[4];
         std::memcpy(_raw, &_tmp, 4);
         _buf.insert(_buf.end(), _raw, _raw + 4);
@@ -234,7 +226,7 @@ std::vector<uint8_t> EquipmentSlot::to_bytes() const {
         _buf.insert(_buf.end(), _raw, _raw + 4);
     }
     {
-        int32_t _tmp = static_cast<int32_t>(resist_type_2);
+        int32_t _tmp = resist_type_2;
         uint8_t _raw[4];
         std::memcpy(_raw, &_tmp, 4);
         _buf.insert(_buf.end(), _raw, _raw + 4);
@@ -295,10 +287,8 @@ UnitSaveData UnitSaveData::parse(const uint8_t* buf, size_t len, size_t& offset)
     std::memcpy(&result.troop_info_index_2, buf + offset, 4);
     offset += 4;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-    uint32_t ucd;
-    std::memcpy(&ucd, buf + offset, 4);
+    std::memcpy(&result.ucd, buf + offset, 4);
     offset += 4;
-    result.ucd = static_cast<UCD>(ucd);
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.formation_type, buf + offset, 4);
     offset += 4;
@@ -374,7 +364,7 @@ std::string UnitSaveData::to_json() const {
     s += std::to_string(troop_info_index_2);
     s += ",";
     s += "\"ucd\":";
-    s += std::to_string(static_cast<int>(ucd));
+    s += std::to_string(ucd);
     s += ",";
     s += "\"formation_type\":";
     s += std::to_string(formation_type);
@@ -498,7 +488,7 @@ std::vector<uint8_t> UnitSaveData::to_bytes() const {
         _buf.insert(_buf.end(), _raw, _raw + 4);
     }
     {
-        uint32_t _tmp = static_cast<uint32_t>(ucd);
+        uint32_t _tmp = ucd;
         uint8_t _raw[4];
         std::memcpy(_raw, &_tmp, 4);
         _buf.insert(_buf.end(), _raw, _raw + 4);

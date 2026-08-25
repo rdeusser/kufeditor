@@ -20,9 +20,12 @@ cleanup_rust_staging() {
 trap cleanup_rust_staging EXIT
 
 shopt -s nullglob
-rust_schemas=("${project_root}"/schemas/sox_*.clv)
-if ((${#rust_schemas[@]} == 0)); then
-    printf 'error: no Rust SOX schemas match %s\n' "${project_root}/schemas/sox_*.clv" >&2
+rust_schemas=(
+    "${project_root}/schemas/kuf_save.clv"
+    "${project_root}"/schemas/sox_*.clv
+)
+if [[ ! -f "${rust_schemas[0]}" ]] || ((${#rust_schemas[@]} == 1)); then
+    printf 'error: no Rust schema inputs found\n' >&2
     exit 1
 fi
 
@@ -34,11 +37,17 @@ for schema in "${rust_schemas[@]}"; do
         "${schema}"
 done
 
-staged_modules=("${rust_staging}"/sox_*.rs)
-if ((${#staged_modules[@]} == 0)); then
-    printf 'error: Cleave generated no Rust SOX modules\n' >&2
-    exit 1
-fi
+staged_modules=()
+for schema in "${rust_schemas[@]}"; do
+    module_name="${schema##*/}"
+    module_name="${module_name%.clv}.rs"
+    staged_module="${rust_staging}/${module_name}"
+    if [[ ! -f "${staged_module}" ]]; then
+        printf 'error: Cleave generated no Rust schema module %s\n' "${module_name}" >&2
+        exit 1
+    fi
+    staged_modules+=("${staged_module}")
+done
 
 current_modules=("${rust_output}"/sox_*.rs)
 for current_module in "${current_modules[@]}"; do
