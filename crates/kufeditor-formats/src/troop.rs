@@ -1,5 +1,5 @@
 use crate::{
-    diagnostic::{Diagnostic, Severity},
+    diagnostic::{Diagnostic, DiagnosticField, Severity},
     error::FormatError,
     generated::sox_troop_info::{File, TroopInfoRecord},
     sox::SoxSource,
@@ -165,7 +165,7 @@ impl TroopDocument {
     }
 
     pub fn value(&self, record: usize, field: TroopField) -> Result<i32, FormatError> {
-        self.record(record).map(|record| field.read(record))
+        self.record(record, field).map(|record| field.read(record))
     }
 
     pub fn set_value(
@@ -174,7 +174,7 @@ impl TroopDocument {
         field: TroopField,
         value: i32,
     ) -> Result<i32, FormatError> {
-        self.record_mut(record)
+        self.record_mut(record, field)
             .map(|record| field.write(record, value))
     }
 
@@ -188,7 +188,7 @@ impl TroopDocument {
                     diagnostics.push(Diagnostic {
                         severity: Severity::Warning,
                         record: record_index,
-                        field,
+                        field: DiagnosticField::Troop(field),
                         message: "Resistance is outside the expected 0 to 500 percent range",
                     });
                 }
@@ -198,7 +198,7 @@ impl TroopDocument {
                 diagnostics.push(Diagnostic {
                     severity: Severity::Error,
                     record: record_index,
-                    field: TroopField::DefaultUnitHp,
+                    field: DiagnosticField::Troop(TroopField::DefaultUnitHp),
                     message: "Default unit HP must be greater than zero",
                 });
             }
@@ -230,17 +230,22 @@ impl TroopDocument {
         Ok(())
     }
 
-    fn record(&self, index: usize) -> Result<&TroopInfoRecord, FormatError> {
+    fn record(&self, index: usize, field: TroopField) -> Result<&TroopInfoRecord, FormatError> {
         self.file
             .records
             .get(index)
             .ok_or(FormatError::RecordOutOfRange {
                 record: index,
                 record_count: self.file.records.len(),
+                field: DiagnosticField::Troop(field),
             })
     }
 
-    fn record_mut(&mut self, index: usize) -> Result<&mut TroopInfoRecord, FormatError> {
+    fn record_mut(
+        &mut self,
+        index: usize,
+        field: TroopField,
+    ) -> Result<&mut TroopInfoRecord, FormatError> {
         let record_count = self.file.records.len();
         self.file
             .records
@@ -248,6 +253,7 @@ impl TroopDocument {
             .ok_or(FormatError::RecordOutOfRange {
                 record: index,
                 record_count,
+                field: DiagnosticField::Troop(field),
             })
     }
 }

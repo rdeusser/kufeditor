@@ -1,4 +1,6 @@
-use crate::TroopField;
+use std::fmt;
+
+use crate::{SkillField, TroopField};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Severity {
@@ -7,10 +9,31 @@ pub enum Severity {
     Error,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum DiagnosticField {
+    Troop(TroopField),
+    Skill(SkillField),
+}
+
+impl DiagnosticField {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Troop(field) => field.label(),
+            Self::Skill(field) => field.label(),
+        }
+    }
+}
+
+impl fmt::Display for DiagnosticField {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Diagnostic {
     pub severity: Severity,
     pub record: usize,
-    pub field: TroopField,
+    pub field: DiagnosticField,
     pub message: &'static str,
 }
