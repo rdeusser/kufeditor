@@ -304,6 +304,14 @@ pub(crate) fn load_image(path: &Path) -> Result<Option<SettingsImageV1>, Setting
 }
 
 pub(crate) fn save_image(path: &Path, image: &SettingsImageV1) -> Result<(), SettingsSaveError> {
+    save_image_observed(path, image, |_| {})
+}
+
+fn save_image_observed(
+    path: &Path,
+    image: &SettingsImageV1,
+    observe_temporary: impl FnOnce(&Path),
+) -> Result<(), SettingsSaveError> {
     use std::io::Write;
 
     let parent = destination_directory(path);
@@ -316,6 +324,7 @@ pub(crate) fn save_image(path: &Path, image: &SettingsImageV1) -> Result<(), Set
             directory: parent.to_path_buf(),
             source,
         })?;
+    observe_temporary(temporary.path());
     let bytes = serde_json::to_vec_pretty(image)
         .map_err(|source| SettingsSaveError::Serialize { source })?;
     temporary
@@ -386,7 +395,7 @@ mod tests {
 
     use super::{
         MAX_SETTINGS_BYTES, SettingsImageError, SettingsLoadError, SettingsSaveError,
-        destination_directory, image_from_runtime, load_image, save_image,
+        destination_directory, image_from_runtime, load_image, save_image, save_image_observed,
     };
 
     fn write_fixture(contents: &[u8]) -> (tempfile::TempDir, PathBuf) {
@@ -589,6 +598,30 @@ mod tests {
         assert_eq!(
             destination_directory(&path),
             std::path::Path::new("/settings-parent")
+        );
+    }
+
+    #[test]
+    fn the_created_temporary_file_is_observed_in_the_destination_directory() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let image = image_from_runtime(
+            Game::Crusaders,
+            &GamePaths::default(),
+            &RecentFiles::default(),
+        )
+        .unwrap();
+        let mut temporary_path = None;
+
+        save_image_observed(&path, &image, |path| {
+            assert!(path.exists());
+            temporary_path = Some(path.to_path_buf());
+        })
+        .unwrap();
+
+        assert_eq!(
+            temporary_path.as_deref().and_then(std::path::Path::parent),
+            Some(directory.path())
         );
     }
 

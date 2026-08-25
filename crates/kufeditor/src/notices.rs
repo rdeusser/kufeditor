@@ -135,9 +135,15 @@ pub(crate) enum NoticeSource {
 }
 
 struct NoticeSlot {
-    identity: u64,
+    identity: NoticeIdentity,
     sequence: u64,
-    notice: Notice,
+    notice: Option<Notice>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NoticeIdentity {
+    Local(u64),
+    External(u64),
 }
 
 #[derive(Default)]
@@ -151,10 +157,43 @@ impl NoticeCenter {
     pub(crate) fn replace(&mut self, source: NoticeSource, notice: Notice) {
         let identity = self.next_identity;
         self.next_identity += 1;
-        self.begin(source, identity, notice);
+        self.insert(source, NoticeIdentity::Local(identity), Some(notice));
     }
 
     pub(crate) fn begin(&mut self, source: NoticeSource, identity: u64, notice: Notice) {
+        self.insert(source, NoticeIdentity::External(identity), Some(notice));
+    }
+
+    pub(crate) fn begin_pending(&mut self, source: NoticeSource, identity: u64) {
+        if let Some(slot) = self.slots.get_mut(&source) {
+            slot.identity = NoticeIdentity::External(identity);
+        } else {
+            self.insert(source, NoticeIdentity::External(identity), None);
+        }
+    }
+
+    pub(crate) fn cancel(&mut self, source: NoticeSource, identity: u64) -> bool {
+        let identity = NoticeIdentity::External(identity);
+        if self.slots.get(&source).map(|slot| slot.identity) != Some(identity) {
+            return false;
+        }
+        if self
+            .slots
+            .get(&source)
+            .is_some_and(|slot| slot.notice.is_some())
+        {
+            let local_identity = self.next_identity;
+            self.next_identity += 1;
+            if let Some(slot) = self.slots.get_mut(&source) {
+                slot.identity = NoticeIdentity::Local(local_identity);
+            }
+        } else {
+            self.slots.remove(&source);
+        }
+        true
+    }
+
+    fn insert(&mut self, source: NoticeSource, identity: NoticeIdentity, notice: Option<Notice>) {
         let sequence = self.allocate_sequence();
         self.slots.insert(
             source,
@@ -172,11 +211,12 @@ impl NoticeCenter {
         identity: u64,
         notice: Option<Notice>,
     ) -> bool {
+        let identity = NoticeIdentity::External(identity);
         if self.slots.get(&source).map(|slot| slot.identity) != Some(identity) {
             return false;
         }
         match notice {
-            Some(notice) => self.begin(source, identity, notice),
+            Some(notice) => self.insert(source, identity, Some(notice)),
             None => {
                 self.slots.remove(&source);
             }
@@ -191,8 +231,13 @@ impl NoticeCenter {
     pub(crate) fn current(&self) -> Option<&Notice> {
         self.slots
             .values()
-            .max_by_key(|slot| (notice_priority(slot.notice.level), slot.sequence))
-            .map(|slot| &slot.notice)
+            .filter_map(|slot| {
+                slot.notice
+                    .as_ref()
+                    .map(|notice| ((notice_priority(notice.level), slot.sequence), notice))
+            })
+            .max_by_key(|(priority, _)| *priority)
+            .map(|(_, notice)| notice)
     }
 
     fn allocate_sequence(&mut self) -> u64 {
@@ -233,6 +278,22 @@ mod tests {
         assert_eq!(center.current().map(Notice::summary), Some("second"));
         assert!(center.complete(NoticeSource::SettingsWrite, 2, None));
         assert!(center.current().is_none());
+    }
+
+    #[test]
+    fn a_stale_external_completion_cannot_clear_a_local_replacement() {
+        let mut center = NoticeCenter::default();
+        center.begin(NoticeSource::Workspace, 0, Notice::info("external request"));
+        center.replace(
+            NoticeSource::Workspace,
+            Notice::plain(NoticeLevel::Error, "local replacement"),
+        );
+
+        assert!(!center.complete(NoticeSource::Workspace, 0, None));
+        assert_eq!(
+            center.current().map(Notice::summary),
+            Some("local replacement")
+        );
     }
 
     #[test]

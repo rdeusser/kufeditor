@@ -135,6 +135,13 @@ impl SettingsWritePump {
         self.failed.take().is_some()
     }
 
+    pub(crate) fn discard_obsolete(&mut self) {
+        self.pending = None;
+        self.failed = None;
+        let revision = self.allocate_revision();
+        self.latest_revision = Some(revision);
+    }
+
     pub(crate) fn is_settled(&self) -> bool {
         self.pending.is_none() && self.in_flight.is_none() && self.failed.is_none()
     }
@@ -250,6 +257,31 @@ mod tests {
         ));
         assert!(!pump.has_failed());
         assert_eq!(pump.take_ready().unwrap().revision(), SettingsRevision(2));
+    }
+
+    #[test]
+    fn invalid_runtime_state_discards_obsolete_in_flight_and_retained_images() {
+        let mut pump =
+            SettingsWritePump::new(PathBuf::from("settings.json"), PersistenceMode::Enabled);
+        pump.queue(image(Game::Crusaders));
+        let in_flight = pump.take_ready().unwrap();
+
+        pump.discard_obsolete();
+        let finish = pump.finish(failed(in_flight));
+
+        assert!(!finish.is_latest);
+        assert!(!pump.has_failed());
+        assert!(pump.is_settled());
+
+        pump.queue(image(Game::Heroes));
+        let latest = pump.take_ready().unwrap();
+        pump.finish(failed(latest));
+        assert!(pump.has_failed());
+
+        pump.discard_obsolete();
+
+        assert!(!pump.has_failed());
+        assert!(pump.is_settled());
     }
 
     #[test]

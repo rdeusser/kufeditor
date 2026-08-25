@@ -1,6 +1,7 @@
 use gpui::Context;
+use kufeditor_game::Game;
 
-use super::{AppFrame, CloseDocuments};
+use super::AppFrame;
 use crate::{
     notices::{Notice, NoticeLevel, NoticeSource},
     settings::{
@@ -27,18 +28,18 @@ fn begin_write_notice(frame: &mut AppFrame, revision: SettingsRevision, notice: 
 }
 
 impl AppFrame {
-    pub(super) fn schedule_settings_write(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn schedule_settings_write(&mut self, game: Game, cx: &mut Context<Self>) -> bool {
         let image: SettingsImageV1 =
-            match image_from_runtime(self.shell.game(), &self.game_paths, &self.recent_files) {
+            match image_from_runtime(game, &self.game_paths, &self.recent_files) {
                 Ok(image) => image,
                 Err(error) => {
+                    self.settings.discard_obsolete();
                     self.close_pending = false;
-                    self.close_documents = CloseDocuments::Save;
                     self.close_armed = false;
                     self.notices
                         .replace(NoticeSource::SettingsWrite, image_error_notice(&error));
                     cx.notify();
-                    return;
+                    return false;
                 }
             };
 
@@ -49,7 +50,7 @@ impl AppFrame {
             }
             SettingsQueueResult::Protected(revision) => {
                 let found = match self.settings.mode() {
-                    crate::settings::PersistenceMode::Enabled => return,
+                    crate::settings::PersistenceMode::Enabled => return false,
                     crate::settings::PersistenceMode::ProtectedUnsupportedVersion { found } => {
                         *found
                     }
@@ -58,6 +59,7 @@ impl AppFrame {
             }
         }
         cx.notify();
+        true
     }
 
     pub(super) fn start_next_settings_write(&mut self, cx: &mut Context<Self>) {
@@ -89,7 +91,6 @@ impl AppFrame {
                 }
                 Err(error) => {
                     self.close_pending = false;
-                    self.close_documents = CloseDocuments::Save;
                     self.close_armed = false;
                     self.notices.complete(
                         NoticeSource::SettingsWrite,
