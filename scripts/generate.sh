@@ -7,19 +7,13 @@ cleave_command="${CLEAVE:-cleave}"
 cpp_output="${project_root}/src/parsers"
 rust_output="${project_root}/crates/kufeditor-formats/src/generated"
 
-mkdir -p "${cpp_output}" "${rust_output}"
-
-for schema in "${project_root}"/schemas/*.clv; do
-    "${cleave_command}" generate --lang cpp --out "${cpp_output}" "${schema}"
-done
-
-rust_staging="$(mktemp -d)"
-cleanup_rust_staging() {
-    rm -rf -- "${rust_staging}"
-}
-trap cleanup_rust_staging EXIT
-
 shopt -s nullglob
+cpp_schemas=("${project_root}"/schemas/*.clv)
+if ((${#cpp_schemas[@]} == 0)); then
+    printf 'error: no C++ schema inputs found\n' >&2
+    exit 1
+fi
+
 rust_schemas=(
     "${project_root}/schemas/kuf_save.clv"
     "${project_root}"/schemas/sox_*.clv
@@ -29,6 +23,36 @@ if [[ ! -f "${rust_schemas[0]}" ]] || ((${#rust_schemas[@]} == 1)); then
     exit 1
 fi
 
+generation_staging="$(mktemp -d)"
+cpp_staging="${generation_staging}/cpp"
+rust_staging="${generation_staging}/rust"
+publication_temps=()
+
+cleanup_generation() {
+    if ((${#publication_temps[@]} > 0)); then
+        for temporary in "${publication_temps[@]}"; do
+            if [[ -e "${temporary}" ]]; then
+                rm -- "${temporary}"
+            fi
+        done
+    fi
+    rm -rf -- "${generation_staging}"
+}
+trap cleanup_generation EXIT
+
+mkdir -p \
+    "${cpp_output}" \
+    "${rust_output}" \
+    "${cpp_staging}" \
+    "${rust_staging}"
+
+for schema in "${cpp_schemas[@]}"; do
+    "${cleave_command}" generate \
+        --lang cpp \
+        --out "${cpp_staging}" \
+        "${schema}"
+done
+
 for schema in "${rust_schemas[@]}"; do
     "${cleave_command}" generate \
         --lang rust \
@@ -37,16 +61,47 @@ for schema in "${rust_schemas[@]}"; do
         "${schema}"
 done
 
-staged_modules=()
+staged_files=()
+destinations=()
+
+for schema in "${cpp_schemas[@]}"; do
+    module_name="${schema##*/}"
+    module_name="${module_name%.clv}"
+    for extension in h cpp; do
+        staged_file="${cpp_staging}/${module_name}.${extension}"
+        if [[ ! -f "${staged_file}" ]]; then
+            printf \
+                'error: Cleave generated no C++ schema file %s.%s\n' \
+                "${module_name}" \
+                "${extension}" >&2
+            exit 1
+        fi
+        staged_files+=("${staged_file}")
+        destinations+=("${cpp_output}/${module_name}.${extension}")
+    done
+done
+
 for schema in "${rust_schemas[@]}"; do
     module_name="${schema##*/}"
     module_name="${module_name%.clv}.rs"
-    staged_module="${rust_staging}/${module_name}"
-    if [[ ! -f "${staged_module}" ]]; then
+    staged_file="${rust_staging}/${module_name}"
+    if [[ ! -f "${staged_file}" ]]; then
         printf 'error: Cleave generated no Rust schema module %s\n' "${module_name}" >&2
         exit 1
     fi
-    staged_modules+=("${staged_module}")
+    staged_files+=("${staged_file}")
+    destinations+=("${rust_output}/${module_name}")
+done
+
+for index in "${!staged_files[@]}"; do
+    destination="${destinations[index]}"
+    temporary="$(mktemp "${destination}.tmp.XXXXXX")"
+    publication_temps+=("${temporary}")
+    cp -p -- "${staged_files[index]}" "${temporary}"
+done
+
+for index in "${!publication_temps[@]}"; do
+    mv -- "${publication_temps[index]}" "${destinations[index]}"
 done
 
 current_modules=("${rust_output}"/sox_*.rs)
@@ -55,8 +110,4 @@ for current_module in "${current_modules[@]}"; do
     if [[ ! -e "${rust_staging}/${module_name}" ]]; then
         rm -- "${current_module}"
     fi
-done
-
-for staged_module in "${staged_modules[@]}"; do
-    cp -- "${staged_module}" "${rust_output}/${staged_module##*/}"
 done

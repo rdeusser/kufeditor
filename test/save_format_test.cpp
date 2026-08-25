@@ -2,6 +2,8 @@
 
 #include "formats/save_format.h"
 
+#include <algorithm>
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -255,18 +257,33 @@ TEST_CASE("SaveFormat preserves unknown raw discriminants across edits",
 	constexpr size_t leaderWeaponOffset = unitOffset + 95;
 	constexpr size_t skillType1Offset = leaderWeaponOffset + 28;
 	constexpr size_t resistType1Offset = leaderWeaponOffset + 44;
-	const uint32_t unknownUCD = 99;
-	const int32_t unknownSkillType = 1234;
-	const int32_t unknownResistType = -99;
-	std::memcpy(data.data() + UCDOffset, &unknownUCD, 4);
-	std::memcpy(data.data() + skillType1Offset, &unknownSkillType, 4);
-	std::memcpy(data.data() + resistType1Offset, &unknownResistType, 4);
+	constexpr std::array unknownUCDBytes = {
+	    std::byte{0x63}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+	constexpr std::array unknownSkillTypeBytes = {
+	    std::byte{0xD2}, std::byte{0x04}, std::byte{0x00}, std::byte{0x00}};
+	constexpr std::array unknownResistTypeBytes = {
+	    std::byte{0x9D}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
+	std::copy(unknownUCDBytes.begin(), unknownUCDBytes.end(),
+		  data.begin() + UCDOffset);
+	std::copy(unknownSkillTypeBytes.begin(), unknownSkillTypeBytes.end(),
+		  data.begin() + skillType1Offset);
+	std::copy(unknownResistTypeBytes.begin(), unknownResistTypeBytes.end(),
+		  data.begin() + resistType1Offset);
 
 	kuf::SaveFormat save;
 	REQUIRE(save.load(data));
 	save.units()[0].skillLevel = 77;
 
 	auto saved = save.save();
+	REQUIRE(std::equal(unknownUCDBytes.begin(), unknownUCDBytes.end(),
+			   saved.begin() + UCDOffset));
+	REQUIRE(std::equal(unknownSkillTypeBytes.begin(),
+			   unknownSkillTypeBytes.end(),
+			   saved.begin() + skillType1Offset));
+	REQUIRE(std::equal(unknownResistTypeBytes.begin(),
+			   unknownResistTypeBytes.end(),
+			   saved.begin() + resistType1Offset));
+
 	kuf::SaveFormat reloaded;
 	REQUIRE(reloaded.load(saved));
 
