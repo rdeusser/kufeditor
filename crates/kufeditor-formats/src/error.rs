@@ -3,7 +3,7 @@ use thiserror::Error;
 use crate::{
     diagnostic::DiagnosticField,
     generated::{
-        sox_ability_by_job, sox_ability_info, sox_char_info, sox_custom_random_table,
+        kuf_save, sox_ability_by_job, sox_ability_info, sox_char_info, sox_custom_random_table,
         sox_item_att_info, sox_item_type_info, sox_job_info, sox_leader_generation,
         sox_library_info, sox_resist_info, sox_skill_info, sox_skill_point_table,
         sox_special_names, sox_troop_info, sox_unit_uv_info, sox_unit_uvid, sox_worldmap_char_info,
@@ -265,8 +265,92 @@ pub struct TroopCleaveError(#[from] sox_troop_info::Error);
 #[error(transparent)]
 pub struct SkillCleaveError(#[from] sox_skill_info::Error);
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SaveRegion {
+    Envelope,
+    Units,
+    Roster,
+    SecondArray,
+    Missions,
+}
+
+impl std::fmt::Display for SaveRegion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Envelope => "envelope",
+            Self::Units => "units",
+            Self::Roster => "roster",
+            Self::SecondArray => "second array",
+            Self::Missions => "missions",
+        })
+    }
+}
+
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct SaveCleaveError(#[from] kuf_save::Error);
+
+#[derive(Debug, Error)]
+pub enum SaveParseError {
+    #[error("save {region} is truncated at offset {offset}: need {needed} bytes, have {remaining}")]
+    Truncated {
+        region: SaveRegion,
+        offset: usize,
+        needed: usize,
+        remaining: usize,
+    },
+
+    #[error("invalid save magic at offset {offset}: found {actual:#010X}")]
+    InvalidMagic { offset: usize, actual: u32 },
+
+    #[error("save envelope does not contain a valid campaign location")]
+    InvalidEnvelope,
+
+    #[error("canonical save length does not fit the wire format")]
+    CanonicalLengthOverflow,
+
+    #[error("failed to reserve {requested} bytes for the canonical save")]
+    Allocation { requested: usize },
+
+    #[error(
+        "save {region} count {count} at offset {offset} cannot fit {remaining} remaining bytes with {item_size} bytes per item"
+    )]
+    ImpossibleCount {
+        region: SaveRegion,
+        offset: usize,
+        count: u32,
+        item_size: usize,
+        remaining: usize,
+    },
+
+    #[error("failed to parse the canonical save at offset {offset}: {source}")]
+    Cleave {
+        offset: usize,
+        #[source]
+        source: SaveCleaveError,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum SaveEncodeError {
+    #[error("failed to encode the canonical save: {0}")]
+    Cleave(#[source] SaveCleaveError),
+
+    #[error("encoded save length {length} does not fit the wire format")]
+    LengthOverflow { length: usize },
+
+    #[error("failed to reserve {requested} bytes for the encoded save")]
+    Allocation { requested: usize },
+}
+
 #[derive(Debug, Error)]
 pub enum FormatError {
+    #[error("failed to parse Crusaders save: {0}")]
+    SaveParse(#[source] SaveParseError),
+
+    #[error("failed to encode Crusaders save: {0}")]
+    SaveEncode(#[source] SaveEncodeError),
+
     #[error("SOX input is neither a TroopInfo, SkillInfo, nor text SOX document")]
     UnsupportedSOX,
 

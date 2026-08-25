@@ -13,12 +13,14 @@ mod troop;
 
 pub use diagnostic::{Diagnostic, DiagnosticField, DiagnosticLocation, Severity};
 pub use error::{
-    FormatError, GeneratedSOXError, SkillCleaveError, StringTableEncodeError,
-    StringTableParseError, TextSOXParseError, TroopCleaveError,
+    FormatError, GeneratedSOXError, SaveCleaveError, SaveEncodeError, SaveParseError, SaveRegion,
+    SkillCleaveError, StringTableEncodeError, StringTableParseError, TextSOXParseError,
+    TroopCleaveError,
 };
 pub use save::{
-    SaveChoice, SaveEditor, SaveEquipmentField, SaveEquipmentGroup, SaveEquipmentSlot,
-    SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup,
+    SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField, SaveEquipmentGroup,
+    SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField,
+    SaveUnitField, SaveUnitGroup,
 };
 pub use schema::{SOXSchema, SchemaDocument, SpecialNameRef};
 pub use skill::{SkillDocument, SkillField, SkillTextField};

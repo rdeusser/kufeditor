@@ -1,10 +1,215 @@
+mod support;
+
 use std::{collections::HashSet, fmt::Debug, hash::Hash};
 
 use kufeditor_formats::{
-    DiagnosticField, DiagnosticLocation, SaveEditor, SaveEquipmentField, SaveEquipmentGroup,
-    SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField,
-    SaveUnitField, SaveUnitGroup, TroopField,
+    DiagnosticField, DiagnosticLocation, FormatError, SaveDocument, SaveEditor, SaveEquipmentField,
+    SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveParseError,
+    SaveRegion, SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup, TroopField,
 };
+use support::{SaveFixtureOptions, fixture_with_count, save_fixture};
+
+#[test]
+fn all_observed_envelopes_parse_and_no_op_encode_exactly() {
+    for size_prefix in [false, true] {
+        for context in [false, true] {
+            let source = save_fixture(SaveFixtureOptions {
+                size_prefix,
+                context,
+                ..SaveFixtureOptions::default()
+            });
+
+            let document = SaveDocument::parse(source.clone()).unwrap();
+
+            assert_eq!(document.has_size_prefix(), size_prefix);
+            assert_eq!(document.has_context(), context);
+            assert_eq!(document.unit_count(), 0);
+            assert_eq!(document.roster_count(), 0);
+            assert_eq!(document.second_array_count(), 0);
+            assert_eq!(document.encode().unwrap(), source);
+        }
+    }
+}
+
+#[test]
+fn bad_save_magic_is_typed() {
+    let mut source = save_fixture(SaveFixtureOptions {
+        size_prefix: false,
+        context: false,
+        pad_to_32_kib: false,
+        tail: Vec::new(),
+    });
+    source
+        .get_mut(..4)
+        .unwrap()
+        .copy_from_slice(&0xdead_beefu32.to_le_bytes());
+
+    assert!(matches!(
+        SaveDocument::parse(source),
+        Err(FormatError::SaveParse(SaveParseError::InvalidMagic {
+            offset: 0,
+            actual: 0xdead_beef,
+        }))
+    ));
+}
+
+#[test]
+fn invalid_save_context_shape_is_typed() {
+    let mut source = save_fixture(SaveFixtureOptions {
+        pad_to_32_kib: false,
+        ..SaveFixtureOptions::default()
+    });
+    source
+        .get_mut(0x440..0x444)
+        .unwrap()
+        .copy_from_slice(&(-1_i32).to_le_bytes());
+
+    assert!(matches!(
+        SaveDocument::parse(source),
+        Err(FormatError::SaveParse(SaveParseError::InvalidEnvelope))
+    ));
+}
+
+#[test]
+fn truncated_mandatory_save_regions_are_typed() {
+    let mut units = save_fixture(SaveFixtureOptions {
+        size_prefix: false,
+        context: false,
+        pad_to_32_kib: false,
+        tail: Vec::new(),
+    });
+    units.truncate(350);
+
+    let mut roster = save_fixture(SaveFixtureOptions {
+        size_prefix: false,
+        context: false,
+        pad_to_32_kib: false,
+        tail: Vec::new(),
+    });
+    roster.truncate(358);
+
+    let mut second_array = save_fixture(SaveFixtureOptions {
+        size_prefix: false,
+        context: false,
+        pad_to_32_kib: false,
+        tail: Vec::new(),
+    });
+    second_array.truncate(362);
+
+    let mut missions = save_fixture(SaveFixtureOptions {
+        size_prefix: false,
+        context: false,
+        pad_to_32_kib: false,
+        tail: Vec::new(),
+    });
+    missions.truncate(372);
+
+    let cases = [
+        (vec![0x6e, 0, 0], SaveRegion::Envelope, 0, 4, 3),
+        (units, SaveRegion::Units, 1_432, 4, 2),
+        (roster, SaveRegion::Roster, 1_440, 4, 2),
+        (second_array, SaveRegion::SecondArray, 1_444, 4, 2),
+        (missions, SaveRegion::Missions, 1_448, 84, 8),
+    ];
+
+    for (source, region, offset, needed, remaining) in cases {
+        assert!(matches!(
+            SaveDocument::parse(source),
+            Err(FormatError::SaveParse(SaveParseError::Truncated {
+                region: actual_region,
+                offset: actual_offset,
+                needed: actual_needed,
+                remaining: actual_remaining,
+            })) if actual_region == region
+                && actual_offset == offset
+                && actual_needed == needed
+                && actual_remaining == remaining
+        ));
+    }
+}
+
+#[test]
+fn truncated_context_probe_is_typed() {
+    let source = [0x6e_u32.to_le_bytes(), (-1_i32).to_le_bytes()].concat();
+
+    assert!(matches!(
+        SaveDocument::parse(source),
+        Err(FormatError::SaveParse(SaveParseError::Truncated {
+            region: SaveRegion::Envelope,
+            offset: 1_084,
+            needed: 4,
+            remaining: 0,
+        }))
+    ));
+}
+
+#[test]
+fn impossible_dynamic_counts_fail_before_generated_parsing() {
+    for (region, offset, item_size) in [
+        (SaveRegion::Units, 1_432, 483),
+        (SaveRegion::Roster, 1_440, 8),
+        (SaveRegion::SecondArray, 1_444, 4),
+    ] {
+        let source = fixture_with_count(region, u32::MAX);
+
+        assert!(matches!(
+            SaveDocument::parse(source),
+            Err(FormatError::SaveParse(
+                SaveParseError::ImpossibleCount {
+                    region: actual_region,
+                    offset: actual_offset,
+                    count: u32::MAX,
+                    item_size: actual_item_size,
+                    ..
+                }
+            )) if actual_region == region
+                && actual_offset == offset
+                && actual_item_size == item_size
+        ));
+    }
+}
+
+#[test]
+fn nonzero_save_tail_survives_no_op_encode_exactly() {
+    let source = save_fixture(SaveFixtureOptions {
+        pad_to_32_kib: false,
+        tail: vec![0xde, 0xad, 0, 0xbe, 0xef],
+        ..SaveFixtureOptions::default()
+    });
+
+    let document = SaveDocument::parse(source.clone()).unwrap();
+
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn context_text_strips_color_codes_filters_and_deduplicates() {
+    let mut source = save_fixture(SaveFixtureOptions {
+        pad_to_32_kib: false,
+        ..SaveFixtureOptions::default()
+    });
+    let context = b"@(color=gold) Alpha \n(color=blue) Beta\r\nabc\nAlpha\n  Delta  \0xyz\0Gamma\0";
+    source
+        .get_mut(12..12 + context.len())
+        .unwrap()
+        .copy_from_slice(context);
+
+    let document = SaveDocument::parse(source).unwrap();
+
+    assert_eq!(document.context_text(), ["Alpha", "Beta", "Delta", "Gamma"]);
+}
+
+#[test]
+fn absent_context_has_no_text_projection() {
+    let source = save_fixture(SaveFixtureOptions {
+        context: false,
+        ..SaveFixtureOptions::default()
+    });
+
+    let document = SaveDocument::parse(source).unwrap();
+
+    assert!(document.context_text().is_empty());
+}
 
 #[test]
 fn save_fields_have_stable_uppercase_acronym_labels() {
