@@ -1,4 +1,4 @@
-use gpui::{Div, div, prelude::*, px};
+use gpui::{AnyElement, Div, div, prelude::*, px};
 use kufeditor_workspace::{DocumentId, Workspace};
 
 use crate::{components, theme::Theme};
@@ -8,6 +8,7 @@ pub fn render(
     workspace: &Workspace,
     active_document: Option<DocumentId>,
     selected_troop: usize,
+    tabs: Vec<AnyElement>,
 ) -> Div {
     let body = match active_document {
         Some(id) => {
@@ -47,10 +48,26 @@ pub fn render(
             ),
     };
 
-    div().size_full().p(px(28.0)).child(
-        components::surface(theme)
-            .size_full()
-            .p(px(28.0))
-            .child(body),
-    )
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .min_w_0()
+                .bg(theme.surface)
+                .border_b_1()
+                .border_color(theme.border)
+                .children(tabs),
+        )
+        .child(
+            div().flex_1().min_h_0().p(px(28.0)).child(
+                components::surface(theme)
+                    .size_full()
+                    .p(px(28.0))
+                    .child(body),
+            ),
+        )
 }

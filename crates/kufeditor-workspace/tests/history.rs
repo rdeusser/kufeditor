@@ -115,3 +115,16 @@ fn projections_describe_the_open_document() {
     assert_eq!(workspace.record_count(id).unwrap(), 1);
     assert!(workspace.diagnostics(id).unwrap().is_empty());
 }
+
+#[test]
+fn document_ids_follow_open_order() {
+    let document = TroopDocument::parse(troop_fixture()).unwrap();
+    let mut workspace = Workspace::new();
+    let first = workspace.open_loaded(
+        PathBuf::from("first.sox"),
+        Document::Troop(document.clone()),
+    );
+    let second = workspace.open_loaded(PathBuf::from("second.sox"), Document::Troop(document));
+
+    assert_eq!(workspace.document_ids(), &[first, second]);
+}

@@ -1,4 +1,4 @@
-use gpui::{Div, Stateful, div, prelude::*, px};
+use gpui::{Div, ElementId, Stateful, div, prelude::*, px};
 
 use crate::theme::Theme;
 
@@ -109,4 +109,38 @@ pub fn surface(theme: &Theme) -> Div {
         .border_1()
         .border_color(theme.border)
         .rounded_lg()
+}
+
+pub fn document_tab(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: String,
+    active: bool,
+    dirty: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(7.0))
+        .h(px(40.0))
+        .px(px(14.0))
+        .border_b_1()
+        .border_color(if active { theme.accent } else { theme.border })
+        .bg(if active {
+            theme.accent_dim
+        } else {
+            theme.surface
+        })
+        .text_color(if active { theme.text } else { theme.text_dim })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .child(label)
+        .children(dirty.then(|| {
+            div()
+                .text_color(theme.accent)
+                .text_size(px(16.0))
+                .child("•")
+        }))
 }

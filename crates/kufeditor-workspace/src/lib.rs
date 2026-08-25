@@ -82,6 +82,7 @@ struct Session {
 #[derive(Debug)]
 pub struct Workspace {
     sessions: HashMap<DocumentId, Session>,
+    open_order: Vec<DocumentId>,
     next_document: u64,
     next_state: u64,
     next_save: u64,
@@ -91,6 +92,7 @@ impl Workspace {
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
+            open_order: Vec::new(),
             next_document: 1,
             next_state: 1,
             next_save: 1,
@@ -112,7 +114,12 @@ impl Workspace {
                 save_in_flight: None,
             },
         );
+        self.open_order.push(id);
         id
+    }
+
+    pub fn document_ids(&self) -> &[DocumentId] {
+        &self.open_order
     }
 
     pub fn insert_loaded(&mut self, loaded: LoadedDocument) -> DocumentId {
@@ -242,6 +249,11 @@ impl Workspace {
     pub fn is_dirty(&self, id: DocumentId) -> Result<bool, WorkspaceError> {
         self.session(id)
             .map(|session| session.current_state != session.saved_state)
+    }
+
+    pub fn save_in_progress(&self, id: DocumentId) -> Result<bool, WorkspaceError> {
+        self.session(id)
+            .map(|session| session.save_in_flight.is_some())
     }
 
     pub fn state_id(&self, id: DocumentId) -> Result<StateId, WorkspaceError> {
