@@ -404,6 +404,10 @@ impl TextInput {
         self.focus_handle.clone()
     }
 
+    pub(crate) fn content(&self) -> &str {
+        self.buffer.content()
+    }
+
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         self.buffer.left();
         cx.notify();
@@ -861,7 +865,39 @@ impl Focusable for TextInput {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextBuffer, TextInputEvent};
+    use gpui::{AppContext, EntityInputHandler, TestAppContext, WindowOptions, rgb};
+
+    use super::{TextBuffer, TextInput, TextInputColors, TextInputEvent};
+
+    fn colors() -> TextInputColors {
+        let color = rgb(0).into();
+        TextInputColors {
+            background: color,
+            border: color,
+            text: color,
+            placeholder: color,
+            selection: color,
+            cursor: color,
+        }
+    }
+
+    #[gpui::test]
+    fn text_sox_content_projection_reflects_platform_replacements(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| TextInput::new("original", "placeholder", colors(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |input, window, cx| {
+                input.replace_text_in_range(None, "replacement", window, cx);
+
+                assert_eq!(input.content(), "replacement");
+            })
+            .unwrap();
+    }
 
     #[test]
     fn insert_replaces_the_selected_initial_value() {

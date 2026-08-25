@@ -184,30 +184,69 @@ impl SkillTypeChoice {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TextEditTarget {
-    document: DocumentId,
-    record: usize,
-    field: SkillTextField,
+enum TextEditTarget {
+    Skill {
+        document: DocumentId,
+        record: usize,
+        field: SkillTextField,
+    },
+    TextSox {
+        document: DocumentId,
+        record: usize,
+    },
 }
 
 impl TextEditTarget {
-    const fn new(document: DocumentId, record: usize, field: SkillTextField) -> Self {
-        Self {
+    const fn skill(document: DocumentId, record: usize, field: SkillTextField) -> Self {
+        Self::Skill {
             document,
             record,
             field,
         }
     }
 
+    const fn text_sox(document: DocumentId, record: usize) -> Self {
+        Self::TextSox { document, record }
+    }
+
+    const fn document(self) -> DocumentId {
+        match self {
+            Self::Skill { document, .. } | Self::TextSox { document, .. } => document,
+        }
+    }
+
+    const fn format_name(self) -> &'static str {
+        match self {
+            Self::Skill { .. } => "SkillInfo",
+            Self::TextSox { .. } => "text SOX",
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Skill { field, .. } => field.label(),
+            Self::TextSox { .. } => "Text",
+        }
+    }
+
     fn document_edit(self, value: String) -> (DocumentId, DocumentEdit) {
-        (
-            self.document,
-            DocumentEdit::SetSkillText {
-                record: self.record,
-                field: self.field,
-                value,
-            },
-        )
+        match self {
+            Self::Skill {
+                document,
+                record,
+                field,
+            } => (
+                document,
+                DocumentEdit::SetSkillText {
+                    record,
+                    field,
+                    value,
+                },
+            ),
+            Self::TextSox { document, record } => {
+                (document, DocumentEdit::SetTextSoxText { record, value })
+            }
+        }
     }
 }
 
@@ -220,12 +259,14 @@ struct ActiveTextEdit {
 enum EditorRoute {
     Troop,
     Skill,
+    TextSox,
 }
 
 const fn editor_route(kind: DocumentKind) -> EditorRoute {
     match kind {
         DocumentKind::TroopInfo => EditorRoute::Troop,
         DocumentKind::SkillInfo => EditorRoute::Skill,
+        DocumentKind::TextSox => EditorRoute::TextSox,
     }
 }
 
@@ -335,27 +376,22 @@ impl AppFrame {
         }
     }
 
-    fn start_skill_text_edit(
+    fn start_text_edit(
         &mut self,
-        document: DocumentId,
-        record: usize,
-        field: SkillTextField,
+        target: TextEditTarget,
         value: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.cancel_property_edit();
         let colors = self.text_input_colors();
-        let input = cx.new(|cx| TextInput::new(value, field.label(), colors, cx));
+        let input = cx.new(|cx| TextInput::new(value, target.label(), colors, cx));
         cx.subscribe(&input, |frame, input, event, cx| {
             frame.handle_text_input_event(&input, event, cx);
         })
         .detach();
         window.focus(&input.read(cx).focus_handle());
-        self.text_edit = Some(ActiveTextEdit {
-            target: TextEditTarget::new(document, record, field),
-            input,
-        });
+        self.text_edit = Some(ActiveTextEdit { target, input });
         cx.notify();
     }
 
@@ -373,7 +409,7 @@ impl AppFrame {
         else {
             return;
         };
-        if self.active_document != Some(target.document) {
+        if self.active_document != Some(target.document()) {
             self.cancel_property_edit();
             self.notice = Some(Notice::info("The active document changed; edit canceled"));
             cx.notify();
@@ -390,8 +426,24 @@ impl AppFrame {
                         self.notice = None;
                     }
                     Err(error) => {
-                        self.notice =
-                            Some(Notice::editor_error("Could not update SkillInfo", &error));
+                        let summary = match target {
+                            TextEditTarget::TextSox { document, record } => self
+                                .workspace
+                                .text_sox_max_length(document, record)
+                                .map_or_else(
+                                    |_| format!("Could not update {}", target.format_name()),
+                                    |maximum| {
+                                        format!(
+                                            "Could not update {} · enter 1..={maximum} bytes",
+                                            target.format_name()
+                                        )
+                                    },
+                                ),
+                            TextEditTarget::Skill { .. } => {
+                                format!("Could not update {}", target.format_name())
+                            }
+                        };
+                        self.notice = Some(Notice::editor_error(summary, &error));
                     }
                 }
             }
@@ -414,6 +466,8 @@ impl AppFrame {
     }
 
     pub fn window_should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.cancel_property_edit();
+        cx.notify();
         self.window_handle = Some(window.window_handle());
         if std::mem::take(&mut self.close_armed) {
             return true;
@@ -990,6 +1044,7 @@ impl AppFrame {
         match self.workspace.document_kind(document_id).map(editor_route) {
             Ok(EditorRoute::Troop) => self.troop_editor(document_id, cx),
             Ok(EditorRoute::Skill) => self.skill_editor(document_id, cx),
+            Ok(EditorRoute::TextSox) => self.text_sox_editor(document_id, cx),
             Err(error) => div()
                 .size_full()
                 .p(px(28.0))
@@ -1118,7 +1173,7 @@ impl AppFrame {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target = TextEditTarget::new(document_id, record, field);
+        let target = TextEditTarget::skill(document_id, record, field);
         if let Some(edit) = self.text_edit.as_ref().filter(|edit| edit.target == target) {
             return views::skill::text_editor_row(
                 &self.theme,
@@ -1136,7 +1191,7 @@ impl AppFrame {
                 value.clone(),
             )
             .on_click(cx.listener(move |frame, _, window, cx| {
-                frame.start_skill_text_edit(document_id, record, field, value.clone(), window, cx);
+                frame.start_text_edit(target, value.clone(), window, cx);
             }))
             .into_any_element(),
             SkillTextProjection::Invalid { value, diagnostic } => {
@@ -1227,6 +1282,128 @@ impl AppFrame {
             .map(|diagnostic| {
                 let item = views::skill::diagnostic_item(diagnostic);
                 views::skill::diagnostic_row(&self.theme, &item).into_any_element()
+            })
+            .collect()
+    }
+
+    fn text_sox_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+        let record_count = match self.workspace.record_count(document_id) {
+            Ok(count) => count,
+            Err(error) => {
+                return div()
+                    .size_full()
+                    .p(px(28.0))
+                    .text_color(self.theme.text_dim)
+                    .child(format!("Could not read text SOX: {error}"));
+            }
+        };
+        let selected = self
+            .selections
+            .selected(document_id)
+            .min(record_count.saturating_sub(1));
+        let records = self.text_sox_records(document_id, record_count, selected, cx);
+        let details = if record_count == 0 {
+            vec![views::text::empty_properties(&self.theme).into_any_element()]
+        } else {
+            vec![
+                self.text_sox_property_group(document_id, selected, cx)
+                    .into_any_element(),
+            ]
+        };
+        let diagnostics = self.text_sox_diagnostics(document_id);
+        views::text::render(&self.theme, records, details, diagnostics)
+    }
+
+    fn text_sox_records(
+        &self,
+        document_id: DocumentId,
+        record_count: usize,
+        selected: usize,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        (0..record_count)
+            .map(|record| {
+                let wire_index = self.workspace.text_sox_index(document_id, record);
+                let maximum = self.workspace.text_sox_max_length(document_id, record);
+                let text = self.workspace.text_sox_text(document_id, record);
+                let (wire_index, maximum, used, text_preview) = match (wire_index, maximum, text) {
+                    (Ok(wire_index), Ok(maximum), Ok(text)) => {
+                        (wire_index, maximum, text.len(), views::text::preview(text))
+                    }
+                    _ => (0, 0, 0, "Unavailable".to_owned()),
+                };
+                views::text::record_row(
+                    &self.theme,
+                    ("text-record", record),
+                    views::text::entry_metadata(record, wire_index, used, maximum),
+                    text_preview,
+                    record == selected,
+                )
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.select_record(document_id, record);
+                    window.focus(&frame.focus);
+                    cx.notify();
+                }))
+                .into_any_element()
+            })
+            .collect()
+    }
+
+    fn text_sox_property_group(
+        &self,
+        document_id: DocumentId,
+        record: usize,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let wire_index = self.workspace.text_sox_index(document_id, record);
+        let maximum = self.workspace.text_sox_max_length(document_id, record);
+        let text = self.workspace.text_sox_text(document_id, record);
+        let (Ok(wire_index), Ok(maximum), Ok(text)) = (wire_index, maximum, text) else {
+            return div()
+                .text_color(self.theme.text_dim)
+                .child("Could not read the selected text entry.");
+        };
+        let target = TextEditTarget::text_sox(document_id, record);
+        let text_field =
+            if let Some(edit) = self.text_edit.as_ref().filter(|edit| edit.target == target) {
+                let current = edit.input.read(cx).content().len();
+                views::text::text_editor_row(
+                    &self.theme,
+                    edit.input.clone().into_any_element(),
+                    current,
+                    maximum,
+                )
+                .into_any_element()
+            } else {
+                let value = text.to_owned();
+                views::text::text_field_row(
+                    &self.theme,
+                    ("text-field", record),
+                    views::text::preview(&value),
+                )
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.start_text_edit(target, value.clone(), window, cx);
+                }))
+                .into_any_element()
+            };
+        views::text::property_group(&self.theme, wire_index, maximum, text_field)
+    }
+
+    fn text_sox_diagnostics(&self, document_id: DocumentId) -> Vec<AnyElement> {
+        let diagnostics = self.workspace.diagnostics(document_id).unwrap_or_default();
+        if diagnostics.is_empty() {
+            return vec![views::text::no_diagnostics(&self.theme).into_any_element()];
+        }
+
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                let wire_index = self
+                    .workspace
+                    .text_sox_index(document_id, diagnostic.record)
+                    .unwrap_or_default();
+                let item = views::text::diagnostic_item(diagnostic, wire_index);
+                views::text::diagnostic_row(&self.theme, &item).into_any_element()
             })
             .collect()
     }
@@ -1573,7 +1750,7 @@ mod tests {
     use gpui::{AppContext, TestAppContext, WindowOptions};
     use kufeditor_workspace::{
         Document, DocumentEdit, DocumentId, DocumentKind, SkillDocument, SkillTextField,
-        TroopDocument, TroopField, Workspace,
+        TextSoxDocument, TroopDocument, TroopField, Workspace,
     };
 
     use super::{
@@ -1582,7 +1759,7 @@ mod tests {
     };
     use crate::{
         state::{Area, Notice, NoticeLevel, RecordSelections},
-        text_input::TextInputEvent,
+        text_input::{TextInputEvent, bind as bind_text_input},
     };
 
     #[test]
@@ -1647,10 +1824,30 @@ mod tests {
         )
     }
 
+    fn text_sox_document(records: &[(u32, &str)]) -> TextSoxDocument {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&100_u32.to_le_bytes());
+        bytes.extend_from_slice(&u32::try_from(records.len()).unwrap().to_le_bytes());
+        for (wire_index, text) in records {
+            bytes.extend_from_slice(&wire_index.to_le_bytes());
+            bytes.extend_from_slice(&u16::try_from(text.len()).unwrap().to_le_bytes());
+            bytes.extend_from_slice(text.as_bytes());
+        }
+        TextSoxDocument::parse(bytes).unwrap()
+    }
+
+    fn open_text_sox(frame: &mut AppFrame, path: &str, records: &[(u32, &str)]) -> DocumentId {
+        frame.workspace.open_loaded(
+            PathBuf::from(path),
+            Document::TextSox(text_sox_document(records)),
+        )
+    }
+
     #[test]
-    fn skill_and_troop_documents_choose_their_own_editor_routes() {
+    fn text_sox_routing_keeps_all_document_routes_distinct() {
         assert_eq!(editor_route(DocumentKind::SkillInfo), EditorRoute::Skill);
         assert_eq!(editor_route(DocumentKind::TroopInfo), EditorRoute::Troop);
+        assert_eq!(editor_route(DocumentKind::TextSox), EditorRoute::TextSox);
     }
 
     #[test]
@@ -1706,7 +1903,7 @@ mod tests {
     }
 
     #[test]
-    fn skill_text_targets_build_field_specific_edits() {
+    fn text_sox_generalization_keeps_skill_text_targets_field_specific() {
         let mut workspace = Workspace::new();
         let document = workspace.open_loaded(
             PathBuf::from("SkillInfo.sox"),
@@ -1717,7 +1914,7 @@ mod tests {
             (SkillTextField::LocalizationKey, "@(S_Changed)"),
             (SkillTextField::IconPath, "changed.tga"),
         ] {
-            let target = TextEditTarget::new(document, 0, field);
+            let target = TextEditTarget::skill(document, 0, field);
             assert_eq!(
                 target.document_edit(value.to_owned()),
                 (
@@ -1730,6 +1927,49 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn text_sox_targets_build_record_specific_edits() {
+        let mut workspace = Workspace::new();
+        let document = workspace.open_loaded(
+            PathBuf::from("StringTable.sox"),
+            Document::TextSox(text_sox_document(&[(9001, "Alpha")])),
+        );
+        let target = TextEditTarget::text_sox(document, 3);
+
+        assert_eq!(
+            target.document_edit("Omega".to_owned()),
+            (
+                document,
+                DocumentEdit::SetTextSoxText {
+                    record: 3,
+                    value: "Omega".to_owned(),
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn text_sox_and_skill_targets_report_document_format_and_label() {
+        let mut workspace = Workspace::new();
+        let skill_document = workspace.open_loaded(
+            PathBuf::from("SkillInfo.sox"),
+            Document::Skill(skill_document(1, b"@(S_Melee)", b"IL_SKL_Melee.tga")),
+        );
+        let text_document = workspace.open_loaded(
+            PathBuf::from("StringTable.sox"),
+            Document::TextSox(text_sox_document(&[(9001, "Alpha")])),
+        );
+        let skill = TextEditTarget::skill(skill_document, 1, SkillTextField::LocalizationKey);
+        let text = TextEditTarget::text_sox(text_document, 2);
+
+        assert_eq!(skill.document(), skill_document);
+        assert_eq!(skill.format_name(), "SkillInfo");
+        assert_eq!(skill.label(), "Localization Key");
+        assert_eq!(text.document(), text_document);
+        assert_eq!(text.format_name(), "text SOX");
+        assert_eq!(text.label(), "Text");
     }
 
     #[test]
@@ -1768,6 +2008,248 @@ mod tests {
 
         assert_eq!(selections.selected(first), 9);
         assert_eq!(selections.selected(second), 5);
+    }
+
+    #[test]
+    fn text_sox_record_selection_is_kept_per_document() {
+        let mut workspace = Workspace::new();
+        let first = workspace.open_loaded(
+            PathBuf::from("first.sox"),
+            Document::TextSox(text_sox_document(&[(1, "one"), (2, "two"), (3, "three")])),
+        );
+        let second = workspace.open_loaded(
+            PathBuf::from("second.sox"),
+            Document::TextSox(text_sox_document(&[(4, "four"), (5, "five")])),
+        );
+        let mut selections = RecordSelections::default();
+
+        selections.select(first, 2);
+        selections.select(second, 1);
+
+        assert_eq!(selections.selected(first), 2);
+        assert_eq!(selections.selected(second), 1);
+    }
+
+    #[gpui::test]
+    fn text_sox_native_input_commit_creates_one_edit_and_clears_the_draft(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            bind_text_input(cx);
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let document = window
+            .update(cx, |frame, window, cx| {
+                let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
+                frame.activate_document(document);
+                frame.shell.select_area(Area::Files);
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+                let input = frame.text_edit.as_ref().unwrap().input.clone();
+                assert!(input.read(cx).focus_handle().is_focused(window));
+                document
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "B r a v o enter");
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Bravo");
+                assert!(frame.workspace.can_undo(document).unwrap());
+                assert!(!frame.workspace.can_redo(document).unwrap());
+                assert!(frame.text_edit.is_none());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn empty_text_sox_commit_keeps_the_same_draft_and_history(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            bind_text_input(cx);
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let (document, state, input) = window
+            .update(cx, |frame, window, cx| {
+                let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
+                frame.activate_document(document);
+                frame.shell.select_area(Area::Files);
+                let state = frame.workspace.state_id(document).unwrap();
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+                let input = frame.text_edit.as_ref().unwrap().input.clone();
+                (document, state, input)
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "backspace enter");
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
+                assert_eq!(frame.workspace.state_id(document).unwrap(), state);
+                assert!(!frame.workspace.can_undo(document).unwrap());
+                assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
+                let notice = frame.notice.as_ref().unwrap();
+                assert!(notice.is_editor_feedback());
+                assert!(notice.summary().contains("text SOX"));
+                assert!(notice.summary().contains("1..=5 bytes"));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn oversized_text_sox_commit_keeps_the_same_draft_and_history(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            bind_text_input(cx);
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let (document, state, input) = window
+            .update(cx, |frame, window, cx| {
+                let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
+                frame.activate_document(document);
+                frame.shell.select_area(Area::Files);
+                let state = frame.workspace.state_id(document).unwrap();
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+                let input = frame.text_edit.as_ref().unwrap().input.clone();
+                (document, state, input)
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "L o n g e r enter");
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
+                assert_eq!(frame.workspace.state_id(document).unwrap(), state);
+                assert!(!frame.workspace.can_undo(document).unwrap());
+                assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
+                let notice = frame.notice.as_ref().unwrap();
+                assert!(notice.is_editor_feedback());
+                assert!(notice.summary().contains("text SOX"));
+                assert!(notice.summary().contains("1..=5 bytes"));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn non_ascii_text_sox_commit_is_state_neutral_and_keeps_the_draft(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let (document, state, input) = window
+            .update(cx, |frame, window, cx| {
+                let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
+                frame.activate_document(document);
+                let state = frame.workspace.state_id(document).unwrap();
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+                let input = frame.text_edit.as_ref().unwrap().input.clone();
+                (document, state, input)
+            })
+            .unwrap();
+
+        input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("Café".to_owned()));
+        });
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
+                assert_eq!(frame.workspace.state_id(document).unwrap(), state);
+                assert!(!frame.workspace.can_undo(document).unwrap());
+                assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
+                let notice = frame.notice.as_ref().unwrap();
+                assert!(notice.is_editor_feedback());
+                assert!(notice.summary().contains("text SOX"));
+                assert!(notice.summary().contains("1..=5 bytes"));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn stale_text_sox_event_cannot_mutate_a_hidden_document(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let (first, second, stale_input) = window
+            .update(cx, |frame, window, cx| {
+                let first = open_text_sox(frame, "first.sox", &[(1, "Alpha")]);
+                let second = open_text_sox(frame, "second.sox", &[(2, "Bravo")]);
+                frame.activate_document(first);
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(first, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+                let input = frame.text_edit.as_ref().unwrap().input.clone();
+
+                frame.activate_document(second);
+                assert!(frame.text_edit.is_none());
+                (first, second, input)
+            })
+            .unwrap();
+
+        stale_input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("Wrong".to_owned()));
+        });
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.active_document, Some(second));
+                assert_eq!(frame.workspace.text_sox_text(first, 0).unwrap(), "Alpha");
+                assert!(!frame.workspace.is_dirty(first).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn selecting_another_text_sox_record_cancels_the_active_draft(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                let document =
+                    open_text_sox(frame, "StringTable.sox", &[(1, "Alpha"), (2, "Bravo")]);
+                frame.activate_document(document);
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+
+                frame.select_record(document, 1);
+
+                assert_eq!(frame.selections.selected(document), 1);
+                assert!(frame.text_edit.is_none());
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
+                assert!(!frame.workspace.is_dirty(document).unwrap());
+            })
+            .unwrap();
     }
 
     #[gpui::test]
@@ -1895,10 +2377,8 @@ mod tests {
                 let first = open_skill(frame, "first.sox", 1);
                 let second = open_skill(frame, "second.sox", 1);
                 frame.activate_document(first);
-                frame.start_skill_text_edit(
-                    first,
-                    0,
-                    SkillTextField::LocalizationKey,
+                frame.start_text_edit(
+                    TextEditTarget::skill(first, 0, SkillTextField::LocalizationKey),
                     "@(S_Melee)".to_owned(),
                     window,
                     cx,
@@ -1947,10 +2427,8 @@ mod tests {
                 frame.begin_number_edit(ActiveNumberEdit::skill_id(document, 0, 0));
                 assert!(frame.number_edit.is_some());
 
-                frame.start_skill_text_edit(
-                    document,
-                    0,
-                    SkillTextField::LocalizationKey,
+                frame.start_text_edit(
+                    TextEditTarget::skill(document, 0, SkillTextField::LocalizationKey),
                     "@(S_Melee)".to_owned(),
                     window,
                     cx,
@@ -1958,10 +2436,8 @@ mod tests {
                 let stale_input = frame.text_edit.as_ref().unwrap().input.clone();
                 assert!(frame.number_edit.is_none());
 
-                frame.start_skill_text_edit(
-                    document,
-                    0,
-                    SkillTextField::IconPath,
+                frame.start_text_edit(
+                    TextEditTarget::skill(document, 0, SkillTextField::IconPath),
                     "IL_SKL_Melee.tga".to_owned(),
                     window,
                     cx,
@@ -2018,10 +2494,8 @@ mod tests {
             .update(cx, |frame, window, cx| {
                 let document = open_skill(frame, "SkillInfo.sox", 2);
                 frame.activate_document(document);
-                frame.start_skill_text_edit(
-                    document,
-                    0,
-                    SkillTextField::LocalizationKey,
+                frame.start_text_edit(
+                    TextEditTarget::skill(document, 0, SkillTextField::LocalizationKey),
                     "@(S_Melee)".to_owned(),
                     window,
                     cx,
@@ -2030,10 +2504,8 @@ mod tests {
                 assert_eq!(frame.selections.selected(document), 1);
                 assert!(frame.text_edit.is_none());
 
-                frame.start_skill_text_edit(
-                    document,
-                    1,
-                    SkillTextField::LocalizationKey,
+                frame.start_text_edit(
+                    TextEditTarget::skill(document, 1, SkillTextField::LocalizationKey),
                     "@(S_Melee)".to_owned(),
                     window,
                     cx,
