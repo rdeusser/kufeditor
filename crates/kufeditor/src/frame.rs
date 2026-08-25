@@ -2248,10 +2248,12 @@ mod tests {
             cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
                 .unwrap()
         });
-        let (first, second, stale_input) = window
+        let (first, first_state, second, second_state, stale_input) = window
             .update(cx, |frame, window, cx| {
                 let first = open_text_sox(frame, "first.sox", &[(1, "Alpha")]);
                 let second = open_text_sox(frame, "second.sox", &[(2, "Bravo")]);
+                let first_state = frame.workspace.state_id(first).unwrap();
+                let second_state = frame.workspace.state_id(second).unwrap();
                 frame.activate_document(first);
                 frame.start_text_edit(
                     TextEditTarget::text_sox(first, 0),
@@ -2263,7 +2265,7 @@ mod tests {
 
                 frame.active_document = Some(second);
                 assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
-                (first, second, input)
+                (first, first_state, second, second_state, input)
             })
             .unwrap();
 
@@ -2278,6 +2280,12 @@ mod tests {
                 assert!(frame.text_edit.is_none());
                 assert_eq!(frame.workspace.text_sox_text(first, 0).unwrap(), "Alpha");
                 assert_eq!(frame.workspace.text_sox_text(second, 0).unwrap(), "Bravo");
+                assert_eq!(frame.workspace.state_id(first).unwrap(), first_state);
+                assert_eq!(frame.workspace.state_id(second).unwrap(), second_state);
+                assert!(!frame.workspace.can_undo(first).unwrap());
+                assert!(!frame.workspace.can_redo(first).unwrap());
+                assert!(!frame.workspace.can_undo(second).unwrap());
+                assert!(!frame.workspace.can_redo(second).unwrap());
                 assert!(!frame.workspace.is_dirty(first).unwrap());
                 assert!(!frame.workspace.is_dirty(second).unwrap());
                 assert_eq!(
