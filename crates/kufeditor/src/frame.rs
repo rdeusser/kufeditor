@@ -19,6 +19,70 @@ use crate::{
     views,
 };
 
+struct ActiveNumberEdit {
+    target: NumberEditTarget,
+    editor: NumberEdit,
+}
+
+impl ActiveNumberEdit {
+    fn troop_field(document: DocumentId, record: usize, field: TroopField, value: i32) -> Self {
+        Self {
+            target: NumberEditTarget::TroopField {
+                document,
+                record,
+                field,
+            },
+            editor: NumberEdit::new(i64::from(value), i64::from(i32::MIN), i64::from(i32::MAX)),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NumberEditTarget {
+    TroopField {
+        document: DocumentId,
+        record: usize,
+        field: TroopField,
+    },
+}
+
+impl NumberEditTarget {
+    fn is_troop_field(&self, document: DocumentId, record: usize, field: TroopField) -> bool {
+        matches!(
+            self,
+            Self::TroopField {
+                document: target_document,
+                record: target_record,
+                field: target_field,
+            } if *target_document == document && *target_record == record && *target_field == field
+        )
+    }
+
+    fn document_edit(
+        &self,
+        value: i64,
+    ) -> Result<(DocumentId, DocumentEdit), std::num::TryFromIntError> {
+        match *self {
+            Self::TroopField {
+                document,
+                record,
+                field,
+            } => Ok((
+                document,
+                DocumentEdit::SetTroopField {
+                    record,
+                    field,
+                    value: i32::try_from(value)?,
+                },
+            )),
+        }
+    }
+}
+
+fn invalid_number_notice() -> Notice {
+    Notice::info("Enter a whole number within the allowed range")
+}
+
 pub struct AppFrame {
     workspace: Workspace,
     pub(crate) shell: ShellState,
@@ -26,7 +90,7 @@ pub struct AppFrame {
     focus: FocusHandle,
     active_document: Option<DocumentId>,
     selected_troop: usize,
-    number_edit: Option<NumberEdit>,
+    number_edit: Option<ActiveNumberEdit>,
     notice: Option<Notice>,
     window_handle: Option<AnyWindowHandle>,
     close_armed: bool,
@@ -165,22 +229,24 @@ impl AppFrame {
         let outcome = self
             .number_edit
             .as_mut()
-            .map_or(NumberOutcome::Cancel, |edit| edit.apply(command));
+            .map_or(NumberOutcome::Cancel, |edit| edit.editor.apply(command));
         match outcome {
-            NumberOutcome::Continue | NumberOutcome::Invalid => {}
+            NumberOutcome::Continue => {}
+            NumberOutcome::Invalid => self.notice = Some(invalid_number_notice()),
             NumberOutcome::Cancel => self.number_edit = None,
             NumberOutcome::Commit(value) => {
                 let Some(edit) = self.number_edit.as_ref() else {
                     return;
                 };
-                let result = self.workspace.apply(
-                    edit.document(),
-                    DocumentEdit::SetTroopField {
-                        record: edit.record(),
-                        field: edit.field(),
-                        value,
-                    },
-                );
+                let (document, document_edit) = match edit.target.document_edit(value) {
+                    Ok(edit) => edit,
+                    Err(error) => {
+                        self.notice = Some(Notice::error("Could not update TroopInfo", &error));
+                        cx.notify();
+                        return;
+                    }
+                };
+                let result = self.workspace.apply(document, document_edit);
                 match result {
                     Ok(()) => {
                         self.number_edit = None;
@@ -700,16 +766,17 @@ impl AppFrame {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let value = self.workspace.troop_value(document_id, record, field);
-        let active_edit = self.number_edit.as_ref().filter(|edit| {
-            edit.document() == document_id && edit.record() == record && edit.field() == field
-        });
+        let active_edit = self
+            .number_edit
+            .as_ref()
+            .filter(|edit| edit.target.is_troop_field(document_id, record, field));
         let display = active_edit.map_or_else(
             || {
                 value
                     .as_ref()
                     .map_or_else(|_| "—".to_owned(), i32::to_string)
             },
-            |edit| edit.draft().to_owned(),
+            |edit| edit.editor.draft().to_owned(),
         );
         let row = views::troop::field_row(
             &self.theme,
@@ -717,13 +784,18 @@ impl AppFrame {
             field.label(),
             display,
             active_edit.is_some(),
-            active_edit.is_some_and(NumberEdit::invalid),
+            active_edit.is_some_and(|edit| edit.editor.invalid()),
         );
 
         match value {
             Ok(value) => row
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.number_edit = Some(NumberEdit::new(document_id, record, field, value));
+                    frame.number_edit = Some(ActiveNumberEdit::troop_field(
+                        document_id,
+                        record,
+                        field,
+                        value,
+                    ));
                     window.focus(&frame.focus);
                     cx.notify();
                 }))
@@ -940,8 +1012,19 @@ mod tests {
     use gpui::{AppContext, TestAppContext, WindowOptions};
     use kufeditor_workspace::{Document, TroopDocument};
 
-    use super::AppFrame;
-    use crate::state::Area;
+    use super::{AppFrame, invalid_number_notice};
+    use crate::state::{Area, NoticeLevel};
+
+    #[test]
+    fn invalid_number_notice_explains_the_allowed_range() {
+        let notice = invalid_number_notice();
+
+        assert_eq!(notice.level(), NoticeLevel::Info);
+        assert_eq!(
+            notice.summary(),
+            "Enter a whole number within the allowed range"
+        );
+    }
 
     #[gpui::test]
     fn app_frame_opens_at_home(cx: &mut TestAppContext) {

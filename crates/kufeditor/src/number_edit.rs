@@ -1,5 +1,3 @@
-use kufeditor_workspace::{DocumentId, TroopField};
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NumberCommand {
     Insert(char),
@@ -13,43 +11,31 @@ pub enum NumberCommand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NumberOutcome {
     Continue,
-    Commit(i32),
+    Commit(i64),
     Cancel,
     Invalid,
 }
 
 #[derive(Clone, Debug)]
 pub struct NumberEdit {
-    document: DocumentId,
-    record: usize,
-    field: TroopField,
     draft: String,
+    minimum: i64,
+    maximum: i64,
     replace_on_input: bool,
     invalid: bool,
 }
 
 impl NumberEdit {
-    pub fn new(document: DocumentId, record: usize, field: TroopField, value: i32) -> Self {
+    pub fn new(value: i64, minimum: i64, maximum: i64) -> Self {
+        assert!(minimum <= maximum, "number edit bounds must be ordered");
+
         Self {
-            document,
-            record,
-            field,
             draft: value.to_string(),
+            minimum,
+            maximum,
             replace_on_input: true,
             invalid: false,
         }
-    }
-
-    pub const fn document(&self) -> DocumentId {
-        self.document
-    }
-
-    pub const fn record(&self) -> usize {
-        self.record
-    }
-
-    pub const fn field(&self) -> TroopField {
-        self.field
     }
 
     pub fn draft(&self) -> &str {
@@ -76,7 +62,10 @@ impl NumberEdit {
             NumberCommand::Increment => self.step(1),
             NumberCommand::Decrement => self.step(-1),
             NumberCommand::Commit => {
-                if let Ok(value) = self.draft.parse::<i32>() {
+                if let Ok(value) = self.draft.parse::<i64>()
+                    && self.minimum <= value
+                    && value <= self.maximum
+                {
                     NumberOutcome::Commit(value)
                 } else {
                     self.invalid = true;
@@ -105,8 +94,8 @@ impl NumberEdit {
         NumberOutcome::Continue
     }
 
-    fn step(&mut self, amount: i32) -> NumberOutcome {
-        let Ok(value) = self.draft.parse::<i32>() else {
+    fn step(&mut self, amount: i64) -> NumberOutcome {
+        let Ok(value) = self.draft.parse::<i64>() else {
             self.invalid = true;
             return NumberOutcome::Invalid;
         };
@@ -114,7 +103,8 @@ impl NumberEdit {
             value.saturating_add(1)
         } else {
             value.saturating_sub(1)
-        };
+        }
+        .clamp(self.minimum, self.maximum);
         self.draft = value.to_string();
         self.replace_on_input = false;
         self.invalid = false;
@@ -124,39 +114,11 @@ impl NumberEdit {
 
 #[cfg(test)]
 mod tests {
-    #![allow(
-        clippy::unwrap_used,
-        reason = "synthetic fixtures use known fixed-size byte ranges"
-    )]
-
-    use std::path::PathBuf;
-
-    use kufeditor_workspace::{Document, DocumentId, TroopDocument, TroopField, Workspace};
-
     use super::{NumberCommand, NumberEdit, NumberOutcome};
-
-    fn document_id() -> DocumentId {
-        let mut bytes = vec![0_u8; 8 + 148 + 64];
-        bytes
-            .get_mut(0..4)
-            .unwrap()
-            .copy_from_slice(&100_u32.to_le_bytes());
-        bytes
-            .get_mut(4..8)
-            .unwrap()
-            .copy_from_slice(&1_u32.to_le_bytes());
-        bytes
-            .get_mut(108..112)
-            .unwrap()
-            .copy_from_slice(&800_i32.to_le_bytes());
-        let document = TroopDocument::parse(bytes).unwrap();
-        let mut workspace = Workspace::new();
-        workspace.open_loaded(PathBuf::from("TroopInfo.sox"), Document::Troop(document))
-    }
 
     #[test]
     fn first_typed_character_replaces_the_selected_value() {
-        let mut edit = NumberEdit::new(document_id(), 0, TroopField::MoveSpeed, 130);
+        let mut edit = NumberEdit::new(130, i64::from(i32::MIN), i64::from(i32::MAX));
         assert_eq!(
             edit.apply(NumberCommand::Insert('2')),
             NumberOutcome::Continue
@@ -170,30 +132,64 @@ mod tests {
     }
 
     #[test]
-    fn arrows_change_the_whole_value_without_overflow() {
-        let mut edit = NumberEdit::new(document_id(), 0, TroopField::MoveSpeed, i32::MAX);
+    fn troop_i32_extremes_remain_representable() {
+        let minimum = i64::from(i32::MIN);
+        let maximum = i64::from(i32::MAX);
+
+        let mut edit = NumberEdit::new(minimum, minimum, maximum);
+        assert_eq!(edit.draft(), i32::MIN.to_string());
+        assert_eq!(
+            edit.apply(NumberCommand::Commit),
+            NumberOutcome::Commit(minimum)
+        );
+
+        let mut edit = NumberEdit::new(maximum, minimum, maximum);
+        assert_eq!(edit.draft(), i32::MAX.to_string());
+        assert_eq!(
+            edit.apply(NumberCommand::Commit),
+            NumberOutcome::Commit(maximum)
+        );
+    }
+
+    #[test]
+    fn u32_value_above_i32_maximum_remains_representable() {
+        let value = i64::from(u32::MAX);
+        let mut edit = NumberEdit::new(value, 0, value);
+
+        assert_eq!(edit.draft(), u32::MAX.to_string());
+        assert_eq!(
+            edit.apply(NumberCommand::Commit),
+            NumberOutcome::Commit(value)
+        );
+    }
+
+    #[test]
+    fn arrows_saturate_at_the_configured_bounds() {
+        let mut edit = NumberEdit::new(65_535, 1, 65_535);
         assert_eq!(
             edit.apply(NumberCommand::Increment),
             NumberOutcome::Continue
         );
-        assert_eq!(edit.draft(), i32::MAX.to_string());
+        assert_eq!(edit.draft(), "65535");
+
+        let mut edit = NumberEdit::new(1, 1, 65_535);
         assert_eq!(
             edit.apply(NumberCommand::Decrement),
             NumberOutcome::Continue
         );
-        assert_eq!(edit.draft(), (i32::MAX - 1).to_string());
+        assert_eq!(edit.draft(), "1");
     }
 
     #[test]
     fn escape_cancels_without_an_edit() {
-        let mut edit = NumberEdit::new(document_id(), 0, TroopField::MoveSpeed, 130);
+        let mut edit = NumberEdit::new(130, i64::from(i32::MIN), i64::from(i32::MAX));
         edit.apply(NumberCommand::Insert('9'));
         assert_eq!(edit.apply(NumberCommand::Cancel), NumberOutcome::Cancel);
     }
 
     #[test]
     fn backspace_clears_a_still_selected_value() {
-        let mut edit = NumberEdit::new(document_id(), 0, TroopField::MoveSpeed, 130);
+        let mut edit = NumberEdit::new(130, i64::from(i32::MIN), i64::from(i32::MAX));
 
         assert_eq!(
             edit.apply(NumberCommand::Backspace),
@@ -205,12 +201,39 @@ mod tests {
     }
 
     #[test]
-    fn commit_rejects_an_out_of_range_integer() {
-        let mut edit = NumberEdit::new(document_id(), 0, TroopField::MoveSpeed, 0);
-        for character in "2147483648".chars() {
+    fn commit_rejects_a_valid_integer_outside_the_configured_bounds() {
+        let mut edit = NumberEdit::new(0, 0, 10);
+        for character in "11".chars() {
             edit.apply(NumberCommand::Insert(character));
         }
 
+        assert_eq!(edit.apply(NumberCommand::Commit), NumberOutcome::Invalid);
+        assert!(edit.invalid());
+    }
+
+    #[test]
+    fn skill_maximum_level_accepts_its_inclusive_bounds() {
+        let mut edit = NumberEdit::new(1, 1, 65_535);
+        assert_eq!(edit.apply(NumberCommand::Commit), NumberOutcome::Commit(1));
+
+        let mut edit = NumberEdit::new(65_535, 1, 65_535);
+        assert_eq!(
+            edit.apply(NumberCommand::Commit),
+            NumberOutcome::Commit(65_535)
+        );
+    }
+
+    #[test]
+    fn skill_maximum_level_rejects_values_outside_its_bounds() {
+        let mut edit = NumberEdit::new(1, 1, 65_535);
+        edit.apply(NumberCommand::Insert('0'));
+        assert_eq!(edit.apply(NumberCommand::Commit), NumberOutcome::Invalid);
+        assert!(edit.invalid());
+
+        let mut edit = NumberEdit::new(1, 1, 65_535);
+        for character in "65536".chars() {
+            edit.apply(NumberCommand::Insert(character));
+        }
         assert_eq!(edit.apply(NumberCommand::Commit), NumberOutcome::Invalid);
         assert!(edit.invalid());
     }
