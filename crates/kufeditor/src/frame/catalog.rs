@@ -101,6 +101,7 @@ mod tests {
         catalog_status::{CatalogKey, CatalogRequestError, CatalogStatus},
         notices::{Notice, NoticeLevel, NoticeSource},
         settings::SettingsStartup,
+        state::RequestId,
     };
 
     fn test_startup() -> SettingsStartup {
@@ -129,6 +130,15 @@ mod tests {
             Notice::info("Loading game catalogs"),
         );
         key
+    }
+
+    fn catalog_request(frame: &AppFrame) -> Option<RequestId> {
+        match frame.catalog.status() {
+            CatalogStatus::Loading { key }
+            | CatalogStatus::Ready { key, .. }
+            | CatalogStatus::Failed { key, .. } => Some(key.request()),
+            CatalogStatus::NotConfigured => None,
+        }
     }
 
     fn installation_errors() -> Vec<InstallationError> {
@@ -566,16 +576,29 @@ mod tests {
             .unwrap()
         });
 
-        window
+        let initial_request = window
             .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(root.clone()));
                 frame.game_paths.set_root(Game::Heroes, Some(root.clone()));
+                frame.start_catalog_load(cx);
+
+                assert!(frame.settings.latest_revision_for_test().is_none());
+                catalog_request(frame).unwrap()
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let (changed_request, changed_revision) = window
+            .update(cx, |frame, _, cx| {
                 frame.select_game(Game::Heroes, cx);
 
-                assert!(matches!(
-                    frame.catalog.status(),
-                    CatalogStatus::Loading { key }
-                        if key.game() == Game::Heroes && key.root() == root
-                ));
+                let request = catalog_request(frame).unwrap();
+                let revision = frame.settings.latest_revision_for_test().unwrap();
+                assert_eq!(request.get(), initial_request.get() + 1);
+                assert_eq!(revision.get(), 1);
+                (request, revision)
             })
             .unwrap();
         cx.run_until_parked();
@@ -593,20 +616,31 @@ mod tests {
                     CatalogStatus::Ready { key, .. }
                         if key.game() == Game::Heroes && key.root() == root
                 ));
-                fs::remove_file(&settings_path).unwrap();
 
                 frame.select_game(Game::Heroes, cx);
+
+                assert_eq!(catalog_request(frame), Some(changed_request));
+                assert_eq!(
+                    frame.settings.latest_revision_for_test(),
+                    Some(changed_revision)
+                );
             })
             .unwrap();
         cx.run_until_parked();
 
-        assert!(!settings_path.exists());
         window
             .update(cx, |frame, _, _| {
                 assert!(matches!(
                     frame.catalog.status(),
-                    CatalogStatus::Ready { .. }
+                    CatalogStatus::Ready { key, .. }
+                        if key.request() == changed_request
+                            && key.game() == Game::Heroes
+                            && key.root() == root
                 ));
+                assert_eq!(
+                    frame.settings.latest_revision_for_test(),
+                    Some(changed_revision)
+                );
             })
             .unwrap();
     }

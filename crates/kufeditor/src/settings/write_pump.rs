@@ -154,6 +154,11 @@ impl SettingsWritePump {
         &self.mode
     }
 
+    #[cfg(test)]
+    pub(crate) const fn latest_revision_for_test(&self) -> Option<SettingsRevision> {
+        self.latest_revision
+    }
+
     fn allocate_revision(&mut self) -> SettingsRevision {
         let revision = SettingsRevision(self.next_revision);
         self.next_revision += 1;

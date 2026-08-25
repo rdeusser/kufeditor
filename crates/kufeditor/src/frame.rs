@@ -1,9 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use gpui::prelude::*;
 use gpui::{
-    Action, AnyElement, AnyWindowHandle, App, AsyncApp, Context, Div, Entity, FocusHandle,
-    Focusable, KeyDownEvent, PathPromptOptions, PromptLevel, Stateful, WeakEntity, Window, div, px,
+    Action, AnyElement, AnyWindowHandle, App, AsyncApp, BackgroundExecutor, Context, Div, Entity,
+    FocusHandle, Focusable, KeyDownEvent, PathPromptOptions, PromptLevel, Stateful, Task,
+    WeakEntity, Window, div, px,
 };
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
@@ -322,6 +326,70 @@ enum SaveAsPromptResult {
     Failed(Notice),
 }
 
+enum OpenPromptResult {
+    Selected(Vec<PathBuf>),
+    Canceled,
+    Failed(Notice),
+}
+
+trait OpenPromptLauncher {
+    fn launch(
+        &self,
+        frame: &AppFrame,
+        request: RequestId,
+        options: PathPromptOptions,
+        cx: &mut Context<AppFrame>,
+    ) -> Task<OpenPromptResult>;
+}
+
+struct PlatformOpenPromptLauncher;
+
+impl OpenPromptLauncher for PlatformOpenPromptLauncher {
+    fn launch(
+        &self,
+        _: &AppFrame,
+        _: RequestId,
+        options: PathPromptOptions,
+        cx: &mut Context<AppFrame>,
+    ) -> Task<OpenPromptResult> {
+        let prompt = cx.prompt_for_paths(options);
+        cx.spawn(async move |_, _| match prompt.await {
+            Ok(Ok(Some(paths))) => OpenPromptResult::Selected(paths),
+            Ok(Ok(None)) => OpenPromptResult::Canceled,
+            Ok(Err(error)) => OpenPromptResult::Failed(Notice::error(
+                "Could not open the file picker",
+                error.as_ref(),
+            )),
+            Err(error) => {
+                OpenPromptResult::Failed(Notice::error("The file picker did not respond", &error))
+            }
+        })
+    }
+}
+
+trait OpenPathLoader {
+    fn start(
+        &self,
+        path: PathBuf,
+        executor: &BackgroundExecutor,
+    ) -> Task<(PathBuf, Result<LoadedDocument, WorkspaceError>)>;
+}
+
+struct FileSystemOpenPathLoader;
+
+impl OpenPathLoader for FileSystemOpenPathLoader {
+    fn start(
+        &self,
+        path: PathBuf,
+        executor: &BackgroundExecutor,
+    ) -> Task<(PathBuf, Result<LoadedDocument, WorkspaceError>)> {
+        executor.spawn(async move {
+            let loaded = load_path(path.clone());
+            (path, loaded)
+        })
+    }
+}
+
 pub struct AppFrame {
     workspace: Workspace,
     pub(crate) shell: ShellState,
@@ -342,6 +410,8 @@ pub struct AppFrame {
     close_pending: bool,
     close_documents: CloseDocuments,
     close_prompt_open: bool,
+    open_prompt_launcher: Rc<dyn OpenPromptLauncher>,
+    open_path_loader: Rc<dyn OpenPathLoader>,
 }
 
 impl AppFrame {
@@ -388,6 +458,8 @@ impl AppFrame {
             close_pending: false,
             close_documents: CloseDocuments::Save,
             close_prompt_open: false,
+            open_prompt_launcher: Rc::new(PlatformOpenPromptLauncher),
+            open_path_loader: Rc::new(FileSystemOpenPathLoader),
         }
     }
 
@@ -790,27 +862,26 @@ impl AppFrame {
     fn open_action(&mut self, _: &OpenFile, _: &mut Window, cx: &mut Context<Self>) {
         self.cancel_property_edit();
         let request = self.begin_open_prompt(cx);
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: true,
-            prompt: Some("Open".into()),
-        });
+        let prompt = Rc::clone(&self.open_prompt_launcher).launch(
+            self,
+            request,
+            PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: true,
+                prompt: Some("Open".into()),
+            },
+            cx,
+        );
 
         cx.spawn(async move |entity, cx| {
             let paths = match prompt.await {
-                Ok(Ok(Some(paths))) => paths,
-                Ok(Ok(None)) => {
+                OpenPromptResult::Selected(paths) => paths,
+                OpenPromptResult::Canceled => {
                     set_open_notice(&entity, cx, request, None);
                     return;
                 }
-                Ok(Err(error)) => {
-                    let notice = Notice::error("Could not open the file picker", error.as_ref());
-                    set_open_notice(&entity, cx, request, Some(notice));
-                    return;
-                }
-                Err(error) => {
-                    let notice = Notice::error("The file picker did not respond", &error);
+                OpenPromptResult::Failed(notice) => {
                     set_open_notice(&entity, cx, request, Some(notice));
                     return;
                 }
@@ -849,14 +920,10 @@ impl AppFrame {
         if !self.shell.accepts_open(request) {
             return;
         }
+        let loader = Rc::clone(&self.open_path_loader);
         let tasks = paths
             .into_iter()
-            .map(|path| {
-                cx.background_executor().spawn(async move {
-                    let loaded = load_path(path.clone());
-                    (path, loaded)
-                })
-            })
+            .map(|path| loader.start(path, cx.background_executor()))
             .collect::<Vec<_>>();
 
         cx.spawn(async move |entity, cx| {
@@ -2145,25 +2212,38 @@ mod tests {
         reason = "the GPUI test creates one controlled in-memory window"
     )]
 
-    use std::{cell::Cell, fs, path::PathBuf, rc::Rc};
+    use std::{
+        cell::Cell,
+        fs,
+        future::Future,
+        path::PathBuf,
+        pin::Pin,
+        rc::Rc,
+        sync::{Arc, Mutex},
+        task::{Context as TaskContext, Poll, Waker},
+    };
 
-    use gpui::{AppContext, EntityInputHandler, TestAppContext, WindowOptions};
+    use gpui::{
+        AppContext, BackgroundExecutor, Context, EntityInputHandler, PathPromptOptions, Task,
+        TestAppContext, WindowOptions,
+    };
     use kufeditor_game::Game;
     use kufeditor_workspace::{
-        Document, DocumentEdit, DocumentId, DocumentKind, SkillDocument, SkillTextField,
-        TextSoxDocument, TroopDocument, TroopField, Workspace, load_path,
+        Document, DocumentEdit, DocumentId, DocumentKind, LoadedDocument, SkillDocument,
+        SkillTextField, TextSoxDocument, TroopDocument, TroopField, Workspace, WorkspaceError,
+        load_path,
     };
 
     use super::{
-        ActiveNumberEdit, AppFrame, CloseDocuments, EditorRoute, SkillTextProjection,
-        SkillTypeChoice, TextEditTarget, editor_route, invalid_number_notice,
-        skill_text_projection,
+        ActiveNumberEdit, AppFrame, CloseDocuments, EditorRoute, OpenPathLoader,
+        OpenPromptLauncher, OpenPromptResult, SkillTextProjection, SkillTypeChoice, TextEditTarget,
+        editor_route, invalid_number_notice, skill_text_projection,
     };
     use crate::{
-        actions::SaveAs,
+        actions::{OpenFile, SaveAs},
         notices::{Notice, NoticeLevel, NoticeSource},
         settings::SettingsStartup,
-        state::{Area, RecordSelections},
+        state::{Area, RecordSelections, RequestId},
         text_input::{TextInputEvent, bind as bind_text_input},
     };
 
@@ -2208,6 +2288,97 @@ mod tests {
             .iter()
             .map(|document| frame.workspace.path(*document).unwrap().to_path_buf())
             .collect()
+    }
+
+    struct PromptLaunchProbe {
+        launched: Rc<Cell<bool>>,
+        request_ready: Rc<Cell<bool>>,
+        notice_ready: Rc<Cell<bool>>,
+    }
+
+    impl OpenPromptLauncher for PromptLaunchProbe {
+        fn launch(
+            &self,
+            frame: &AppFrame,
+            request: RequestId,
+            _: PathPromptOptions,
+            _: &mut Context<AppFrame>,
+        ) -> Task<OpenPromptResult> {
+            self.launched.set(true);
+            self.request_ready.set(frame.shell.accepts_open(request));
+            self.notice_ready.set(
+                frame.notices.current().map(Notice::summary)
+                    == Some("Choose one or more .sox files"),
+            );
+            Task::ready(OpenPromptResult::Canceled)
+        }
+    }
+
+    type LoadResult = Result<LoadedDocument, WorkspaceError>;
+
+    #[derive(Default)]
+    struct ManualLoadState {
+        result: Option<LoadResult>,
+        waker: Option<Waker>,
+    }
+
+    struct ManualLoadFuture {
+        state: Arc<Mutex<ManualLoadState>>,
+    }
+
+    impl Future for ManualLoadFuture {
+        type Output = LoadResult;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+            let mut state = self.state.lock().unwrap();
+            if let Some(result) = state.result.take() {
+                Poll::Ready(result)
+            } else {
+                state.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct ControlledOpenPathLoader {
+        started: Arc<Mutex<Vec<PathBuf>>>,
+        pending: Mutex<Vec<Arc<Mutex<ManualLoadState>>>>,
+    }
+
+    impl ControlledOpenPathLoader {
+        fn started_paths(&self) -> Vec<PathBuf> {
+            self.started.lock().unwrap().clone()
+        }
+
+        fn release(&self, index: usize, result: LoadResult) {
+            let state = Arc::clone(self.pending.lock().unwrap().get(index).unwrap());
+            let waker = {
+                let mut state = state.lock().unwrap();
+                state.result = Some(result);
+                state.waker.take()
+            };
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        }
+    }
+
+    impl OpenPathLoader for ControlledOpenPathLoader {
+        fn start(
+            &self,
+            path: PathBuf,
+            executor: &BackgroundExecutor,
+        ) -> Task<(PathBuf, LoadResult)> {
+            let state = Arc::new(Mutex::new(ManualLoadState::default()));
+            self.pending.lock().unwrap().push(Arc::clone(&state));
+            let started = Arc::clone(&self.started);
+            executor.spawn(async move {
+                started.lock().unwrap().push(path.clone());
+                let result = ManualLoadFuture { state }.await;
+                (path, result)
+            })
+        }
     }
 
     #[test]
@@ -2299,12 +2470,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn open_batch_keeps_input_order_for_documents_and_recent_files(cx: &mut TestAppContext) {
+    fn open_batch_starts_all_loads_then_applies_once_in_input_order(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let paths = ["A.sox", "B.sox", "C.sox"].map(|name| directory.path().join(name));
         for path in &paths {
             write_valid_sox(path);
         }
+        let [first_loaded, second_loaded, third_loaded] =
+            paths.clone().map(|path| load_path(path).unwrap());
+        let loader = Rc::new(ControlledOpenPathLoader::default());
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
@@ -2314,9 +2488,36 @@ mod tests {
 
         window
             .update(cx, |frame, _, cx| {
+                frame.open_path_loader = Rc::<ControlledOpenPathLoader>::clone(&loader);
                 begin_open_paths(frame, paths.to_vec(), cx);
             })
             .unwrap();
+        cx.run_until_parked();
+        let started = loader.started_paths();
+        assert_eq!(started.len(), paths.len());
+        for path in &paths {
+            assert!(started.contains(path));
+        }
+
+        window
+            .update(cx, |frame, _, _| {
+                assert!(frame.workspace.document_ids().is_empty());
+                assert!(frame.recent_files.paths().is_empty());
+            })
+            .unwrap();
+
+        loader.release(0, Ok(first_loaded));
+        loader.release(1, Ok(second_loaded));
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert!(frame.workspace.document_ids().is_empty());
+                assert!(frame.recent_files.paths().is_empty());
+            })
+            .unwrap();
+
+        loader.release(2, Ok(third_loaded));
         cx.run_until_parked();
 
         window
@@ -2331,7 +2532,10 @@ mod tests {
     }
 
     #[gpui::test]
-    fn picker_request_and_notice_exist_before_prompt_work(cx: &mut TestAppContext) {
+    fn open_action_creates_request_and_notice_before_launching_picker(cx: &mut TestAppContext) {
+        let launched = Rc::new(Cell::new(false));
+        let request_ready = Rc::new(Cell::new(false));
+        let notice_ready = Rc::new(Cell::new(false));
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
@@ -2340,16 +2544,19 @@ mod tests {
         });
 
         window
-            .update(cx, |frame, _, cx| {
-                let request = frame.begin_open_prompt(cx);
-
-                assert!(frame.shell.accepts_open(request));
-                assert_eq!(
-                    frame.notices.current().map(Notice::summary),
-                    Some("Choose one or more .sox files")
-                );
+            .update(cx, |frame, window, cx| {
+                frame.open_prompt_launcher = Rc::new(PromptLaunchProbe {
+                    launched: Rc::clone(&launched),
+                    request_ready: Rc::clone(&request_ready),
+                    notice_ready: Rc::clone(&notice_ready),
+                });
+                frame.open_action(&OpenFile, window, cx);
             })
             .unwrap();
+
+        assert!(launched.get());
+        assert!(request_ready.get());
+        assert!(notice_ready.get());
     }
 
     #[gpui::test]
@@ -2516,8 +2723,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let picker_path = directory.path().join("picker.sox");
         let recent_path = directory.path().join("recent.sox");
-        write_valid_sox(&picker_path);
         write_valid_sox(&recent_path);
+        let recent_document = load_path(recent_path.clone()).unwrap();
+        let loader = Rc::new(ControlledOpenPathLoader::default());
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
@@ -2527,6 +2735,7 @@ mod tests {
 
         window
             .update(cx, |frame, _, cx| {
+                frame.open_path_loader = Rc::<ControlledOpenPathLoader>::clone(&loader);
                 let picker_request = frame.shell.begin_open();
                 frame.notices.begin(
                     NoticeSource::Open,
@@ -2538,6 +2747,9 @@ mod tests {
                 frame.open_paths(picker_request, vec![picker_path], cx);
             })
             .unwrap();
+        cx.run_until_parked();
+        assert_eq!(loader.started_paths(), std::slice::from_ref(&recent_path));
+        loader.release(0, Ok(recent_document));
         cx.run_until_parked();
 
         window
@@ -2611,19 +2823,16 @@ mod tests {
             .unwrap();
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[gpui::test]
-    fn non_unicode_success_opens_without_changing_recent_files_or_settings(
-        cx: &mut TestAppContext,
-    ) {
+    fn filesystem_non_unicode_success_uses_shared_open_pipeline(cx: &mut TestAppContext) {
         use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
         let directory = tempfile::tempdir().unwrap();
-        let fixture = directory.path().join("fixture.sox");
-        write_valid_sox(&fixture);
-        let path = PathBuf::from(OsString::from_vec(vec![
+        let path = directory.path().join(OsString::from_vec(vec![
             b'n', b'o', b'n', b'-', 0xff, b'.', b's', b'o', b'x',
         ]));
+        write_valid_sox(&path);
         let settings_path = directory.path().join("settings.json");
         let startup = SettingsStartup::load(settings_path.clone());
         let window = cx.update(|cx| {
@@ -2635,16 +2844,58 @@ mod tests {
 
         window
             .update(cx, |frame, _, cx| {
-                let request = frame.shell.begin_open();
-                frame.notices.begin(
-                    NoticeSource::Open,
-                    request.get(),
-                    Notice::info("Opening file"),
-                );
-                let loaded = load_path(fixture).unwrap();
-                frame.finish_open_paths(request, vec![(path.clone(), Ok(loaded))], cx);
+                begin_open_paths(frame, vec![path.clone()], cx);
             })
             .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(open_paths_in_workspace(frame), [path]);
+                assert!(frame.recent_files.paths().is_empty());
+                assert!(!frame.settings.has_failed());
+                assert!(!settings_path.exists());
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.level(), NoticeLevel::Warning);
+                assert_eq!(
+                    notice.summary(),
+                    "Opened 1 file; 1 path omitted from recent files"
+                );
+            })
+            .unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[gpui::test]
+    fn injected_non_unicode_success_uses_shared_open_pipeline(cx: &mut TestAppContext) {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = directory.path().join("fixture.sox");
+        write_valid_sox(&fixture);
+        let loaded_document = load_path(fixture).unwrap();
+        let path = PathBuf::from(OsString::from_vec(vec![
+            b'n', b'o', b'n', b'-', 0xff, b'.', b's', b'o', b'x',
+        ]));
+        let settings_path = directory.path().join("settings.json");
+        let startup = SettingsStartup::load(settings_path.clone());
+        let loader = Rc::new(ControlledOpenPathLoader::default());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.open_path_loader = Rc::<ControlledOpenPathLoader>::clone(&loader);
+                begin_open_paths(frame, vec![path.clone()], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(loader.started_paths(), std::slice::from_ref(&path));
+        loader.release(0, Ok(loaded_document));
         cx.run_until_parked();
 
         window
