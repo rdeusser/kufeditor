@@ -1,0 +1,112 @@
+use gpui::{Div, Stateful, div, prelude::*, px};
+
+use crate::theme::Theme;
+
+pub fn rail_item(
+    theme: &Theme,
+    id: &'static str,
+    label: &'static str,
+    selected: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    let accent = theme.accent;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .h(px(42.0))
+        .px(px(14.0))
+        .rounded_md()
+        .border_1()
+        .border_color(if selected {
+            theme.accent
+        } else {
+            theme.surface
+        })
+        .bg(if selected {
+            theme.accent_dim
+        } else {
+            theme.surface
+        })
+        .text_color(if selected {
+            theme.accent
+        } else {
+            theme.text_dim
+        })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover).text_color(accent))
+        .active(move |style| style.border_color(accent))
+        .child(label)
+}
+
+pub fn disabled_rail_item(theme: &Theme, id: &'static str, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .h(px(42.0))
+        .px(px(14.0))
+        .rounded_md()
+        .border_1()
+        .border_color(theme.surface)
+        .text_color(theme.text_dim)
+        .opacity(0.45)
+        .child(label)
+}
+
+pub fn toolbar_button(
+    theme: &Theme,
+    id: &'static str,
+    label: &'static str,
+    enabled: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    let accent = theme.accent;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .h(px(32.0))
+        .px(px(12.0))
+        .rounded_md()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.surface)
+        .text_color(if enabled { theme.text } else { theme.text_dim })
+        .when(enabled, move |button| {
+            button
+                .cursor_pointer()
+                .hover(move |style| style.bg(hover).border_color(accent))
+                .active(move |style| style.bg(theme.accent_dim))
+        })
+        .when(!enabled, |button| button.opacity(0.45))
+        .child(label)
+}
+
+pub fn primary_button(theme: &Theme, id: &'static str, label: &'static str) -> Stateful<Div> {
+    let raised = theme.raised;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .h(px(38.0))
+        .px(px(18.0))
+        .rounded_md()
+        .border_1()
+        .border_color(theme.accent)
+        .bg(theme.accent_dim)
+        .text_color(theme.accent)
+        .cursor_pointer()
+        .hover(move |style| style.bg(raised))
+        .active(move |style| style.bg(theme.accent_dim))
+        .child(label)
+}
+
+pub fn surface(theme: &Theme) -> Div {
+    div()
+        .bg(theme.surface)
+        .border_1()
+        .border_color(theme.border)
+        .rounded_lg()
+}
