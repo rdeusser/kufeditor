@@ -47,6 +47,12 @@ enum NumberEditTarget {
 }
 
 impl NumberEditTarget {
+    fn document(&self) -> DocumentId {
+        match self {
+            Self::TroopField { document, .. } => *document,
+        }
+    }
+
     fn is_troop_field(&self, document: DocumentId, record: usize, field: TroopField) -> bool {
         matches!(
             self,
@@ -118,6 +124,12 @@ impl AppFrame {
 
     pub fn focus_handle(&self) -> FocusHandle {
         self.focus.clone()
+    }
+
+    fn activate_document(&mut self, document: DocumentId, selected_troop: usize) {
+        self.active_document = Some(document);
+        self.selected_troop = selected_troop;
+        self.number_edit = None;
     }
 
     pub fn window_should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -234,31 +246,41 @@ impl AppFrame {
             NumberOutcome::Continue => {}
             NumberOutcome::Invalid => self.notice = Some(invalid_number_notice()),
             NumberOutcome::Cancel => self.number_edit = None,
-            NumberOutcome::Commit(value) => {
-                let Some(edit) = self.number_edit.as_ref() else {
-                    return;
-                };
-                let (document, document_edit) = match edit.target.document_edit(value) {
-                    Ok(edit) => edit,
-                    Err(error) => {
-                        self.notice = Some(Notice::error("Could not update TroopInfo", &error));
-                        cx.notify();
-                        return;
-                    }
-                };
-                let result = self.workspace.apply(document, document_edit);
-                match result {
-                    Ok(()) => {
-                        self.number_edit = None;
-                        self.notice = None;
-                    }
-                    Err(error) => {
-                        self.notice = Some(Notice::error("Could not update TroopInfo", &error));
-                    }
-                }
-            }
+            NumberOutcome::Commit(value) => self.commit_number_edit(value),
         }
         cx.notify();
+    }
+
+    fn commit_number_edit(&mut self, value: i64) {
+        let Some(target_document) = self.number_edit.as_ref().map(|edit| edit.target.document())
+        else {
+            return;
+        };
+        if self.active_document != Some(target_document) {
+            self.number_edit = None;
+            self.notice = Some(Notice::info("The active document changed; edit canceled"));
+            return;
+        }
+
+        let Some(edit) = self.number_edit.as_ref() else {
+            return;
+        };
+        let (document, document_edit) = match edit.target.document_edit(value) {
+            Ok(edit) => edit,
+            Err(error) => {
+                self.notice = Some(Notice::error("Could not update TroopInfo", &error));
+                return;
+            }
+        };
+        match self.workspace.apply(document, document_edit) {
+            Ok(()) => {
+                self.number_edit = None;
+                self.notice = None;
+            }
+            Err(error) => {
+                self.notice = Some(Notice::error("Could not update TroopInfo", &error));
+            }
+        }
     }
 
     fn open_action(&mut self, _: &OpenFile, _: &mut Window, cx: &mut Context<Self>) {
@@ -316,8 +338,7 @@ impl AppFrame {
                                 let name = display_name(&path);
                                 let document_id = frame.workspace.insert_loaded(loaded);
                                 if activate {
-                                    frame.active_document = Some(document_id);
-                                    frame.selected_troop = 0;
+                                    frame.activate_document(document_id, 0);
                                     frame.shell.select_area(Area::Files);
                                 }
                                 frame.notice = Some(Notice::success(format!("Opened {name}")));
@@ -712,9 +733,7 @@ impl AppFrame {
                     record == selected,
                 )
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.active_document = Some(document_id);
-                    frame.selected_troop = record;
-                    frame.number_edit = None;
+                    frame.activate_document(document_id, record);
                     window.focus(&frame.focus);
                     cx.notify();
                 }))
@@ -848,9 +867,7 @@ impl AppFrame {
                     dirty,
                 )
                 .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.active_document = Some(document_id);
-                    frame.selected_troop = 0;
-                    frame.number_edit = None;
+                    frame.activate_document(document_id, 0);
                     cx.notify();
                 }))
                 .into_any_element()
@@ -1010,9 +1027,9 @@ mod tests {
     use std::path::PathBuf;
 
     use gpui::{AppContext, TestAppContext, WindowOptions};
-    use kufeditor_workspace::{Document, TroopDocument};
+    use kufeditor_workspace::{Document, DocumentId, TroopDocument, TroopField};
 
-    use super::{AppFrame, invalid_number_notice};
+    use super::{ActiveNumberEdit, AppFrame, invalid_number_notice};
     use crate::state::{Area, NoticeLevel};
 
     #[test]
@@ -1024,6 +1041,70 @@ mod tests {
             notice.summary(),
             "Enter a whole number within the allowed range"
         );
+    }
+
+    fn open_troop(frame: &mut AppFrame, path: &str, move_speed: i32) -> DocumentId {
+        let mut bytes = vec![0_u8; 8 + 148 + 64];
+        bytes
+            .get_mut(0..4)
+            .unwrap()
+            .copy_from_slice(&100_u32.to_le_bytes());
+        bytes
+            .get_mut(4..8)
+            .unwrap()
+            .copy_from_slice(&1_u32.to_le_bytes());
+        let mut document = TroopDocument::parse(bytes).unwrap();
+        document
+            .set_value(0, TroopField::MoveSpeed, move_speed)
+            .unwrap();
+        frame
+            .workspace
+            .open_loaded(PathBuf::from(path), Document::Troop(document))
+    }
+
+    #[gpui::test]
+    fn inactive_number_edit_cannot_survive_activation_or_commit(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, _| {
+                let first = open_troop(frame, "first.sox", 100);
+                let second = open_troop(frame, "second.sox", 200);
+                frame.activate_document(first, 0);
+                frame.number_edit = Some(ActiveNumberEdit::troop_field(
+                    first,
+                    0,
+                    TroopField::MoveSpeed,
+                    100,
+                ));
+
+                frame.activate_document(second, 0);
+
+                assert_eq!(frame.active_document, Some(second));
+                assert!(frame.number_edit.is_none());
+
+                frame.number_edit = Some(ActiveNumberEdit::troop_field(
+                    first,
+                    0,
+                    TroopField::MoveSpeed,
+                    100,
+                ));
+                frame.commit_number_edit(101);
+
+                assert!(frame.number_edit.is_none());
+                assert_eq!(
+                    frame
+                        .workspace
+                        .troop_value(first, 0, TroopField::MoveSpeed)
+                        .unwrap(),
+                    100
+                );
+                assert!(!frame.workspace.is_dirty(first).unwrap());
+            })
+            .unwrap();
     }
 
     #[gpui::test]
