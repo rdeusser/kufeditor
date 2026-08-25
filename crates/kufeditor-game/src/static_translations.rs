@@ -1,7 +1,3 @@
-#[allow(
-    dead_code,
-    reason = "the Stage 2D name dictionary consumes this table in the next task"
-)]
 pub(super) const STATIC_TRANSLATIONS: &[(&str, &str)] = &[
     ("가 나타난다", "Appears"),
     ("가 목표", "Is the target"),

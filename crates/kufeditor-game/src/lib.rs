@@ -1,12 +1,14 @@
 //! Supported games, installation discovery, paths, and data catalogs.
 
 mod catalog;
+mod dictionary;
 mod error;
 mod static_translations;
 
 use std::fmt;
 
 pub use catalog::CatalogRole;
+pub use dictionary::{CatalogLoad, NameDictionary, load_name_dictionary};
 pub use error::{CatalogFileError, CatalogIssue, CatalogLoadError};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

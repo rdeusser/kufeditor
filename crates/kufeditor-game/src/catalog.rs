@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "Task 5 consumes the crate-private raw catalog loader and model"
-)]
-
 use std::{
     fmt::{self, Display, Formatter},
     fs,
@@ -113,47 +108,42 @@ pub(crate) fn load_catalog_data(sox_directory: &Path) -> Result<RawCatalogData, 
         });
     }
 
-    let data_directory = sox_directory.parent().unwrap_or(sox_directory);
     let mut issues = Vec::new();
 
     let troop_names = load_indexed_role(
         CatalogRole::TroopNames,
-        &role_path(sox_directory, data_directory, CatalogRole::TroopNames),
+        &role_path(sox_directory, CatalogRole::TroopNames),
         &mut issues,
     );
     let character_names = load_indexed_role(
         CatalogRole::CharacterNames,
-        &role_path(sox_directory, data_directory, CatalogRole::CharacterNames),
+        &role_path(sox_directory, CatalogRole::CharacterNames),
         &mut issues,
     );
     let leader_pools = load_indexed_role(
         CatalogRole::LeaderPools,
-        &role_path(sox_directory, data_directory, CatalogRole::LeaderPools),
+        &role_path(sox_directory, CatalogRole::LeaderPools),
         &mut issues,
     );
     let special_names = load_special_names(
-        &role_path(sox_directory, data_directory, CatalogRole::SpecialNameKeys),
+        &role_path(sox_directory, CatalogRole::SpecialNameKeys),
         &mut issues,
     );
     let special_display_names = load_sequential_role(
         CatalogRole::SpecialDisplayNames,
-        &role_path(
-            sox_directory,
-            data_directory,
-            CatalogRole::SpecialDisplayNames,
-        ),
+        &role_path(sox_directory, CatalogRole::SpecialDisplayNames),
         &mut issues,
     );
     let item_attributes = load_item_attributes(
-        &role_path(sox_directory, data_directory, CatalogRole::ItemAttributes),
+        &role_path(sox_directory, CatalogRole::ItemAttributes),
         &mut issues,
     );
     let item_type_prefixes = load_item_type_prefixes(
-        &role_path(sox_directory, data_directory, CatalogRole::ItemTypePrefixes),
+        &role_path(sox_directory, CatalogRole::ItemTypePrefixes),
         &mut issues,
     );
     let weapon_types = load_weapon_names(
-        &role_path(sox_directory, data_directory, CatalogRole::WeaponNames),
+        &role_path(sox_directory, CatalogRole::WeaponNames),
         &mut issues,
     );
 
@@ -174,9 +164,12 @@ pub(crate) fn load_catalog_data(sox_directory: &Path) -> Result<RawCatalogData, 
     })
 }
 
-fn role_path(sox_directory: &Path, data_directory: &Path, role: CatalogRole) -> PathBuf {
+pub(crate) fn role_path(sox_directory: &Path, role: CatalogRole) -> PathBuf {
     match role {
-        CatalogRole::WeaponNames => data_directory.join(role.relative_path()),
+        CatalogRole::WeaponNames => sox_directory
+            .parent()
+            .unwrap_or(sox_directory)
+            .join(role.relative_path()),
         _ => sox_directory.join(role.relative_path()),
     }
 }

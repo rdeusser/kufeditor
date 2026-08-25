@@ -2903,6 +2903,7 @@ dependencies = [
 name = "kufeditor-game"
 version = "0.1.0"
 dependencies = [
+ "encoding_rs",
  "kufeditor-formats",
  "sha2 0.11.0",
  "tempfile",
