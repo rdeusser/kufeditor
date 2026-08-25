@@ -141,6 +141,58 @@ struct NoticeSlot {
     suspended: Option<Box<NoticeSlot>>,
 }
 
+impl NoticeSlot {
+    fn contains_identity(&self, identity: NoticeIdentity) -> bool {
+        self.identity == identity
+            || self
+                .suspended
+                .as_ref()
+                .is_some_and(|slot| slot.contains_identity(identity))
+    }
+
+    fn complete_suspended(
+        &mut self,
+        identity: NoticeIdentity,
+        notice: Option<Notice>,
+        sequence: u64,
+    ) -> bool {
+        let direct_match = self
+            .suspended
+            .as_ref()
+            .is_some_and(|slot| slot.identity == identity);
+        let completed = if direct_match {
+            match notice {
+                Some(notice) => {
+                    if let Some(slot) = self.suspended.as_mut() {
+                        **slot = Self {
+                            identity,
+                            sequence,
+                            notice: Some(notice),
+                            suspended: None,
+                        };
+                    }
+                }
+                None => self.suspended = None,
+            }
+            true
+        } else {
+            self.suspended
+                .as_mut()
+                .is_some_and(|slot| slot.complete_suspended(identity, notice, sequence))
+        };
+        if completed {
+            if let Some(slot) = self.suspended.as_ref() {
+                self.sequence = slot.sequence;
+                self.notice.clone_from(&slot.notice);
+            } else {
+                self.sequence = sequence;
+                self.notice = None;
+            }
+        }
+        completed
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NoticeIdentity {
     Local(u64),
@@ -216,16 +268,36 @@ impl NoticeCenter {
         notice: Option<Notice>,
     ) -> bool {
         let identity = NoticeIdentity::External(identity);
-        if self.slots.get(&source).map(|slot| slot.identity) != Some(identity) {
+        let Some(slot) = self.slots.get(&source) else {
+            return false;
+        };
+        if !slot.contains_identity(identity) {
             return false;
         }
-        match notice {
-            Some(notice) => self.insert(source, identity, Some(notice)),
-            None => {
-                self.slots.remove(&source);
+        let top_matches = slot.identity == identity;
+        let sequence = self.allocate_sequence();
+        if top_matches {
+            match notice {
+                Some(notice) => {
+                    self.slots.insert(
+                        source,
+                        NoticeSlot {
+                            identity,
+                            sequence,
+                            notice: Some(notice),
+                            suspended: None,
+                        },
+                    );
+                }
+                None => {
+                    self.slots.remove(&source);
+                }
             }
+            return true;
         }
-        true
+        self.slots
+            .get_mut(&source)
+            .is_some_and(|slot| slot.complete_suspended(identity, notice, sequence))
     }
 
     pub(crate) fn clear(&mut self, source: NoticeSource) {
@@ -316,6 +388,48 @@ mod tests {
             center.current().map(Notice::summary),
             Some("Saved document")
         );
+    }
+
+    #[test]
+    fn completion_updates_a_suspended_notice_through_nested_pending_cancellation() {
+        let cases = [
+            (
+                Some(Notice::success("Saved document")),
+                Notice::success("other success"),
+                "Saved document",
+                Some("Saved document"),
+            ),
+            (
+                Some(Notice::plain(NoticeLevel::Error, "Could not save document")),
+                Notice::plain(NoticeLevel::Error, "other error"),
+                "Could not save document",
+                Some("Could not save document"),
+            ),
+            (None, Notice::info("other info"), "other info", None),
+        ];
+
+        for (completion, competing_notice, expected, restored) in cases {
+            let mut center = NoticeCenter::default();
+            center.begin(NoticeSource::Workspace, 7, Notice::info("Saving document"));
+            center.begin_pending(NoticeSource::Workspace, 8);
+            center.begin_pending(NoticeSource::Workspace, 9);
+            center.replace(NoticeSource::Editor, competing_notice);
+
+            assert!(!center.complete(
+                NoticeSource::Workspace,
+                6,
+                Some(Notice::plain(NoticeLevel::Error, "stale completion")),
+            ));
+            assert!(center.complete(NoticeSource::Workspace, 7, completion));
+            assert_eq!(center.current().map(Notice::summary), Some(expected));
+
+            assert!(center.cancel(NoticeSource::Workspace, 9));
+            assert_eq!(center.current().map(Notice::summary), Some(expected));
+            assert!(center.cancel(NoticeSource::Workspace, 8));
+            assert_eq!(center.current().map(Notice::summary), Some(expected));
+            center.clear(NoticeSource::Editor);
+            assert_eq!(center.current().map(Notice::summary), restored);
+        }
     }
 
     #[test]

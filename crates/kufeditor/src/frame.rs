@@ -2526,6 +2526,69 @@ mod tests {
     }
 
     #[gpui::test]
+    fn save_completion_while_save_as_is_pending_survives_picker_cancellation(
+        cx: &mut TestAppContext,
+    ) {
+        let cases = [
+            (false, "Saved document.sox", NoticeLevel::Success),
+            (true, "Could not save document", NoticeLevel::Error),
+        ];
+
+        for (must_fail, expected_summary, expected_level) in cases {
+            let directory = tempfile::tempdir().unwrap();
+            let document_path = if must_fail {
+                let blocker = directory.path().join("not-a-directory");
+                fs::write(&blocker, b"blocker").unwrap();
+                blocker.join("document.sox")
+            } else {
+                directory.path().join("document.sox")
+            };
+            let window = cx.update(|cx| {
+                cx.open_window(WindowOptions::default(), |_, cx| {
+                    cx.new(|cx| AppFrame::new(test_startup(), cx))
+                })
+                .unwrap()
+            });
+            let (document, token, result, notice_identity) = window
+                .update(cx, |frame, window, cx| {
+                    let document = open_troop(frame, &document_path.to_string_lossy(), 100);
+                    frame.activate_document(document);
+                    let request = frame.workspace.prepare_save(document, None).unwrap();
+                    let token = request.token();
+                    let result = request.run();
+                    assert_eq!(result.is_err(), must_fail);
+                    let notice_identity = frame.allocate_workspace_notice_identity();
+                    frame.notices.begin(
+                        NoticeSource::Workspace,
+                        notice_identity,
+                        Notice::info("Saving document"),
+                    );
+
+                    frame.save_as_action(&SaveAs, window, cx);
+                    (document, token, result, notice_identity)
+                })
+                .unwrap();
+            assert!(cx.did_prompt_for_new_path());
+
+            window
+                .update(cx, |frame, _, _| {
+                    frame.finish_save_result(document, token, notice_identity, result);
+                })
+                .unwrap();
+            cx.simulate_new_path_selection(|_| None);
+            cx.run_until_parked();
+
+            window
+                .update(cx, |frame, _, _| {
+                    let notice = frame.notices.current().unwrap();
+                    assert_eq!(notice.summary(), expected_summary);
+                    assert_eq!(notice.level(), expected_level);
+                })
+                .unwrap();
+        }
+    }
+
+    #[gpui::test]
     fn empty_text_sox_commit_keeps_the_same_draft_and_history(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             bind_text_input(cx);
