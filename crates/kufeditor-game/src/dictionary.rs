@@ -123,6 +123,34 @@ impl NameDictionary {
             .map(String::as_str)
     }
 
+    pub fn unit_name(
+        &self,
+        leader_name_index: i32,
+        troop_info_index: i32,
+        job_type: u32,
+    ) -> Option<&str> {
+        if leader_name_index < 0 {
+            if let Ok(character_index) = u8::try_from(job_type)
+                && let Some(name) = self.character_name(character_index)
+            {
+                return Some(name);
+            }
+        } else if let Ok(pool_index) = u32::try_from(troop_info_index)
+            && let Some(name) = self.leader_name(pool_index, leader_name_index)
+        {
+            return Some(name);
+        }
+
+        if job_type <= 42
+            && let Some(name) = self.troop_name(job_type)
+        {
+            return Some(name);
+        }
+
+        let character_index = u8::try_from(job_type).ok()?;
+        self.character_name(character_index)
+    }
+
     pub fn weapon_name(
         &self,
         item_type: i32,

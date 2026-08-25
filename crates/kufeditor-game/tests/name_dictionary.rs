@@ -78,6 +78,67 @@ fn leader_lookup_splits_unicode_whitespace_and_checks_every_bound() {
 }
 
 #[test]
+fn unit_name_negative_leader_prefers_character_to_troop() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(-1, 73, 7), Some("Character Seven"));
+}
+
+#[test]
+fn unit_name_nonnegative_leader_prefers_selected_pool_name_to_job_fallback() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(1, 73, 7), Some("LeaderOne"));
+}
+
+#[test]
+fn unit_name_missing_or_invalid_leader_falls_back_to_bounded_troop() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(0, 74, 0), Some("Troop Zero"));
+    assert_eq!(dictionary.unit_name(2, 73, 42), Some("Troop Forty Two"));
+}
+
+#[test]
+fn unit_name_uses_character_fallback_after_leader_and_troop_miss() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(
+        dictionary.unit_name(0, 74, 200),
+        Some("Character Two Hundred")
+    );
+}
+
+#[test]
+fn unit_name_negative_troop_pool_does_not_wrap() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(0, -1, 300), None);
+}
+
+#[test]
+fn unit_name_job_type_above_42_does_not_index_troop() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(0, 74, 43), None);
+}
+
+#[test]
+fn unit_name_wide_job_types_do_not_truncate_to_character_index() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(-1, 73, 256), None);
+    assert_eq!(dictionary.unit_name(-1, 73, u32::MAX), None);
+}
+
+#[test]
+fn unit_name_missing_data_returns_none() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(0, 74, 41), None);
+}
+
+#[test]
 fn special_names_prefer_localized_display_and_fall_back_to_cp949_default() {
     let dictionary = complete_dictionary();
 
@@ -434,6 +495,33 @@ fn reverse_translation_is_deterministic_non_cascading_and_nonempty() {
 
 fn complete_dictionary() -> NameDictionary {
     let tree = complete_catalog_tree();
+    load_name_dictionary(&tree.sox).unwrap().dictionary
+}
+
+fn unit_name_dictionary() -> NameDictionary {
+    let tree = CatalogTree::new();
+    tree.write(
+        CatalogRole::TroopNames,
+        &indexed_table(&[
+            (0, b"Troop Zero"),
+            (7, b"Troop Seven"),
+            (42, b"Troop Forty Two"),
+            (43, b"Troop Forty Three"),
+        ]),
+    );
+    tree.write(
+        CatalogRole::CharacterNames,
+        &indexed_table(&[
+            (0, b"Character Zero"),
+            (7, b"Character Seven"),
+            (200, b"Character Two Hundred"),
+            (u32::from(u8::MAX), b"Character 255"),
+        ]),
+    );
+    tree.write(
+        CatalogRole::LeaderPools,
+        &indexed_table(&[(73, b"LeaderZero LeaderOne"), (u32::MAX, b"WrappedLeader")]),
+    );
     load_name_dictionary(&tree.sox).unwrap().dictionary
 }
 
