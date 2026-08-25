@@ -122,7 +122,17 @@ pub enum SavePresentationTransition {
     ChangedAndCancelDraft,
 }
 
-#[derive(Debug, Default)]
+impl SavePresentationTransition {
+    pub const fn cancels_draft(self) -> bool {
+        matches!(self, Self::ChangedAndCancelDraft)
+    }
+
+    pub const fn changed(self) -> bool {
+        !matches!(self, Self::Unchanged)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 #[allow(
     dead_code,
     reason = "Task 11 stores document-scoped save presentation state in the frame"
@@ -248,11 +258,20 @@ impl SavePresentationStates {
         transition
     }
 
-    pub fn remove_document(&mut self, document: DocumentID) -> bool {
-        if self.active_document == Some(document) {
+    pub fn remove_document(
+        &mut self,
+        document: DocumentID,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let was_active = self.active_document == Some(document);
+        if was_active {
             self.active_document = None;
         }
-        self.documents.remove(&document).is_some()
+        if self.documents.remove(&document).is_some() || was_active {
+            changed_transition(draft_active)
+        } else {
+            SavePresentationTransition::Unchanged
+        }
     }
 }
 
@@ -912,7 +931,10 @@ mod save_presentation_tests {
         let mut states = SavePresentationStates::default();
         states.activate_document(document, all_units(1), false);
 
-        assert!(states.remove_document(document));
+        assert_eq!(
+            states.remove_document(document, true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
         assert!(states.get(document).is_none());
         assert_eq!(states.active_document(), None);
     }

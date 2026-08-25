@@ -993,7 +993,7 @@ pub fn render_editor(
                     )
                     .children(rail)
                     .child(div().flex_1())
-                    .child(read_only_badge(theme)),
+                    .child(editing_badge(theme)),
             )
             .child(
                 div()
@@ -1284,6 +1284,80 @@ pub fn value_row(
         .child(div().flex_none().text_color(theme.text).child(value.into()))
 }
 
+pub fn editable_value_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    value: impl Into<String>,
+    active: bool,
+    invalid: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    value_row(theme, id, label, value)
+        .border_1()
+        .border_color(if active || invalid {
+            theme.accent
+        } else {
+            theme.background
+        })
+        .text_color(if invalid { theme.accent } else { theme.text })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+}
+
+pub fn choice_value_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    value: impl Into<String>,
+    unknown_selector: Option<String>,
+    choices: Vec<AnyElement>,
+) -> Stateful<Div> {
+    let unknown_current = unknown_selector.is_some();
+    div()
+        .id(id)
+        .px(px(10.0))
+        .py(px(8.0))
+        .flex()
+        .flex_col()
+        .gap(px(7.0))
+        .rounded_md()
+        .bg(theme.background)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(theme.text_dim)
+                        .child(label.into()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(if unknown_current {
+                            theme.accent
+                        } else {
+                            theme.text
+                        })
+                        .child(value.into()),
+                ),
+        )
+        .children(unknown_selector.map(|selector| {
+            let element_id = selector.clone();
+            div()
+                .id(SharedString::from(element_id))
+                .debug_selector(move || selector.clone())
+                .text_size(px(10.0))
+                .text_color(theme.accent)
+                .child("UNKNOWN VALUE · PRESERVED UNTIL YOU CHOOSE A DEFINED VALUE")
+        }))
+        .child(div().flex().flex_wrap().gap(px(5.0)).children(choices))
+}
+
 pub fn text_value_row(
     theme: &Theme,
     id: impl Into<ElementId>,
@@ -1307,6 +1381,39 @@ pub fn text_value_row(
                 .child(label.into()),
         )
         .child(div().text_color(theme.text).child(value.into()))
+}
+
+pub fn text_editor_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    input: AnyElement,
+    validation_error: Option<String>,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .px(px(10.0))
+        .py(px(8.0))
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .rounded_md()
+        .bg(theme.background)
+        .child(
+            div()
+                .text_size(px(11.0))
+                .text_color(theme.text_dim)
+                .child(label.into()),
+        )
+        .child(input)
+        .children(validation_error.map(|error| {
+            div()
+                .id("save-text-validation-error")
+                .debug_selector(|| "save-text-validation-error".to_owned())
+                .text_size(px(12.0))
+                .text_color(theme.accent)
+                .child(error)
+        }))
 }
 
 pub fn empty_state(theme: &Theme, message: impl Into<String>) -> Div {
@@ -1461,8 +1568,18 @@ pub fn roster_row(
                         .text_color(theme.text)
                         .child(field.display_value.clone()),
                 )
+                .into_any_element()
         })
-        .collect::<Vec<_>>();
+        .collect();
+    roster_row_with_fields(theme, id, row, fields)
+}
+
+pub fn roster_row_with_fields(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    row: &SaveRosterRowProjection,
+    fields: Vec<AnyElement>,
+) -> Stateful<Div> {
     div()
         .id(id)
         .h(px(64.0))
@@ -1591,7 +1708,7 @@ pub fn inline_name_unavailable(theme: &Theme, subject: &'static str) -> Stateful
         .child(format!("{subject} name is unavailable; showing raw IDs."))
 }
 
-fn read_only_badge(theme: &Theme) -> Div {
+fn editing_badge(theme: &Theme) -> Div {
     div()
         .px(px(8.0))
         .py(px(6.0))
@@ -1600,7 +1717,7 @@ fn read_only_badge(theme: &Theme) -> Div {
         .border_color(theme.border)
         .text_size(px(10.0))
         .text_color(theme.text_dim)
-        .child("READ ONLY")
+        .child("TYPED EDITING")
 }
 
 #[cfg(test)]

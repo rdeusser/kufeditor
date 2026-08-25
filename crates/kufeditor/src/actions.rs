@@ -1,6 +1,15 @@
-use gpui::{App, KeyBinding, actions};
+use gpui::{Action, App, KeyBinding, actions};
+use kufeditor_workspace::{DocumentID, SaveNumberTarget};
 
 actions!(kufeditor, [OpenFile, Save, SaveAll, SaveAs, Undo, Redo]);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Action)]
+#[action(namespace = kufeditor, no_json)]
+pub(crate) struct SetSaveChoice {
+    pub(crate) document: DocumentID,
+    pub(crate) target: SaveNumberTarget,
+    pub(crate) value: i64,
+}
 
 pub fn bind(cx: &mut App) {
     cx.bind_keys([

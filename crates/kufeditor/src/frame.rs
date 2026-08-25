@@ -12,11 +12,12 @@ use gpui::{
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
     ApplyOutcome, DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
-    SaveToken, SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError, load_path,
+    SaveEditor, SaveNumberTarget, SaveTextField, SaveToken, SkillTextField, TroopField, TroopGroup,
+    Workspace, WorkspaceError, load_path,
 };
 
 use crate::{
-    actions::{OpenFile, Redo, Save, SaveAll, SaveAs, Undo},
+    actions::{OpenFile, Redo, Save, SaveAll, SaveAs, SetSaveChoice, Undo},
     catalog_status::{CatalogRequestError, CatalogSession},
     components,
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
@@ -82,6 +83,21 @@ impl ActiveNumberEdit {
             editor: NumberEdit::new(i64::from(value), 1, 65_535),
         }
     }
+
+    fn save(
+        document: DocumentID,
+        target: SaveNumberTarget,
+        value: i64,
+        editor: SaveEditor,
+    ) -> Option<Self> {
+        let SaveEditor::Number { minimum, maximum } = editor else {
+            return None;
+        };
+        Some(Self {
+            target: NumberEditTarget::Save { document, target },
+            editor: NumberEdit::new(value, minimum, maximum),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,6 +115,10 @@ enum NumberEditTarget {
         document: DocumentID,
         record: usize,
     },
+    Save {
+        document: DocumentID,
+        target: SaveNumberTarget,
+    },
 }
 
 impl NumberEditTarget {
@@ -106,7 +126,8 @@ impl NumberEditTarget {
         match self {
             Self::TroopField { document, .. }
             | Self::SkillID { document, .. }
-            | Self::SkillMaxLevel { document, .. } => *document,
+            | Self::SkillMaxLevel { document, .. }
+            | Self::Save { document, .. } => *document,
         }
     }
 
@@ -114,6 +135,7 @@ impl NumberEditTarget {
         match self {
             Self::TroopField { .. } => "TroopInfo",
             Self::SkillID { .. } | Self::SkillMaxLevel { .. } => "SkillInfo",
+            Self::Save { .. } => "Crusaders save",
         }
     }
 
@@ -148,6 +170,16 @@ impl NumberEditTarget {
         )
     }
 
+    fn is_save(&self, document: DocumentID, target: SaveNumberTarget) -> bool {
+        matches!(
+            self,
+            Self::Save {
+                document: target_document,
+                target: target_field,
+            } if *target_document == document && *target_field == target
+        )
+    }
+
     fn document_edit(
         &self,
         value: i64,
@@ -179,6 +211,9 @@ impl NumberEditTarget {
                     value: u32::try_from(value)?,
                 },
             )),
+            Self::Save { document, target } => {
+                Ok((document, DocumentEdit::SetSaveNumber { target, value }))
+            }
         }
     }
 }
@@ -225,6 +260,10 @@ enum TextEditTarget {
         document: DocumentID,
         record: usize,
     },
+    Save {
+        document: DocumentID,
+        field: SaveTextField,
+    },
 }
 
 impl TextEditTarget {
@@ -240,9 +279,15 @@ impl TextEditTarget {
         Self::TextSOX { document, record }
     }
 
+    const fn save(document: DocumentID, field: SaveTextField) -> Self {
+        Self::Save { document, field }
+    }
+
     const fn document(self) -> DocumentID {
         match self {
-            Self::Skill { document, .. } | Self::TextSOX { document, .. } => document,
+            Self::Skill { document, .. }
+            | Self::TextSOX { document, .. }
+            | Self::Save { document, .. } => document,
         }
     }
 
@@ -250,6 +295,7 @@ impl TextEditTarget {
         match self {
             Self::Skill { .. } => "SkillInfo",
             Self::TextSOX { .. } => "text SOX",
+            Self::Save { .. } => "Crusaders save",
         }
     }
 
@@ -257,7 +303,12 @@ impl TextEditTarget {
         match self {
             Self::Skill { field, .. } => field.label(),
             Self::TextSOX { .. } => "Text",
+            Self::Save { field, .. } => field.label(),
         }
+    }
+
+    fn element_id(self) -> String {
+        format!("text-input:{self:?}")
     }
 
     fn document_edit(self, value: String) -> (DocumentID, DocumentEdit) {
@@ -277,6 +328,9 @@ impl TextEditTarget {
             Self::TextSOX { document, record } => {
                 (document, DocumentEdit::SetTextSOXText { record, value })
             }
+            Self::Save { document, field } => {
+                (document, DocumentEdit::SetSaveText { field, value })
+            }
         }
     }
 }
@@ -284,6 +338,7 @@ impl TextEditTarget {
 struct ActiveTextEdit {
     target: TextEditTarget,
     input: Entity<TextInput>,
+    validation_error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -559,13 +614,18 @@ impl AppFrame {
     ) {
         self.cancel_property_edit();
         let colors = self.text_input_colors();
-        let input = cx.new(|cx| TextInput::new(value, target.label(), colors, cx));
+        let element_id = target.element_id();
+        let input = cx.new(|cx| TextInput::new(value, target.label(), element_id, colors, cx));
         cx.subscribe(&input, |frame, input, event, cx| {
             frame.handle_text_input_event(&input, event, cx);
         })
         .detach();
         window.focus(&input.read(cx).focus_handle());
-        self.text_edit = Some(ActiveTextEdit { target, input });
+        self.text_edit = Some(ActiveTextEdit {
+            target,
+            input,
+            validation_error: None,
+        });
         cx.notify();
     }
 
@@ -606,6 +666,18 @@ impl AppFrame {
                         self.notices.clear(NoticeSource::Editor);
                     }
                     Err(error) => {
+                        if matches!(target, TextEditTarget::Save { .. }) {
+                            if let Some(edit) = self
+                                .text_edit
+                                .as_mut()
+                                .filter(|edit| edit.target == target && edit.input == *input)
+                            {
+                                edit.validation_error = Some(error.to_string());
+                            }
+                            self.notices.clear(NoticeSource::Editor);
+                            cx.notify();
+                            return;
+                        }
                         let summary = match target {
                             TextEditTarget::TextSOX { document, record } => self
                                 .workspace
@@ -621,6 +693,9 @@ impl AppFrame {
                                 ),
                             TextEditTarget::Skill { .. } => {
                                 format!("Could not update {}", target.format_name())
+                            }
+                            TextEditTarget::Save { .. } => {
+                                unreachable!("save text errors stay attached to their active input")
                             }
                         };
                         self.notices
@@ -655,6 +730,58 @@ impl AppFrame {
                 );
             }
         }
+    }
+
+    fn set_save_choice(&mut self, action: &SetSaveChoice, _: &mut Window, cx: &mut Context<Self>) {
+        if self.active_document != Some(action.document) {
+            self.cancel_property_edit();
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("The active document changed; edit canceled"),
+            );
+            cx.notify();
+            return;
+        }
+
+        let valid_choice = self
+            .workspace
+            .save_number_editor(action.document, action.target)
+            .is_ok_and(|editor| {
+                matches!(
+                    editor,
+                    SaveEditor::Choice { choices }
+                        if choices.iter().any(|choice| choice.value == action.value)
+                )
+            });
+        if !valid_choice {
+            self.notices.replace(
+                NoticeSource::Editor,
+                Notice::editor_info("Choose one of the values defined by the save format"),
+            );
+            cx.notify();
+            return;
+        }
+
+        self.cancel_property_edit();
+        match self.workspace.apply(
+            action.document,
+            DocumentEdit::SetSaveNumber {
+                target: action.target,
+                value: action.value,
+            },
+        ) {
+            Ok(outcome) => {
+                if outcome == ApplyOutcome::Changed {
+                    self.document_did_mutate();
+                }
+                self.notices.clear(NoticeSource::Editor);
+            }
+            Err(error) => self.notices.replace(
+                NoticeSource::Editor,
+                Notice::editor_error("Could not update Crusaders save", &error),
+            ),
+        }
+        cx.notify();
     }
 
     pub fn window_should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -2296,6 +2423,7 @@ impl Render for AppFrame {
             .on_action(cx.listener(Self::save_as_action))
             .on_action(cx.listener(Self::undo_action))
             .on_action(cx.listener(Self::redo_action))
+            .on_action(cx.listener(Self::set_save_choice))
             .child(self.top_bar(cx))
             .children(self.notice_bar())
             .child(

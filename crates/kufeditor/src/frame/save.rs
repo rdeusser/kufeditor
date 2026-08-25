@@ -1,11 +1,12 @@
 use gpui::{AnyElement, Context, Div, SharedString, div, prelude::*, px};
 use kufeditor_game::NameDictionary;
 use kufeditor_workspace::{
-    DocumentID, SaveEquipmentGroup, SaveEquipmentSlot, SaveNumberTarget, SaveUnitGroup,
+    DocumentID, SaveEditor, SaveEquipmentGroup, SaveEquipmentSlot, SaveNumberTarget, SaveUnitGroup,
 };
 
 use super::AppFrame;
 use crate::{
+    actions::SetSaveChoice,
     components,
     save_catalog_status::SaveCatalogStatus,
     state::{SavePresentationState, SavePresentationTransition, SaveSection, SaveUnitVisibility},
@@ -48,21 +49,22 @@ impl AppFrame {
             .ok()
             .and_then(SaveRows::unit_visibility)
             .unwrap_or(SaveUnitVisibility::All { unit_count: 0 });
-        let transition =
-            self.save_presentations
-                .activate_document(document, visibility, draft_active);
-        let transition = if document_changed {
-            if draft_active {
-                SavePresentationTransition::ChangedAndCancelDraft
-            } else if transition == SavePresentationTransition::Unchanged {
-                SavePresentationTransition::Changed
-            } else {
-                transition
-            }
-        } else {
-            transition
-        };
-        self.finish_save_presentation_transition(transition, cx);
+        self.apply_save_presentation_transition(
+            draft_active,
+            |states, draft_active| {
+                let transition = states.activate_document(document, visibility, draft_active);
+                if document_changed && transition == SavePresentationTransition::Unchanged {
+                    if draft_active {
+                        SavePresentationTransition::ChangedAndCancelDraft
+                    } else {
+                        SavePresentationTransition::Changed
+                    }
+                } else {
+                    transition
+                }
+            },
+            cx,
+        );
     }
 
     pub(super) fn save_editor(&self, document: DocumentID, cx: &mut Context<Self>) -> Div {
@@ -100,7 +102,7 @@ impl AppFrame {
     ) -> AnyElement {
         match model {
             SaveSectionModel::Summary(summary) => self
-                .save_summary_view(document, &summary)
+                .save_summary_view(document, &summary, cx)
                 .into_any_element(),
             SaveSectionModel::Units { rows, inspected } => self
                 .save_units_view(document, state, &rows, inspected, cx)
@@ -138,6 +140,7 @@ impl AppFrame {
         &self,
         document: DocumentID,
         summary: &save::SaveSummaryProjection,
+        cx: &mut Context<Self>,
     ) -> Div {
         save::scrolling_section(
             &self.theme,
@@ -146,8 +149,8 @@ impl AppFrame {
             "Envelope, campaign, fixed strings, and record counts".to_owned(),
             vec![
                 self.save_summary_envelope(document, summary),
-                self.save_summary_values(summary),
-                self.save_summary_text(summary),
+                self.save_summary_values(summary, cx),
+                self.save_summary_text(document, summary, cx),
                 self.save_summary_counts(document, summary),
                 self.save_summary_context(document, summary),
             ],
@@ -181,26 +184,47 @@ impl AppFrame {
             .into_any_element()
     }
 
-    fn save_summary_values(&self, summary: &save::SaveSummaryProjection) -> AnyElement {
-        let mut values = vec![self.save_number_row(&summary.campaign)];
+    fn save_summary_values(
+        &self,
+        summary: &save::SaveSummaryProjection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut values = vec![self.save_number_row(&summary.campaign, cx)];
         values.extend(
             summary
                 .main_fields
                 .iter()
-                .map(|field| self.save_number_row(field)),
+                .map(|field| self.save_number_row(field, cx)),
         );
-        values.push(self.save_number_row(&summary.saved_unit_reference));
+        values.push(self.save_number_row(&summary.saved_unit_reference, cx));
         save::group(&self.theme, "SAVE VALUES", values)
             .id("save-summary-values")
             .debug_selector(|| "save-summary-values".to_owned())
             .into_any_element()
     }
 
-    fn save_summary_text(&self, summary: &save::SaveSummaryProjection) -> AnyElement {
+    fn save_summary_text(
+        &self,
+        document: DocumentID,
+        summary: &save::SaveSummaryProjection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let text = summary
             .text_fields
             .iter()
             .map(|field| {
+                let target = super::TextEditTarget::save(document, field.field);
+                if let Some(edit) = self.text_edit.as_ref().filter(|edit| edit.target == target) {
+                    return save::text_editor_row(
+                        &self.theme,
+                        projection_element_id("save-text-editor", field.id),
+                        field.label.clone(),
+                        edit.input.clone().into_any_element(),
+                        edit.validation_error.clone(),
+                    )
+                    .debug_selector(move || save_text_editor_selector(field.field).to_owned())
+                    .into_any_element();
+                }
                 let row = save::text_value_row(
                     &self.theme,
                     projection_element_id("save-text", field.id),
@@ -210,8 +234,15 @@ impl AppFrame {
                         Err(error) => error.workspace_error().to_string(),
                     },
                 );
-                if field.value.is_ok() {
-                    row.into_any_element()
+                if let Ok(value) = &field.value {
+                    let value = value.clone();
+                    row.debug_selector(move || save_text_selector(field.field).to_owned())
+                        .tab_stop(true)
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |frame, _, window, cx| {
+                            frame.start_text_edit(target, value.clone(), window, cx);
+                        }))
+                        .into_any_element()
                 } else {
                     row.debug_selector(|| "save-fixed-text-error".to_owned())
                         .into_any_element()
@@ -329,7 +360,7 @@ impl AppFrame {
     ) -> Div {
         let list = self.save_unit_list(document, state, rows.clone(), cx);
         let details =
-            inspected.map_or_else(Vec::new, |unit| self.save_unit_details(document, &unit));
+            inspected.map_or_else(Vec::new, |unit| self.save_unit_details(document, &unit, cx));
         save::split_section(
             &self.theme,
             "save-units",
@@ -358,7 +389,7 @@ impl AppFrame {
                     .debug_selector(move || selector.clone())
                     .tab_stop(true)
                     .on_click(cx.listener(move |frame, _, window, cx| {
-                        frame.set_save_unit_filter(document, filter.to_owned(), cx);
+                        frame.set_save_unit_filter(document, filter, cx);
                         window.focus(&frame.focus);
                     }))
                     .into_any_element()
@@ -447,6 +478,7 @@ impl AppFrame {
         &self,
         document: DocumentID,
         unit: &SaveUnitProjection,
+        cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut details = Vec::new();
         if self.save_dictionary().is_some()
@@ -493,7 +525,7 @@ impl AppFrame {
                 .fields
                 .iter()
                 .filter(|field| unit_field_group(field.target) == Some(group))
-                .map(|field| self.save_number_row(field))
+                .map(|field| self.save_number_row(field, cx))
                 .collect();
             details.push(save::group(&self.theme, group.label(), fields).into_any_element());
         }
@@ -514,7 +546,7 @@ impl AppFrame {
         let mut content =
             vec![self.save_equipment_slot_bar(document, state, slots, slots_enabled, cx)];
         if let (Some(unit), Some(equipment)) = (inspected_unit, selected) {
-            content.extend(self.save_equipment_details(document, unit, equipment));
+            content.extend(self.save_equipment_details(document, unit, equipment, cx));
         } else {
             let (selector, message) = if state.unit_filter().is_empty() {
                 (
@@ -592,6 +624,7 @@ impl AppFrame {
         document: DocumentID,
         unit: &save::SaveUnitRowProjection,
         equipment: &save::SaveEquipmentProjection,
+        cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut content = vec![
             save::group(
@@ -654,7 +687,7 @@ impl AppFrame {
                 .fields
                 .iter()
                 .filter(|field| equipment_field_group(field.target) == Some(group))
-                .map(|field| self.save_number_row(field))
+                .map(|field| self.save_number_row(field, cx))
                 .collect();
             content.push(save::group(&self.theme, group.label(), fields).into_any_element());
         }
@@ -696,8 +729,8 @@ impl AppFrame {
             save::uniform_save_rows(
                 save_local_id("save-roster-list", document, 0),
                 world_map_rows,
-                cx.processor(move |frame, location, _, _| {
-                    frame.save_virtual_roster_row(document, location)
+                cx.processor(move |frame, location, _, cx| {
+                    frame.save_virtual_roster_row(document, location, cx)
                 }),
             )
             .size_full()
@@ -767,14 +800,23 @@ impl AppFrame {
         &self,
         document: DocumentID,
         location: SaveRowLocation,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         match save::row_projection(&self.workspace, document, self.save_dictionary(), location) {
-            Ok(SaveRowProjection::Roster(row)) => save::roster_row(
-                &self.theme,
-                projection_element_id("save-roster-row", row.id),
-                &row,
-            )
-            .into_any_element(),
+            Ok(SaveRowProjection::Roster(row)) => {
+                let fields = row
+                    .fields
+                    .iter()
+                    .map(|field| self.save_number_row(field, cx))
+                    .collect();
+                save::roster_row_with_fields(
+                    &self.theme,
+                    projection_element_id("save-roster-row", row.id),
+                    &row,
+                    fields,
+                )
+                .into_any_element()
+            }
             Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
             Err(error) => save::empty_state(&self.theme, format!("Could not read row: {error}"))
                 .into_any_element(),
@@ -803,7 +845,7 @@ impl AppFrame {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .children(self.save_mission_fixed(mission));
+            .children(self.save_mission_fixed(mission, cx));
         let fixed_scroll = if second_count == 0 {
             fixed_scroll.flex_1()
         } else {
@@ -848,8 +890,8 @@ impl AppFrame {
             save::uniform_save_rows(
                 save_local_id("save-second-array-list", document, 0),
                 second_array_rows,
-                cx.processor(move |frame, location, _, _| {
-                    frame.save_virtual_second_array_row(document, location)
+                cx.processor(move |frame, location, _, cx| {
+                    frame.save_virtual_second_array_row(document, location, cx)
                 }),
             )
             .size_full()
@@ -857,12 +899,16 @@ impl AppFrame {
         }
     }
 
-    fn save_mission_fixed(&self, mission: &save::SaveMissionProjection) -> Vec<AnyElement> {
+    fn save_mission_fixed(
+        &self,
+        mission: &save::SaveMissionProjection,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let mut fixed = vec![
             save::group(
                 &self.theme,
                 "CURRENT MISSION",
-                vec![self.save_number_row(&mission.current_mission)],
+                vec![self.save_number_row(&mission.current_mission, cx)],
             )
             .into_any_element(),
         ];
@@ -874,14 +920,7 @@ impl AppFrame {
                     .iter()
                     .enumerate()
                     .map(|(index, field)| {
-                        save::value_row(
-                            &self.theme,
-                            projection_element_id("save-mission", field.id),
-                            format!("Mission {}", index + 1),
-                            field.display_value.clone(),
-                        )
-                        .debug_selector(move || format!("save-mission-completion-{index}"))
-                        .into_any_element()
+                        self.save_number_row_with_label(field, format!("Mission {}", index + 1), cx)
                     })
                     .collect(),
             )
@@ -926,29 +965,110 @@ impl AppFrame {
         &self,
         document: DocumentID,
         location: SaveRowLocation,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         match save::row_projection(&self.workspace, document, self.save_dictionary(), location) {
-            Ok(SaveRowProjection::SecondArray(field)) => save::second_array_row(
-                &self.theme,
-                projection_element_id("save-second-array-row", field.id),
-                location.source_index,
-                field.raw_value,
-            )
-            .into_any_element(),
+            Ok(SaveRowProjection::SecondArray(field)) => self.save_number_row_with_label(
+                &field,
+                format!("Second Array {}", location.source_index + 1),
+                cx,
+            ),
             Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
             Err(error) => save::empty_state(&self.theme, format!("Could not read row: {error}"))
                 .into_any_element(),
         }
     }
 
-    fn save_number_row(&self, field: &SaveNumberProjection) -> AnyElement {
-        save::value_row(
-            &self.theme,
-            projection_element_id("save-number", field.id),
-            field.label.clone(),
-            field.display_value.clone(),
-        )
-        .into_any_element()
+    fn save_number_row(&self, field: &SaveNumberProjection, cx: &mut Context<Self>) -> AnyElement {
+        self.save_number_row_with_label(field, field.label.clone(), cx)
+    }
+
+    fn save_number_row_with_label(
+        &self,
+        field: &SaveNumberProjection,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let document = field.id.document;
+        let target = field.target;
+        let raw_value = field.raw_value;
+        let editor = field.editor;
+        let selector = save_number_selector(target);
+        match editor {
+            SaveEditor::Number { .. } => {
+                let active_edit = self
+                    .number_edit
+                    .as_ref()
+                    .filter(|edit| edit.target.is_save(document, target));
+                let display = active_edit.map_or_else(
+                    || field.display_value.clone(),
+                    |edit| edit.editor.draft().to_owned(),
+                );
+                save::editable_value_row(
+                    &self.theme,
+                    projection_element_id("save-number", field.id),
+                    label,
+                    display,
+                    active_edit.is_some(),
+                    active_edit
+                        .is_some_and(|edit| edit.editor.invalid() || !edit.editor.is_valid()),
+                )
+                .debug_selector(move || selector.clone())
+                .tab_stop(true)
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    if frame.active_document != Some(document) {
+                        return;
+                    }
+                    let Some(edit) =
+                        super::ActiveNumberEdit::save(document, target, raw_value, editor)
+                    else {
+                        return;
+                    };
+                    frame.begin_number_edit(edit);
+                    window.focus(&frame.focus);
+                    cx.notify();
+                }))
+                .into_any_element()
+            }
+            SaveEditor::Choice { choices } => {
+                let known_current = choices.iter().any(|choice| choice.value == raw_value);
+                let buttons = choices
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(index, choice)| {
+                        let action = SetSaveChoice {
+                            document,
+                            target,
+                            value: choice.value,
+                        };
+                        let choice_selector = save_choice_selector(target, choice.value);
+                        components::choice_button(
+                            &self.theme,
+                            projection_choice_element_id(field.id, index),
+                            choice.label,
+                            choice.value == raw_value,
+                        )
+                        .debug_selector(move || choice_selector.clone())
+                        .tab_stop(true)
+                        .on_click(move |_, window, cx| {
+                            window.dispatch_action(Box::new(action), cx);
+                        })
+                        .into_any_element()
+                    })
+                    .collect();
+                save::choice_value_row(
+                    &self.theme,
+                    projection_element_id("save-choice", field.id),
+                    label,
+                    field.display_value.clone(),
+                    (!known_current).then(|| unknown_choice_selector(target)),
+                    buttons,
+                )
+                .debug_selector(move || selector.clone())
+                .into_any_element()
+            }
+        }
     }
 
     fn save_section_rail(
@@ -1049,10 +1169,12 @@ impl AppFrame {
         if self.active_document != Some(document) {
             return;
         }
-        let transition =
-            self.save_presentations
-                .select_section(document, section, self.save_draft_active());
-        self.finish_save_presentation_transition(transition, cx);
+        let draft_active = self.save_draft_active();
+        self.apply_save_presentation_transition(
+            draft_active,
+            |states, draft_active| states.select_section(document, section, draft_active),
+            cx,
+        );
     }
 
     fn inspect_save_unit(&mut self, document: DocumentID, unit: usize, cx: &mut Context<Self>) {
@@ -1067,14 +1189,15 @@ impl AppFrame {
         let Ok(rows) = self.save_unit_rows(document, &filter) else {
             return;
         };
-        let transition = self.save_presentations.inspect_unit(
-            document,
-            unit,
-            rows.unit_visibility()
-                .unwrap_or(SaveUnitVisibility::All { unit_count: 0 }),
-            self.save_draft_active(),
+        let visibility = rows
+            .unit_visibility()
+            .unwrap_or(SaveUnitVisibility::All { unit_count: 0 });
+        let draft_active = self.save_draft_active();
+        self.apply_save_presentation_transition(
+            draft_active,
+            |states, draft_active| states.inspect_unit(document, unit, visibility, draft_active),
+            cx,
         );
-        self.finish_save_presentation_transition(transition, cx);
     }
 
     fn select_save_equipment_slot(
@@ -1086,32 +1209,32 @@ impl AppFrame {
         if self.active_document != Some(document) {
             return;
         }
-        let transition =
-            self.save_presentations
-                .select_equipment_slot(document, slot, self.save_draft_active());
-        self.finish_save_presentation_transition(transition, cx);
+        let draft_active = self.save_draft_active();
+        self.apply_save_presentation_transition(
+            draft_active,
+            |states, draft_active| states.select_equipment_slot(document, slot, draft_active),
+            cx,
+        );
     }
 
-    fn set_save_unit_filter(
-        &mut self,
-        document: DocumentID,
-        filter: String,
-        cx: &mut Context<Self>,
-    ) {
+    fn set_save_unit_filter(&mut self, document: DocumentID, filter: &str, cx: &mut Context<Self>) {
         if self.active_document != Some(document) {
             return;
         }
-        let Ok(rows) = self.save_unit_rows(document, &filter) else {
+        let Ok(rows) = self.save_unit_rows(document, filter) else {
             return;
         };
-        let transition = self.save_presentations.set_unit_filter(
-            document,
-            filter,
-            rows.unit_visibility()
-                .unwrap_or(SaveUnitVisibility::All { unit_count: 0 }),
-            self.save_draft_active(),
+        let visibility = rows
+            .unit_visibility()
+            .unwrap_or(SaveUnitVisibility::All { unit_count: 0 });
+        let draft_active = self.save_draft_active();
+        self.apply_save_presentation_transition(
+            draft_active,
+            |states, draft_active| {
+                states.set_unit_filter(document, filter.to_owned(), visibility, draft_active)
+            },
+            cx,
         );
-        self.finish_save_presentation_transition(transition, cx);
     }
 
     fn save_unit_rows(
@@ -1126,18 +1249,48 @@ impl AppFrame {
         self.number_edit.is_some() || self.text_edit.is_some()
     }
 
-    fn finish_save_presentation_transition(
+    #[allow(
+        dead_code,
+        reason = "Task 12 covers document-close cancellation before tab close controls are exposed"
+    )]
+    fn remove_save_presentation(&mut self, document: DocumentID, cx: &mut Context<Self>) {
+        let draft_active = self
+            .number_edit
+            .as_ref()
+            .is_some_and(|edit| edit.target.document() == document)
+            || self
+                .text_edit
+                .as_ref()
+                .is_some_and(|edit| edit.target.document() == document);
+        self.apply_save_presentation_transition(
+            draft_active,
+            |states, draft_active| states.remove_document(document, draft_active),
+            cx,
+        );
+        if self.active_document == Some(document) {
+            self.active_document = None;
+            cx.notify();
+        }
+    }
+
+    fn apply_save_presentation_transition(
         &mut self,
-        transition: SavePresentationTransition,
+        draft_active: bool,
+        mut apply: impl FnMut(
+            &mut crate::state::SavePresentationStates,
+            bool,
+        ) -> SavePresentationTransition,
         cx: &mut Context<Self>,
     ) {
-        match transition {
-            SavePresentationTransition::Unchanged => {}
-            SavePresentationTransition::Changed => cx.notify(),
-            SavePresentationTransition::ChangedAndCancelDraft => {
-                self.cancel_property_edit();
-                cx.notify();
-            }
+        let mut preview = self.save_presentations.clone();
+        let preview_transition = apply(&mut preview, draft_active);
+        if preview_transition.cancels_draft() {
+            self.cancel_property_edit();
+        }
+
+        let transition = apply(&mut self.save_presentations, false);
+        if transition.changed() {
+            cx.notify();
         }
     }
 }
@@ -1201,6 +1354,90 @@ fn projection_element_id(prefix: &'static str, id: SaveProjectionID) -> SharedSt
     format!("{prefix}:{id:?}").into()
 }
 
+fn projection_choice_element_id(id: SaveProjectionID, index: usize) -> SharedString {
+    format!("save-choice:{id:?}:{index}").into()
+}
+
+fn save_number_selector(target: SaveNumberTarget) -> String {
+    match target {
+        SaveNumberTarget::CampaignIndex => "save-number-campaign".to_owned(),
+        SaveNumberTarget::Main(field) => format!(
+            "save-number-main-{}",
+            selector_slug(field.label()).replace("0x", "")
+        ),
+        SaveNumberTarget::SelectedUnit => "save-number-selected-unit-reference".to_owned(),
+        SaveNumberTarget::Unit { unit, field } => {
+            format!("save-number-unit-{unit}-{}", selector_slug(field.label()))
+        }
+        SaveNumberTarget::Equipment { unit, slot, field } => format!(
+            "save-number-equipment-{unit}-{}-{}",
+            selector_slug(slot.label()),
+            selector_slug(field.label())
+        ),
+        SaveNumberTarget::Roster { record: 0, field } => {
+            format!("save-roster-field-{}", selector_slug(field.label()))
+        }
+        SaveNumberTarget::Roster { record, field } => format!(
+            "save-roster-{record}-field-{}",
+            selector_slug(field.label())
+        ),
+        SaveNumberTarget::MissionCompletion { slot } => {
+            format!("save-mission-completion-{slot}")
+        }
+        SaveNumberTarget::CurrentMissionIndex => "save-number-current-mission-index".to_owned(),
+        SaveNumberTarget::SecondArray { record } => {
+            format!("save-number-second-array-{record}")
+        }
+    }
+}
+
+fn save_choice_selector(target: SaveNumberTarget, value: i64) -> String {
+    match target {
+        SaveNumberTarget::CampaignIndex => format!("save-choice-campaign-{value}"),
+        _ => format!("save-choice:{}:{value}", save_number_selector(target)),
+    }
+}
+
+fn unknown_choice_selector(target: SaveNumberTarget) -> String {
+    match target {
+        SaveNumberTarget::CampaignIndex => "save-choice-current-unknown".to_owned(),
+        _ => format!("save-choice-unknown:{}", save_number_selector(target)),
+    }
+}
+
+const fn save_text_selector(field: kufeditor_workspace::SaveTextField) -> &'static str {
+    match field {
+        kufeditor_workspace::SaveTextField::MapName => "save-text-map-name",
+        kufeditor_workspace::SaveTextField::SetFile => "save-text-set-file",
+        kufeditor_workspace::SaveTextField::SkyEffects => "save-text-sky-effects",
+    }
+}
+
+const fn save_text_editor_selector(field: kufeditor_workspace::SaveTextField) -> &'static str {
+    match field {
+        kufeditor_workspace::SaveTextField::MapName => "save-text-editor-map-name",
+        kufeditor_workspace::SaveTextField::SetFile => "save-text-editor-set-file",
+        kufeditor_workspace::SaveTextField::SkyEffects => "save-text-editor-sky-effects",
+    }
+}
+
+fn selector_slug(label: &str) -> String {
+    let mut slug = String::with_capacity(label.len());
+    let mut separator = false;
+    for character in label.chars() {
+        if character.is_ascii_alphanumeric() {
+            if separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(character.to_ascii_lowercase());
+            separator = false;
+        } else {
+            separator = true;
+        }
+    }
+    slug
+}
+
 fn save_local_id(prefix: &'static str, document: DocumentID, index: usize) -> SharedString {
     format!("{prefix}:{document:?}:{index}").into()
 }
@@ -1226,17 +1463,27 @@ mod tests {
 
     use std::{fs, path::PathBuf, sync::Arc};
 
-    use gpui::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
+    use gpui::{
+        AppContext, ClipboardItem, Entity, Modifiers, TestAppContext, VisualTestContext, point, px,
+        size,
+    };
     use kufeditor_game::{CatalogRole, Game, InstallationError, load_name_dictionary};
-    use kufeditor_workspace::{Document, DocumentID, SaveDocument, SaveEquipmentSlot};
+    use kufeditor_workspace::{
+        ApplyOutcome, Document, DocumentEdit, DocumentID, SaveDocument, SaveEquipmentField,
+        SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField,
+        SaveUnitField,
+    };
 
     use super::{AppFrame, SAVE_SECTIONS, UNIT_FILTERS, save_section_id, save_section_label};
     use crate::{
         catalog_status::CatalogRequestError,
+        notices::{Notice, NoticeSource},
         save_catalog_status::SaveCatalogKey,
         settings::SettingsStartup,
         state::{Area, SaveSection},
         test_support::SaveFixture,
+        text_input::{TextInput, TextInputEvent},
+        views::save,
     };
 
     #[test]
@@ -1356,6 +1603,667 @@ mod tests {
     }
 
     #[gpui::test]
+    fn save_edit_numeric_field_opens_with_format_bounds(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 0, 0).build());
+
+        cx.run_until_parked();
+        click(cx, "save-number-main-field-00");
+        cx.simulate_keystrokes("down");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                Some("0"),
+            );
+        });
+
+        cx.simulate_keystrokes("escape");
+        frame.update(cx, |frame, cx| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetSaveNumber {
+                            target: SaveNumberTarget::Main(SaveMainField::Field00),
+                            value: i64::from(u32::MAX),
+                        },
+                    )
+                    .unwrap(),
+                ApplyOutcome::Changed,
+            );
+            cx.notify();
+        });
+        draw_frame(cx, &frame);
+        click(cx, "save-number-main-field-00");
+        cx.simulate_keystrokes("up");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                Some("4294967295"),
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn save_edit_lazy_numeric_sections_dispatch_their_exact_typed_targets(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(1, 1, 1).build());
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        click(cx, "save-number-unit-0-troop-info-index");
+        cx.simulate_keystrokes("9 enter");
+
+        click(cx, "save-section-equipment");
+        click(cx, "save-number-equipment-0-leader-weapon-level");
+        cx.simulate_keystrokes("6 enter");
+
+        click(cx, "save-section-roster");
+        click(cx, "save-roster-field-byte-60");
+        cx.simulate_keystrokes("7 enter");
+
+        click(cx, "save-section-missions");
+        click(cx, "save-number-current-mission-index");
+        cx.simulate_keystrokes("3 enter");
+        click(cx, "save-mission-completion-0");
+        cx.simulate_keystrokes("4 enter");
+        click(cx, "save-number-second-array-0");
+        cx.simulate_keystrokes("5 enter");
+
+        frame.update(cx, |frame, _| {
+            for (target, expected) in [
+                (
+                    SaveNumberTarget::Unit {
+                        unit: 0,
+                        field: SaveUnitField::TroopInfoIndex,
+                    },
+                    9,
+                ),
+                (
+                    SaveNumberTarget::Equipment {
+                        unit: 0,
+                        slot: SaveEquipmentSlot::LeaderWeapon,
+                        field: SaveEquipmentField::Level,
+                    },
+                    6,
+                ),
+                (
+                    SaveNumberTarget::Roster {
+                        record: 0,
+                        field: SaveRosterField::Byte60,
+                    },
+                    7,
+                ),
+                (SaveNumberTarget::CurrentMissionIndex, 3),
+                (SaveNumberTarget::MissionCompletion { slot: 0 }, 4),
+                (SaveNumberTarget::SecondArray { record: 0 }, 5),
+            ] {
+                assert_eq!(
+                    frame.workspace.save_number(document, target).unwrap(),
+                    expected
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn save_edit_choice_uses_metadata_and_keeps_unknown_current_value(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(1, 0, 0).with_unit_roles([99]).build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        assert!(
+            cx.debug_bounds("save-choice-unknown:save-number-unit-0-ucd")
+                .is_some()
+        );
+        assert!(
+            cx.debug_bounds("save-choice:save-number-unit-0-ucd:99")
+                .is_none()
+        );
+        click(cx, "save-choice:save-number-unit-0-ucd:1");
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(
+                        document,
+                        SaveNumberTarget::Unit {
+                            unit: 0,
+                            field: SaveUnitField::UCD,
+                        },
+                    )
+                    .unwrap(),
+                1,
+            );
+            assert!(frame.workspace.is_dirty(document).unwrap());
+            assert!(frame.workspace.can_undo(document).unwrap());
+        });
+    }
+
+    #[gpui::test]
+    fn save_edit_fixed_text_commits_and_invalid_draft_stays_visible(cx: &mut TestAppContext) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-text-set-file");
+        frame.update(cx, |frame, cx| {
+            assert_eq!(
+                frame
+                    .text_edit
+                    .as_ref()
+                    .map(|edit| edit.input.read(cx).content()),
+                Some("Alpha"),
+            );
+        });
+        cx.simulate_keystrokes("B r a v o enter");
+        cx.run_until_parked();
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Bravo",
+            );
+            assert!(frame.text_edit.is_none());
+        });
+
+        draw_frame(cx, &frame);
+        click(cx, "save-text-set-file");
+        cx.simulate_keystrokes(
+            "x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x enter",
+        );
+        cx.run_until_parked();
+        frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(
+                edit.input.read(cx).content(),
+                "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Bravo",
+            );
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-text-validation-error").is_some());
+    }
+
+    #[gpui::test]
+    fn save_edit_fixed_text_keeps_ascii_and_zero_errors_beside_the_exact_draft(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-text-set-file");
+        frame.update(cx, |_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("é".to_owned()));
+        });
+        cx.simulate_keystrokes("cmd-v enter");
+        frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input.read(cx).content(), "é");
+            assert!(
+                edit.validation_error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("non-ASCII byte"))
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Alpha",
+            );
+        });
+
+        cx.simulate_keystrokes("escape");
+        draw_frame(cx, &frame);
+        click(cx, "save-text-set-file");
+        frame.update(cx, |_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("\0".to_owned()));
+        });
+        cx.simulate_keystrokes("cmd-v enter");
+        frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input.read(cx).content(), "\0");
+            assert!(
+                edit.validation_error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("zero byte"))
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Alpha",
+            );
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-text-validation-error").is_some());
+    }
+
+    #[gpui::test]
+    fn save_edit_preserves_shell_catalog_and_notice_state_while_names_load_or_fail(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 0, 0).build());
+        let (global_request, save_key, settings_revision, settings_settled, task_launches) = frame
+            .update(cx, |frame, cx| {
+                let global_request = frame.shell.begin_catalog();
+                let save_key = SaveCatalogKey::new(
+                    frame.shell.begin_save_catalog(),
+                    PathBuf::from("/catalog/editing"),
+                );
+                frame.save_catalog.begin(save_key.clone());
+                frame.notices.replace(
+                    NoticeSource::Workspace,
+                    Notice::info("Persistent workspace notice"),
+                );
+                cx.notify();
+                (
+                    global_request,
+                    save_key,
+                    frame.settings.latest_revision_for_test(),
+                    frame.settings.is_settled(),
+                    frame.task_launches,
+                )
+            });
+
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-catalog-loading").is_some());
+        click(cx, "save-number-main-field-00");
+        cx.simulate_keystrokes("enter");
+        frame.update(cx, |frame, cx| {
+            assert!(frame.shell.accepts_catalog(global_request));
+            assert!(frame.shell.accepts_save_catalog(save_key.request()));
+            assert_eq!(frame.shell.game(), Game::Crusaders);
+            assert_eq!(frame.shell.area(), Area::Files);
+            assert_eq!(frame.settings.latest_revision_for_test(), settings_revision);
+            assert_eq!(frame.settings.is_settled(), settings_settled);
+            assert_eq!(frame.task_launches, task_launches);
+            assert_eq!(
+                frame.notices.current().map(Notice::summary),
+                Some("Persistent workspace notice"),
+            );
+            assert!(frame.save_catalog.finish_failed(
+                save_key.clone(),
+                CatalogRequestError::Installation(InstallationError::RootMissing {
+                    game: Game::Crusaders,
+                    root: PathBuf::from("/catalog/editing"),
+                }),
+            ));
+            cx.notify();
+        });
+
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-catalog-failed").is_some());
+        click(cx, "save-number-main-field-00");
+        cx.simulate_keystrokes("7 enter");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(document, SaveNumberTarget::Main(SaveMainField::Field00))
+                    .unwrap(),
+                7,
+            );
+            assert!(frame.shell.accepts_catalog(global_request));
+            assert!(frame.shell.accepts_save_catalog(save_key.request()));
+            assert_eq!(frame.shell.game(), Game::Crusaders);
+            assert_eq!(frame.shell.area(), Area::Files);
+            assert_eq!(frame.settings.latest_revision_for_test(), settings_revision);
+            assert_eq!(frame.settings.is_settled(), settings_settled);
+            assert_eq!(frame.task_launches, task_launches);
+            assert_eq!(
+                frame.notices.current().map(Notice::summary),
+                Some("Persistent workspace notice"),
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn save_edit_save_and_save_as_keep_the_sav_extension_policy(cx: &mut TestAppContext) {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.sav");
+        let copy_without_extension = temporary.path().join("copy");
+        let copy = temporary.path().join("copy.sav");
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = frame.update(cx, |frame, cx| {
+            let document = frame.workspace.open_loaded(
+                source.clone(),
+                Document::Save(SaveDocument::parse(SaveFixture::new(0, 0, 0).build()).unwrap()),
+            );
+            frame.activate_document(document, cx);
+            frame.shell.select_area(Area::Files);
+            assert_eq!(
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetSaveNumber {
+                            target: SaveNumberTarget::Main(SaveMainField::Field00),
+                            value: 1,
+                        },
+                    )
+                    .unwrap(),
+                ApplyOutcome::Changed,
+            );
+            assert!(frame.start_save(document, None, cx));
+            document
+        });
+        cx.run_until_parked();
+
+        frame.update(cx, |frame, cx| {
+            assert_eq!(frame.workspace.path(document).unwrap(), source);
+            assert!(!frame.workspace.is_dirty(document).unwrap());
+            assert!(source.is_file());
+            assert_eq!(
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetSaveNumber {
+                            target: SaveNumberTarget::Main(SaveMainField::Field00),
+                            value: 2,
+                        },
+                    )
+                    .unwrap(),
+                ApplyOutcome::Changed,
+            );
+            let notice = frame.allocate_workspace_notice_identity();
+            frame.notices.begin_pending(NoticeSource::Workspace, notice);
+            frame.finish_save_as_prompt(
+                notice,
+                document,
+                crate::frame::SaveAsPromptResult::Selected(copy_without_extension.clone()),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(frame.workspace.path(document).unwrap(), copy);
+            assert!(!frame.workspace.is_dirty(document).unwrap());
+            assert!(copy.is_file());
+        });
+    }
+
+    #[gpui::test]
+    fn save_edit_equal_number_text_and_choice_values_are_history_neutral(cx: &mut TestAppContext) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+        let before = frame.update(cx, |frame, _| {
+            frame.close_documents = crate::frame::CloseDocuments::Discard;
+            frame.close_pending = true;
+            frame.close_armed = true;
+            frame.workspace.state_id(document).unwrap()
+        });
+
+        cx.run_until_parked();
+        click(cx, "save-number-main-field-00");
+        cx.simulate_keystrokes("enter");
+        draw_frame(cx, &frame);
+        click(cx, "save-text-set-file");
+        cx.simulate_keystrokes("enter");
+        draw_frame(cx, &frame);
+        click(cx, "save-choice-campaign-0");
+        cx.run_until_parked();
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(frame.workspace.state_id(document).unwrap(), before);
+            assert!(!frame.workspace.is_dirty(document).unwrap());
+            assert!(!frame.workspace.can_undo(document).unwrap());
+            assert!(frame.number_edit.is_none());
+            assert!(frame.text_edit.is_none());
+            assert_eq!(frame.close_documents, crate::frame::CloseDocuments::Discard);
+            assert!(frame.close_pending);
+            assert!(frame.close_armed);
+        });
+    }
+
+    #[gpui::test]
+    fn save_edit_undo_and_redo_refresh_projected_values(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 0, 0).build());
+
+        cx.run_until_parked();
+        click(cx, "save-choice-campaign-2");
+        frame.update(cx, |frame, cx| {
+            assert_eq!(
+                save::summary_projection(&frame.workspace, document)
+                    .unwrap()
+                    .campaign
+                    .display_value,
+                "Ecclesia (Kendal) (2)",
+            );
+            frame.move_history(false, cx);
+            assert_eq!(
+                save::summary_projection(&frame.workspace, document)
+                    .unwrap()
+                    .campaign
+                    .display_value,
+                "Hironeiden (Gerald) (0)",
+            );
+            frame.move_history(true, cx);
+            assert_eq!(
+                save::summary_projection(&frame.workspace, document)
+                    .unwrap()
+                    .campaign
+                    .display_value,
+                "Ecclesia (Kendal) (2)",
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_save_draft_closes_before_section_filter_unit_and_slot_changes(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(2, 0, 0).with_unit_roles([3, 0]).build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-number-main-field-00");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
+        click(cx, "save-section-units");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_none()));
+
+        click(cx, "save-number-unit-0-troop-info-index");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
+        click(cx, "save-unit-filter-troops");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_none()));
+
+        click(cx, "save-number-unit-0-troop-info-index");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
+        click(cx, "save-unit-filter-all");
+        click(cx, "save-unit-master-row-1");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_none()));
+
+        click(cx, "save-section-equipment");
+        click(cx, "save-number-equipment-1-leader-weapon-level");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
+        click(cx, "save-equipment-slot-troop-armor");
+        frame.update(cx, |frame, _| {
+            assert!(frame.number_edit.is_none());
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(
+                        document,
+                        SaveNumberTarget::Equipment {
+                            unit: 1,
+                            slot: SaveEquipmentSlot::LeaderWeapon,
+                            field: kufeditor_workspace::SaveEquipmentField::Level,
+                        },
+                    )
+                    .unwrap(),
+                0,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_save_draft_closes_before_active_document_and_window_close(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let first = activate_save(&frame, cx, SaveFixture::new(0, 0, 0).build());
+        let second = frame.update(cx, |frame, _| {
+            frame.workspace.open_loaded(
+                PathBuf::from("second.sav"),
+                Document::Save(SaveDocument::parse(SaveFixture::new(0, 0, 0).build()).unwrap()),
+            )
+        });
+
+        cx.run_until_parked();
+        click(cx, "save-number-main-field-00");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
+        frame.update(cx, |frame, cx| frame.activate_document(second, cx));
+        frame.update(cx, |frame, _| {
+            assert_eq!(frame.active_document, Some(second));
+            assert!(frame.number_edit.is_none());
+            assert!(!frame.workspace.is_dirty(first).unwrap());
+        });
+
+        frame.update(cx, |frame, cx| frame.activate_document(first, cx));
+        draw_frame(cx, &frame);
+        click(cx, "save-number-main-field-00");
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_some()));
+        assert!(frame.update_in(cx, |frame, window, cx| {
+            frame.window_should_close(window, cx)
+        }));
+        frame.update(cx, |frame, _| {
+            assert!(frame.number_edit.is_none());
+            assert!(!frame.workspace.is_dirty(first).unwrap());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_save_draft_closes_before_document_presentation_is_removed(cx: &mut TestAppContext) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-number-main-field-00");
+        frame.update(cx, |frame, cx| {
+            assert!(frame.number_edit.is_some());
+            frame.remove_save_presentation(document, cx);
+            assert!(frame.number_edit.is_none());
+            assert!(frame.save_presentations.get(document).is_none());
+            assert!(!frame.workspace.is_dirty(document).unwrap());
+        });
+
+        frame.update(cx, |frame, cx| frame.activate_document(document, cx));
+        let stale = start_hidden_save_text(&frame, cx, document);
+        frame.update(cx, |frame, cx| {
+            frame.remove_save_presentation(document, cx);
+        });
+        assert_hidden_text_commit_is_ignored(&frame, cx, document, &stale);
+        frame.update(cx, |frame, _| {
+            assert!(frame.save_presentations.get(document).is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_save_draft_text_input_cancels_before_every_context_transition(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let first = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(2, 0, 0)
+                .with_unit_roles([3, 0])
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+        let second = frame.update(cx, |frame, _| {
+            frame.workspace.open_loaded(
+                PathBuf::from("second-text.sav"),
+                Document::Save(SaveDocument::parse(SaveFixture::new(0, 0, 0).build()).unwrap()),
+            )
+        });
+
+        cx.run_until_parked();
+        click(cx, "save-text-set-file");
+        let stale = active_text_input(&frame, cx);
+        click(cx, "save-section-units");
+        assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
+
+        let stale = start_hidden_save_text(&frame, cx, first);
+        click(cx, "save-unit-filter-troops");
+        assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
+
+        click(cx, "save-unit-filter-all");
+        let stale = start_hidden_save_text(&frame, cx, first);
+        click(cx, "save-unit-master-row-1");
+        assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
+
+        click(cx, "save-section-equipment");
+        let stale = start_hidden_save_text(&frame, cx, first);
+        click(cx, "save-equipment-slot-troop-armor");
+        assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
+
+        let stale = start_hidden_save_text(&frame, cx, first);
+        frame.update(cx, |frame, cx| frame.activate_document(second, cx));
+        assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
+
+        frame.update(cx, |frame, cx| frame.activate_document(first, cx));
+        let stale = start_hidden_save_text(&frame, cx, first);
+        assert!(frame.update_in(cx, |frame, window, cx| {
+            frame.window_should_close(window, cx)
+        }));
+        assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
+    }
+
+    #[gpui::test]
     fn save_view_draws_empty_states_without_duplicate_or_inert_panes(cx: &mut TestAppContext) {
         let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
         let cx = cx.add_empty_window();
@@ -1399,7 +2307,7 @@ mod tests {
             SaveFixture::new(1, 0, 0).with_unit_roles([3]).build(),
         );
         frame.update(cx, |frame, cx| {
-            frame.set_save_unit_filter(document, "leader".to_owned(), cx);
+            frame.set_save_unit_filter(document, "leader", cx);
             frame.select_save_section(document, SaveSection::Equipment, cx);
         });
 
@@ -1479,6 +2387,54 @@ mod tests {
         let path = file.path().to_path_buf();
         drop(file);
         SettingsStartup::load(path)
+    }
+
+    fn active_text_input(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+    ) -> Entity<TextInput> {
+        frame.update(cx, |frame, _| {
+            frame.text_edit.as_ref().unwrap().input.clone()
+        })
+    }
+
+    fn start_hidden_save_text(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        document: DocumentID,
+    ) -> Entity<TextInput> {
+        frame.update_in(cx, |frame, window, cx| {
+            frame.start_text_edit(
+                crate::frame::TextEditTarget::save(document, SaveTextField::SetFile),
+                "Alpha".to_owned(),
+                window,
+                cx,
+            );
+            frame.text_edit.as_ref().unwrap().input.clone()
+        })
+    }
+
+    fn assert_hidden_text_commit_is_ignored(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        document: DocumentID,
+        stale: &Entity<TextInput>,
+    ) {
+        frame.update(cx, |frame, _| assert!(frame.text_edit.is_none()));
+        stale.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("Hidden mutation".to_owned()));
+        });
+        cx.run_until_parked();
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Alpha",
+            );
+            assert!(!frame.workspace.is_dirty(document).unwrap());
+        });
     }
 
     fn activate_save(

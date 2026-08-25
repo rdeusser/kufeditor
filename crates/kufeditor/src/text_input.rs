@@ -376,6 +376,7 @@ pub(crate) struct TextInput {
     focus_handle: FocusHandle,
     buffer: TextBuffer,
     placeholder: SharedString,
+    element_id: SharedString,
     colors: TextInputColors,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
@@ -386,6 +387,7 @@ impl TextInput {
     pub(crate) fn new(
         content: impl Into<String>,
         placeholder: impl Into<SharedString>,
+        element_id: impl Into<SharedString>,
         colors: TextInputColors,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -393,6 +395,7 @@ impl TextInput {
             focus_handle: cx.focus_handle(),
             buffer: TextBuffer::new(content),
             placeholder: placeholder.into(),
+            element_id: element_id.into(),
             colors,
             last_layout: None,
             last_bounds: None,
@@ -818,7 +821,10 @@ impl Element for TextElement {
 
 impl Render for TextInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let selector = self.element_id.clone();
         div()
+            .id(self.element_id.clone())
+            .debug_selector(move || selector.to_string())
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus_handle())
             .flex()
@@ -885,7 +891,15 @@ mod tests {
     fn text_sox_content_projection_reflects_platform_replacements(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
-                cx.new(|cx| TextInput::new("original", "placeholder", colors(), cx))
+                cx.new(|cx| {
+                    TextInput::new(
+                        "original",
+                        "placeholder",
+                        "text-input:test-platform-replacement",
+                        colors(),
+                        cx,
+                    )
+                })
             })
             .unwrap()
         });
