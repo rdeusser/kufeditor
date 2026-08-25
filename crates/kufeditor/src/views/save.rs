@@ -12,7 +12,7 @@ use kufeditor_workspace::{
     SaveRosterField, SaveTextField, SaveUnitField, Workspace, WorkspaceError,
 };
 
-use crate::state::SaveSection;
+use crate::state::{SaveSection, SaveUnitVisibility};
 
 pub type SaveProjectionResult<T> = Result<T, Box<WorkspaceError>>;
 
@@ -25,6 +25,7 @@ pub enum SaveProjectionField {
     SavedUnitReference,
     Unit(SaveUnitField),
     Equipment(SaveEquipmentField),
+    EquipmentAttribute(SaveEquipmentField),
     Roster(SaveRosterField),
     MissionCompletion,
     CurrentMission,
@@ -253,6 +254,18 @@ impl SaveRows {
 
     pub const fn kind(&self) -> SaveRowKind {
         self.kind
+    }
+
+    pub fn unit_visibility(&self) -> Option<SaveUnitVisibility<'_>> {
+        if self.kind != SaveRowKind::Units {
+            return None;
+        }
+        Some(match &self.indices {
+            SaveRowIndices::Contiguous(unit_count) => SaveUnitVisibility::All {
+                unit_count: *unit_count,
+            },
+            SaveRowIndices::Filtered(indices) => SaveUnitVisibility::Filtered(indices),
+        })
     }
 
     pub fn locations(&self, requested: Range<usize>) -> Vec<SaveRowLocation> {
@@ -608,7 +621,7 @@ fn equipment_attribute_projection(
             SaveSection::Equipment,
             unit,
             Some(slot),
-            SaveProjectionField::Equipment(field),
+            SaveProjectionField::EquipmentAttribute(field),
         ),
         raw_index,
         name,
@@ -786,7 +799,7 @@ mod tests {
         SaveProjectionField, SaveRowKind, SaveRows, equipment_projection, mission_projection,
         summary_projection, unit_projection, visible_unit_indices,
     };
-    use crate::state::SaveSection;
+    use crate::state::{SaveSection, SaveUnitVisibility};
 
     const CONTEXT_SIZE: usize = 0x438;
     const MAIN_SIZE: usize = 0x154;
@@ -1056,6 +1069,26 @@ mod tests {
     }
 
     #[test]
+    fn save_projection_exposes_compact_unit_visibility() {
+        let (workspace, document) = workspace_with_save(1, 0, 0);
+
+        let all_units = SaveRows::units(&workspace, document, None, "").unwrap();
+        assert_eq!(
+            all_units.unit_visibility(),
+            Some(SaveUnitVisibility::All { unit_count: 1 }),
+        );
+
+        let filtered_units = SaveRows::units(&workspace, document, None, "job 2").unwrap();
+        assert_eq!(
+            filtered_units.unit_visibility(),
+            Some(SaveUnitVisibility::Filtered(&[0])),
+        );
+
+        let roster = SaveRows::roster(&workspace, document).unwrap();
+        assert_eq!(roster.unit_visibility(), None);
+    }
+
+    #[test]
     fn save_projection_resolves_equipment_names_and_attribute_effects() {
         let (workspace, document) = workspace_with_save(1, 0, 0);
         let dictionary = CatalogTree::names().load();
@@ -1083,6 +1116,29 @@ mod tests {
         assert_eq!(attribute.raw_index, 91);
         assert_eq!(attribute.name, "Flame");
         assert_eq!(attribute.effect.as_deref(), Some("Adds fire"));
+    }
+
+    #[test]
+    fn save_projection_equipment_component_ids_are_unique() {
+        let (workspace, document) = workspace_with_save(1, 0, 0);
+        let equipment = equipment_projection(
+            &workspace,
+            document,
+            0,
+            SaveEquipmentSlot::LeaderWeapon,
+            None,
+        )
+        .unwrap();
+
+        let ids = std::iter::once(equipment.id)
+            .chain(equipment.attributes.iter().map(|attribute| attribute.id))
+            .chain(equipment.fields.iter().map(|field| field.id))
+            .collect::<HashSet<_>>();
+
+        assert_eq!(
+            ids.len(),
+            1 + equipment.attributes.len() + equipment.fields.len(),
+        );
     }
 
     #[test]
