@@ -1,9 +1,10 @@
-use crate::{FormatError, SkillDocument, TroopDocument};
+use crate::{FormatError, SkillDocument, TextSoxDocument, TroopDocument};
 
 #[derive(Clone, Debug)]
 pub enum SoxDocument {
     Troop(TroopDocument),
     Skill(SkillDocument),
+    Text(TextSoxDocument),
 }
 
 pub fn parse_sox(bytes: Vec<u8>) -> Result<SoxDocument, FormatError> {
@@ -11,8 +12,11 @@ pub fn parse_sox(bytes: Vec<u8>) -> Result<SoxDocument, FormatError> {
     if let Ok(document) = TroopDocument::from_source(source.clone()) {
         return Ok(SoxDocument::Troop(document));
     }
-    if let Ok(document) = SkillDocument::from_source(source) {
+    if let Ok(document) = SkillDocument::from_source(source.clone()) {
         return Ok(SoxDocument::Skill(document));
+    }
+    if let Ok(document) = TextSoxDocument::from_source(source) {
+        return Ok(SoxDocument::Text(document));
     }
     Err(FormatError::UnsupportedSox)
 }

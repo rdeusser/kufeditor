@@ -32,6 +32,18 @@ fn skill_fixture() -> Vec<u8> {
     bytes
 }
 
+fn text_fixture() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, 100);
+    push_u32(&mut bytes, 2);
+    push_u32(&mut bytes, 17);
+    push_bytes(&mut bytes, b"First");
+    push_u32(&mut bytes, 4_096);
+    push_bytes(&mut bytes, b"Second");
+    bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+    bytes
+}
+
 fn push_bytes(bytes: &mut Vec<u8>, value: &[u8]) {
     bytes.extend_from_slice(&u16::try_from(value.len()).unwrap().to_le_bytes());
     bytes.extend_from_slice(value);
@@ -81,11 +93,38 @@ fn detects_ascii_hex_skill_info() {
 }
 
 #[test]
+fn detects_raw_text_sox() {
+    let document = parse_sox(text_fixture()).unwrap();
+
+    assert!(matches!(document, SoxDocument::Text(_)));
+}
+
+#[test]
+fn detects_ascii_hex_text_sox() {
+    let document = parse_sox(ascii_hex(&text_fixture())).unwrap();
+
+    assert!(matches!(document, SoxDocument::Text(_)));
+}
+
+#[test]
 fn rejects_a_sox_marker_without_a_supported_body() {
     let mut bytes = Vec::new();
     push_u32(&mut bytes, 100);
     push_u32(&mut bytes, 1);
     bytes.resize(8 + 64, 0);
+
+    let error = parse_sox(bytes).unwrap_err();
+
+    assert!(matches!(error, FormatError::UnsupportedSox));
+}
+
+#[test]
+fn rejects_text_shaped_payload_with_a_nul_byte() {
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, 100);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 73);
+    push_bytes(&mut bytes, b"ok\0");
 
     let error = parse_sox(bytes).unwrap_err();
 
