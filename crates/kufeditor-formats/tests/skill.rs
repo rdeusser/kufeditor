@@ -169,6 +169,19 @@ fn rejects_truncated_data() {
 }
 
 #[test]
+fn rejects_an_impossible_large_record_count_without_allocating() {
+    let source = vec![0x64, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff];
+
+    let error = SkillDocument::parse(source).unwrap_err();
+
+    assert!(matches!(&error, FormatError::SkillParse { .. }));
+    assert_eq!(
+        error.to_string(),
+        "failed to parse SkillInfo at offset 8: invalid length 4294967295 for records"
+    );
+}
+
+#[test]
 fn rejects_a_bad_marker() {
     let mut bad_marker = melee_fixture(&[]);
     bad_marker

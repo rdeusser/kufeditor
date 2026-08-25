@@ -1,9 +1,13 @@
 use crate::{
     diagnostic::{Diagnostic, DiagnosticField, Severity},
     error::FormatError,
-    generated::sox_troop_info::{File, TroopInfoRecord},
+    generated::sox_troop_info::{self, File, TroopInfoRecord},
     sox::SoxSource,
 };
+
+const SOX_HEADER_SIZE: usize = 8;
+const SOX_FOOTER_SIZE: usize = 64;
+const TROOP_RECORD_SIZE: usize = 37 * 4;
 
 macro_rules! troop_fields {
     ($($variant:ident => ($member:ident, $label:literal, $group:ident)),+ $(,)?) => {
@@ -143,6 +147,7 @@ impl TroopDocument {
     pub fn parse(bytes: Vec<u8>) -> Result<Self, FormatError> {
         let source = SoxSource::parse(bytes)?;
         let decoded = source.decoded();
+        preflight_record_count(decoded)?;
         let mut offset = 0;
         let file = File::parse(decoded, &mut offset).map_err(|source| FormatError::TroopParse {
             offset,
@@ -256,4 +261,31 @@ impl TroopDocument {
                 field: DiagnosticField::Troop(field),
             })
     }
+}
+
+fn preflight_record_count(bytes: &[u8]) -> Result<(), FormatError> {
+    let Some(count_bytes) = bytes.get(4..SOX_HEADER_SIZE) else {
+        return Ok(());
+    };
+    let &[first, second, third, fourth] = count_bytes else {
+        return Ok(());
+    };
+    let record_count = u32::from_le_bytes([first, second, third, fourth]);
+    let maximum_count = bytes
+        .len()
+        .saturating_sub(SOX_HEADER_SIZE + SOX_FOOTER_SIZE)
+        / TROOP_RECORD_SIZE;
+
+    if u128::from(record_count) <= maximum_count as u128 {
+        return Ok(());
+    }
+
+    Err(FormatError::TroopParse {
+        offset: SOX_HEADER_SIZE,
+        source: sox_troop_info::Error::InvalidLength {
+            field: "records",
+            value: i128::from(record_count),
+        }
+        .into(),
+    })
 }

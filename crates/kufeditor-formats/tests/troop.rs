@@ -202,6 +202,19 @@ fn truncated_input_returns_an_error() {
 }
 
 #[test]
+fn impossible_large_record_count_returns_a_typed_parse_error() {
+    let source = vec![0x64, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff];
+
+    let error = TroopDocument::parse(source).unwrap_err();
+
+    assert!(matches!(&error, FormatError::TroopParse { .. }));
+    assert_eq!(
+        error.to_string(),
+        "failed to parse TroopInfo at offset 8: invalid length 4294967295 for records"
+    );
+}
+
+#[test]
 fn every_wire_field_has_editor_metadata() {
     assert_eq!(TroopField::ALL.len(), 37);
     assert!(
