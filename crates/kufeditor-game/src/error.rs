@@ -1,4 +1,10 @@
-use std::{io, path::PathBuf, str::Utf8Error};
+use std::{
+    error::Error as StdError,
+    fmt::{self, Display, Formatter},
+    io,
+    path::PathBuf,
+    str::Utf8Error,
+};
 
 use kufeditor_formats::FormatError;
 use thiserror::Error;
@@ -14,35 +20,71 @@ pub struct CatalogIssue {
     pub error: CatalogFileError,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum CatalogFileError {
-    #[error("failed to read the catalog file: {source}")]
     Read {
-        #[source]
         source: io::Error,
     },
 
-    #[error("failed to parse or access the catalog format: {source}")]
     Format {
-        #[source]
-        source: FormatError,
+        source: Box<FormatError>,
     },
 
-    #[error("weapon file is not valid UTF-8: {source}")]
     InvalidWeaponUTF8 {
-        #[source]
         source: Utf8Error,
     },
 
-    #[error("invalid weapon syntax on line {line}: {reason}")]
-    WeaponSyntax { line: usize, reason: &'static str },
+    WeaponSyntax {
+        line: usize,
+        reason: &'static str,
+    },
 
-    #[error("invalid field encoding in {role} record {record} field {field}")]
     InvalidFieldEncoding {
         role: CatalogRole,
         record: usize,
         field: usize,
     },
+}
+
+impl Display for CatalogFileError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { source } => {
+                write!(formatter, "failed to read the catalog file: {source}")
+            }
+            Self::Format { source } => {
+                write!(
+                    formatter,
+                    "failed to parse or access the catalog format: {source}"
+                )
+            }
+            Self::InvalidWeaponUTF8 { source } => {
+                write!(formatter, "weapon file is not valid UTF-8: {source}")
+            }
+            Self::WeaponSyntax { line, reason } => {
+                write!(formatter, "invalid weapon syntax on line {line}: {reason}")
+            }
+            Self::InvalidFieldEncoding {
+                role,
+                record,
+                field,
+            } => write!(
+                formatter,
+                "invalid field encoding in {role} record {record} field {field}"
+            ),
+        }
+    }
+}
+
+impl StdError for CatalogFileError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Read { source } => Some(source),
+            Self::Format { source } => Some(source.as_ref()),
+            Self::InvalidWeaponUTF8 { source } => Some(source),
+            Self::WeaponSyntax { .. } | Self::InvalidFieldEncoding { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Error)]

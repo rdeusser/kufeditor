@@ -525,7 +525,9 @@ fn format_issue(role: CatalogRole, path: &Path, source: FormatError) -> CatalogI
     CatalogIssue {
         role,
         path: path.to_path_buf(),
-        error: CatalogFileError::Format { source },
+        error: CatalogFileError::Format {
+            source: Box::new(source),
+        },
     }
 }
 
@@ -541,10 +543,12 @@ fn weapon_syntax(path: &Path, line: usize, reason: &'static str) -> CatalogIssue
 mod tests {
     use std::{
         collections::HashSet,
+        error::Error,
         fs,
         path::{Path, PathBuf},
     };
 
+    use kufeditor_formats::FormatError;
     use tempfile::TempDir;
 
     use super::{CatalogRole, load_catalog_data};
@@ -717,6 +721,14 @@ mod tests {
         assert_eq!(issue.role, CatalogRole::LeaderPools);
         assert_eq!(issue.path, missing_path);
         assert!(matches!(issue.error, CatalogFileError::Read { .. }));
+        let catalog_error = issue.source().unwrap();
+        assert!(catalog_error.downcast_ref::<CatalogFileError>().is_some());
+        let io_error = catalog_error.source().unwrap();
+        assert!(io_error.downcast_ref::<std::io::Error>().is_some());
+        assert_eq!(
+            catalog_error.to_string(),
+            format!("failed to read the catalog file: {io_error}")
+        );
     }
 
     #[test]
@@ -739,6 +751,28 @@ mod tests {
     }
 
     #[test]
+    fn catalog_format_issue_exposes_format_error_source() {
+        let tree = complete_catalog_tree();
+        tree.write(CatalogRole::CharacterNames, b"not a SOX table");
+
+        let loaded = load_catalog_data(&tree.sox).unwrap();
+        let issue = loaded
+            .issues
+            .iter()
+            .find(|issue| issue.role == CatalogRole::CharacterNames)
+            .unwrap();
+
+        let catalog_error = issue.source().unwrap();
+        assert!(catalog_error.downcast_ref::<CatalogFileError>().is_some());
+        let format_error = catalog_error.source().unwrap();
+        assert!(format_error.downcast_ref::<FormatError>().is_some());
+        assert_eq!(
+            catalog_error.to_string(),
+            format!("failed to parse or access the catalog format: {format_error}")
+        );
+    }
+
+    #[test]
     fn catalog_weapon_utf8_and_syntax_issues_retain_exact_lines() {
         let tree = complete_catalog_tree();
         let weapon_path = tree.role_path(CatalogRole::WeaponNames);
@@ -755,6 +789,14 @@ mod tests {
             utf8_issue.error,
             CatalogFileError::InvalidWeaponUTF8 { .. }
         ));
+        let catalog_error = utf8_issue.source().unwrap();
+        assert!(catalog_error.downcast_ref::<CatalogFileError>().is_some());
+        let utf8_error = catalog_error.source().unwrap();
+        assert!(utf8_error.downcast_ref::<std::str::Utf8Error>().is_some());
+        assert_eq!(
+            catalog_error.to_string(),
+            format!("weapon file is not valid UTF-8: {utf8_error}")
+        );
 
         let syntax_cases = [
             (b"x\n".as_slice(), 1, "invalid weapon-type count"),
@@ -800,7 +842,25 @@ mod tests {
                     reason: actual_reason,
                 } if *actual_line == line && *actual_reason == reason
             ));
+            assert_eq!(
+                issue.error.to_string(),
+                format!("invalid weapon syntax on line {line}: {reason}")
+            );
         }
+    }
+
+    #[test]
+    fn catalog_invalid_field_encoding_message_is_stable() {
+        let error = CatalogFileError::InvalidFieldEncoding {
+            role: CatalogRole::TroopNames,
+            record: 7,
+            field: 3,
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "invalid field encoding in troop names record 7 field 3"
+        );
     }
 
     #[test]
