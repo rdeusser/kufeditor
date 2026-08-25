@@ -375,10 +375,8 @@ impl AppFrame {
                         self.game_paths = previous_paths;
                         self.root_revisions = previous_revisions;
                     }
-                    if update.changed_games.contains(&Game::Crusaders) {
-                        self.reconcile_save_catalog(cx);
-                    }
                 }
+                self.reconcile_save_catalog(cx);
 
                 let notice = if update.installation_count == 0 {
                     Some(Notice::plain(
@@ -1240,6 +1238,128 @@ mod tests {
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Warning);
                 assert_eq!(notice.summary(), "No Steam installations were found");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn accepted_discovery_with_unchanged_roots_reconciles_the_save_catalog(
+        cx: &mut TestAppContext,
+    ) {
+        let fixture = ReportFixture::complete();
+        let expected_crusaders = fixture.crusaders.clone().unwrap();
+        let expected_heroes = fixture.heroes.clone().unwrap();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(expected_crusaders.clone()));
+                frame
+                    .game_paths
+                    .set_root(Game::Heroes, Some(expected_heroes.clone()));
+                open_active_save(frame, cx);
+                let stale_request = frame.shell.begin_save_catalog();
+                frame
+                    .save_catalog
+                    .begin(SaveCatalogKey::new(stale_request, "/stale/crusaders"));
+                let key = begin_discovery(frame);
+
+                frame.finish_discovery(key, Ok(fixture.report), cx);
+
+                assert_eq!(frame.root_revisions, RootRevisions::default());
+                assert_eq!(frame.task_launches.settings, 0);
+                assert_eq!(frame.task_launches.save_catalog, 2);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key }
+                        if key.root() == expected_crusaders
+                            && key.request() != stale_request
+                ));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn zero_installation_discovery_reconciles_the_configured_save_catalog(cx: &mut TestAppContext) {
+        let installation = InstallationFixture::complete();
+        let fixture = ReportFixture::empty();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(installation.crusaders.clone()));
+                open_active_save(frame, cx);
+                let stale_request = frame.shell.begin_save_catalog();
+                frame
+                    .save_catalog
+                    .begin(SaveCatalogKey::new(stale_request, "/stale/crusaders"));
+                let key = begin_discovery(frame);
+
+                frame.finish_discovery(key, Ok(fixture.report), cx);
+
+                assert_eq!(frame.task_launches.settings, 0);
+                assert_eq!(frame.task_launches.save_catalog, 2);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key }
+                        if key.root() == installation.crusaders
+                            && key.request() != stale_request
+                ));
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.level(), NoticeLevel::Warning);
+                assert_eq!(notice.summary(), "No Steam installations were found");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn heroes_only_discovery_restores_matching_save_catalog_without_restarting(
+        cx: &mut TestAppContext,
+    ) {
+        let fixture = ReportFixture::complete();
+        let expected_crusaders = fixture.crusaders.clone().unwrap();
+        let expected_heroes = fixture.heroes.clone().unwrap();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(expected_crusaders.clone()));
+                open_active_save(frame, cx);
+                let save_key = match frame.save_catalog.status() {
+                    SaveCatalogStatus::Loading { key } => key.clone(),
+                    _ => panic!("configured active save must start loading"),
+                };
+                assert!(
+                    !frame
+                        .save_catalog
+                        .dormant(Some(expected_crusaders.as_path()))
+                );
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Dormant
+                ));
+                let key = begin_discovery(frame);
+
+                frame.finish_discovery(key, Ok(fixture.report), cx);
+
+                assert_eq!(
+                    frame.game_paths.root(Game::Heroes),
+                    Some(expected_heroes.as_path())
+                );
+                assert_eq!(frame.root_revisions.revision(Game::Crusaders), 0);
+                assert_eq!(frame.root_revisions.revision(Game::Heroes), 1);
+                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert!(frame.shell.accepts_save_catalog(save_key.request()));
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key } if key == &save_key
+                ));
             })
             .unwrap();
     }
