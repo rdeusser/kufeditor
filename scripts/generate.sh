@@ -18,3 +18,9 @@ done
     --no-cargo \
     --out "${rust_output}" \
     "${project_root}/schemas/sox_troop_info.clv"
+
+"${cleave_command}" generate \
+    --lang rust \
+    --no-cargo \
+    --out "${rust_output}" \
+    "${project_root}/schemas/sox_skill_info.clv"
