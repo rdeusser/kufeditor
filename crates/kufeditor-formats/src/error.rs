@@ -2,9 +2,172 @@ use thiserror::Error;
 
 use crate::{
     diagnostic::DiagnosticField,
-    generated::{sox_skill_info, sox_troop_info},
+    generated::{
+        sox_ability_by_job, sox_ability_info, sox_char_info, sox_custom_random_table,
+        sox_item_att_info, sox_item_type_info, sox_job_info, sox_leader_generation,
+        sox_library_info, sox_resist_info, sox_skill_info, sox_skill_point_table,
+        sox_special_names, sox_troop_info, sox_unit_uv_info, sox_unit_uvid, sox_worldmap_char_info,
+        sox_worldmap_troop_info,
+    },
+    schema::SoxSchema,
     skill::SkillTextField,
 };
+
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum GeneratedSoxError {
+    #[error("unexpected end of input at offset {offset}: need {needed} bytes, have {remaining}")]
+    UnexpectedEof {
+        offset: usize,
+        needed: usize,
+        remaining: usize,
+    },
+
+    #[error("invalid {enum_name} value {value}")]
+    InvalidEnum {
+        enum_name: &'static str,
+        value: i128,
+    },
+
+    #[error("unknown tag {value} for {struct_name}.{field}")]
+    UnknownTag {
+        struct_name: &'static str,
+        field: &'static str,
+        value: i128,
+    },
+
+    #[error("validation {id} failed for {field}: {message}")]
+    Validation {
+        id: &'static str,
+        message: &'static str,
+        field: &'static str,
+    },
+
+    #[error("unsupported encoding {encoding}")]
+    UnsupportedEncoding { encoding: &'static str },
+
+    #[error("invalid {encoding} text")]
+    InvalidEncoding { encoding: &'static str },
+
+    #[error("invalid regular expression {pattern:?}: {message}")]
+    InvalidRegex { pattern: String, message: String },
+
+    #[error("invalid length {value} for {field}")]
+    InvalidLength { field: &'static str, value: i128 },
+
+    #[error("length {value} for {field} does not fit {target}")]
+    LengthOverflow {
+        field: &'static str,
+        value: String,
+        target: &'static str,
+    },
+
+    #[error("{field} has length {actual}, expected {expected}")]
+    FixedSize {
+        field: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+
+    #[error("payload for {field} does not match tag {tag}")]
+    MatchType { field: &'static str, tag: i128 },
+
+    #[error("parsing {field} made no progress at offset {offset}")]
+    NoProgress { field: &'static str, offset: usize },
+}
+
+macro_rules! impl_generated_sox_error {
+    ($($module:ident),+ $(,)?) => {
+        $(
+            impl From<$module::Error> for GeneratedSoxError {
+                fn from(error: $module::Error) -> Self {
+                    match error {
+                        $module::Error::UnexpectedEof {
+                            offset,
+                            needed,
+                            remaining,
+                        } => Self::UnexpectedEof {
+                            offset,
+                            needed,
+                            remaining,
+                        },
+                        $module::Error::InvalidEnum { enum_name, value } => {
+                            Self::InvalidEnum { enum_name, value }
+                        }
+                        $module::Error::UnknownTag {
+                            struct_name,
+                            field,
+                            value,
+                        } => Self::UnknownTag {
+                            struct_name,
+                            field,
+                            value,
+                        },
+                        $module::Error::Validation { id, message, field } => {
+                            Self::Validation { id, message, field }
+                        }
+                        $module::Error::UnsupportedEncoding { encoding } => {
+                            Self::UnsupportedEncoding { encoding }
+                        }
+                        $module::Error::InvalidEncoding { encoding } => {
+                            Self::InvalidEncoding { encoding }
+                        }
+                        $module::Error::InvalidRegex { pattern, message } => {
+                            Self::InvalidRegex { pattern, message }
+                        }
+                        $module::Error::InvalidLength { field, value } => {
+                            Self::InvalidLength { field, value }
+                        }
+                        $module::Error::LengthOverflow {
+                            field,
+                            value,
+                            target,
+                        } => Self::LengthOverflow {
+                            field,
+                            value,
+                            target,
+                        },
+                        $module::Error::FixedSize {
+                            field,
+                            expected,
+                            actual,
+                        } => Self::FixedSize {
+                            field,
+                            expected,
+                            actual,
+                        },
+                        $module::Error::MatchType { field, tag } => {
+                            Self::MatchType { field, tag }
+                        }
+                        $module::Error::NoProgress { field, offset } => {
+                            Self::NoProgress { field, offset }
+                        }
+                    }
+                }
+            }
+        )+
+    };
+}
+
+impl_generated_sox_error!(
+    sox_ability_by_job,
+    sox_ability_info,
+    sox_char_info,
+    sox_custom_random_table,
+    sox_item_att_info,
+    sox_item_type_info,
+    sox_job_info,
+    sox_leader_generation,
+    sox_library_info,
+    sox_resist_info,
+    sox_skill_info,
+    sox_skill_point_table,
+    sox_special_names,
+    sox_troop_info,
+    sox_unit_uv_info,
+    sox_unit_uvid,
+    sox_worldmap_char_info,
+    sox_worldmap_troop_info,
+);
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum TextSoxParseError {
@@ -62,6 +225,21 @@ pub enum FormatError {
 
     #[error("saved SOX source image has an inconsistent encoding envelope")]
     InconsistentSoxRebase,
+
+    #[error("failed to parse {schema} at offset {offset}: {source}")]
+    SchemaParse {
+        schema: SoxSchema,
+        offset: usize,
+        #[source]
+        source: GeneratedSoxError,
+    },
+
+    #[error("failed to encode {schema}: {source}")]
+    SchemaEncode {
+        schema: SoxSchema,
+        #[source]
+        source: GeneratedSoxError,
+    },
 
     #[error("failed to parse text SOX at offset {offset}: {source}")]
     TextSoxParse {
