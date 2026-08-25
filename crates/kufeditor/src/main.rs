@@ -1,6 +1,7 @@
 mod actions;
 mod components;
 mod frame;
+mod number_edit;
 mod state;
 mod theme;
 mod views;

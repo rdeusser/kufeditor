@@ -1,21 +1,13 @@
 use gpui::{AnyElement, Div, div, prelude::*, px};
-use kufeditor_workspace::{DocumentId, Workspace};
 
 use crate::{components, theme::Theme};
 
-pub fn render(
-    theme: &Theme,
-    workspace: &Workspace,
-    active_document: Option<DocumentId>,
-    selected_troop: usize,
-    tabs: Vec<AnyElement>,
-) -> Div {
-    let body = match active_document {
-        Some(id) => {
-            let title = workspace
-                .title(id)
-                .unwrap_or_else(|error| format!("Unavailable document: {error}"));
-            div()
+pub fn render(theme: &Theme, tabs: Vec<AnyElement>, editor: Option<Div>) -> Div {
+    let body = editor.unwrap_or_else(|| {
+        div().size_full().p(px(28.0)).child(
+            components::surface(theme)
+                .size_full()
+                .p(px(28.0))
                 .flex()
                 .flex_col()
                 .gap(px(10.0))
@@ -23,30 +15,15 @@ pub fn render(
                     div()
                         .text_size(px(22.0))
                         .text_color(theme.text)
-                        .child(title),
+                        .child("No file is open"),
                 )
                 .child(
                     div()
                         .text_color(theme.text_dim)
-                        .child(format!("Selected troop record: {}", selected_troop + 1)),
-                )
-        }
-        None => div()
-            .flex()
-            .flex_col()
-            .gap(px(10.0))
-            .child(
-                div()
-                    .text_size(px(22.0))
-                    .text_color(theme.text)
-                    .child("No file is open"),
-            )
-            .child(
-                div()
-                    .text_color(theme.text_dim)
-                    .child("Open a TroopInfo.sox file to begin editing."),
-            ),
-    };
+                        .child("Open a TroopInfo.sox file to begin editing."),
+                ),
+        )
+    });
 
     div()
         .size_full()
@@ -62,12 +39,5 @@ pub fn render(
                 .border_color(theme.border)
                 .children(tabs),
         )
-        .child(
-            div().flex_1().min_h_0().p(px(28.0)).child(
-                components::surface(theme)
-                    .size_full()
-                    .p(px(28.0))
-                    .child(body),
-            ),
-        )
+        .child(div().flex_1().min_h_0().child(body))
 }

@@ -2,15 +2,18 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
 use gpui::{
-    Action, AnyElement, App, AsyncApp, Context, Div, FocusHandle, Focusable, PathPromptOptions,
-    Stateful, WeakEntity, Window, div, px,
+    Action, AnyElement, App, AsyncApp, Context, Div, FocusHandle, Focusable, KeyDownEvent,
+    PathPromptOptions, Stateful, WeakEntity, Window, div, px,
 };
 use kufeditor_game::Game;
-use kufeditor_workspace::{DocumentId, SaveToken, Workspace, load_path};
+use kufeditor_workspace::{
+    DocumentEdit, DocumentId, SaveToken, TroopField, TroopGroup, Workspace, load_path,
+};
 
 use crate::{
     actions::{OpenFile, Redo, Save, SaveAll, SaveAs, Undo},
     components,
+    number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     state::{Area, Notice, NoticeLevel, RequestId, ShellState},
     theme::Theme,
     views,
@@ -23,6 +26,7 @@ pub struct AppFrame {
     focus: FocusHandle,
     active_document: Option<DocumentId>,
     selected_troop: usize,
+    number_edit: Option<NumberEdit>,
     notice: Option<Notice>,
 }
 
@@ -35,6 +39,7 @@ impl AppFrame {
             focus: cx.focus_handle(),
             active_document: None,
             selected_troop: 0,
+            number_edit: None,
             notice: None,
         }
     }
@@ -43,7 +48,50 @@ impl AppFrame {
         self.focus.clone()
     }
 
+    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.number_edit.is_none() {
+            return;
+        }
+        let Some(command) = number_command(event) else {
+            return;
+        };
+        cx.stop_propagation();
+
+        let outcome = self
+            .number_edit
+            .as_mut()
+            .map_or(NumberOutcome::Cancel, |edit| edit.apply(command));
+        match outcome {
+            NumberOutcome::Continue | NumberOutcome::Invalid => {}
+            NumberOutcome::Cancel => self.number_edit = None,
+            NumberOutcome::Commit(value) => {
+                let Some(edit) = self.number_edit.as_ref() else {
+                    return;
+                };
+                let result = self.workspace.apply(
+                    edit.document(),
+                    DocumentEdit::SetTroopField {
+                        record: edit.record(),
+                        field: edit.field(),
+                        value,
+                    },
+                );
+                match result {
+                    Ok(()) => {
+                        self.number_edit = None;
+                        self.notice = None;
+                    }
+                    Err(error) => {
+                        self.notice = Some(Notice::error("Could not update TroopInfo", &error));
+                    }
+                }
+            }
+        }
+        cx.notify();
+    }
+
     fn open_action(&mut self, _: &OpenFile, _: &mut Window, cx: &mut Context<Self>) {
+        self.number_edit = None;
         let request = self.shell.begin_open();
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -62,8 +110,7 @@ impl AppFrame {
                     return;
                 }
                 Ok(Err(error)) => {
-                    let notice =
-                        Notice::error("Could not open the file picker", error.as_ref());
+                    let notice = Notice::error("Could not open the file picker", error.as_ref());
                     set_open_notice(&entity, cx, request, Some(notice));
                     return;
                 }
@@ -124,12 +171,14 @@ impl AppFrame {
     }
 
     fn save_action(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
+        self.number_edit = None;
         if let Some(document_id) = self.active_document {
             self.start_save(document_id, None, cx);
         }
     }
 
     fn save_all_action(&mut self, _: &SaveAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.number_edit = None;
         let document_ids = self.workspace.document_ids().to_vec();
         let mut started = false;
         for document_id in document_ids {
@@ -150,6 +199,7 @@ impl AppFrame {
     }
 
     fn save_as_action(&mut self, _: &SaveAs, _: &mut Window, cx: &mut Context<Self>) {
+        self.number_edit = None;
         let Some(document_id) = self.active_document else {
             return;
         };
@@ -204,6 +254,7 @@ impl AppFrame {
     }
 
     fn move_history(&mut self, redo: bool, cx: &mut Context<Self>) {
+        self.number_edit = None;
         let Some(document_id) = self.active_document else {
             return;
         };
@@ -385,6 +436,7 @@ impl AppFrame {
                     })
                     .on_click(cx.listener(move |frame, _, _, cx| {
                         frame.shell.select_game(game);
+                        frame.number_edit = None;
                         cx.notify();
                     }))
             }))
@@ -410,6 +462,7 @@ impl AppFrame {
                 )
                 .on_click(cx.listener(move |frame, _, _, cx| {
                     frame.shell.select_area(area);
+                    frame.number_edit = None;
                     cx.notify();
                 }))
             }))
@@ -424,16 +477,168 @@ impl AppFrame {
     fn content(&self, cx: &mut Context<Self>) -> Div {
         match self.shell.area() {
             Area::Home => views::home::render(&self.theme, self.shell.game()),
-            Area::Files => views::files::render(
-                &self.theme,
-                &self.workspace,
-                self.active_document,
-                self.selected_troop,
-                self.document_tabs(cx),
-            ),
+            Area::Files => {
+                let editor = self
+                    .active_document
+                    .map(|document_id| self.troop_editor(document_id, cx));
+                views::files::render(&self.theme, self.document_tabs(cx), editor)
+            }
             Area::Mods => views::mods::render(&self.theme),
             Area::Patches => views::patches::render(&self.theme),
         }
+    }
+
+    fn troop_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+        let record_count = match self.workspace.record_count(document_id) {
+            Ok(count) => count,
+            Err(error) => {
+                return div()
+                    .size_full()
+                    .p(px(28.0))
+                    .text_color(self.theme.text_dim)
+                    .child(format!("Could not read TroopInfo: {error}"));
+            }
+        };
+        let selected = self.selected_troop.min(record_count.saturating_sub(1));
+        let records = self.troop_records(document_id, record_count, selected, cx);
+        let groups = if record_count == 0 {
+            vec![
+                div()
+                    .text_color(self.theme.text_dim)
+                    .child("This file has no troop records.")
+                    .into_any_element(),
+            ]
+        } else {
+            self.troop_groups(document_id, selected, cx)
+        };
+        let diagnostics = self.troop_diagnostics(document_id);
+        views::troop::render(&self.theme, records, groups, diagnostics)
+    }
+
+    fn troop_records(
+        &self,
+        document_id: DocumentId,
+        record_count: usize,
+        selected: usize,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        (0..record_count)
+            .map(|record| {
+                views::troop::record_row(
+                    &self.theme,
+                    ("troop-record", record),
+                    record,
+                    record == selected,
+                )
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.active_document = Some(document_id);
+                    frame.selected_troop = record;
+                    frame.number_edit = None;
+                    window.focus(&frame.focus);
+                    cx.notify();
+                }))
+                .into_any_element()
+            })
+            .collect()
+    }
+
+    fn troop_groups(
+        &self,
+        document_id: DocumentId,
+        record: usize,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        TroopGroup::ALL
+            .into_iter()
+            .map(|group| {
+                let fields = TroopField::ALL
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, field)| field.group() == group)
+                    .map(|(index, field)| self.troop_field(document_id, record, field, index, cx))
+                    .collect();
+                let help = (group == TroopGroup::Resistances)
+                    .then_some("Damage %: 0 immune, 100 normal, 200 vulnerable");
+                let derived = (group == TroopGroup::Formation).then(|| {
+                    let width = self
+                        .workspace
+                        .troop_value(document_id, record, TroopField::DefaultUnitNumX)
+                        .unwrap_or(0);
+                    let depth = self
+                        .workspace
+                        .troop_value(document_id, record, TroopField::DefaultUnitNumY)
+                        .unwrap_or(0);
+                    ("Units Total", width.saturating_mul(depth))
+                });
+                views::troop::group(&self.theme, group.label(), fields, help, derived)
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    fn troop_field(
+        &self,
+        document_id: DocumentId,
+        record: usize,
+        field: TroopField,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let value = self.workspace.troop_value(document_id, record, field);
+        let active_edit = self.number_edit.as_ref().filter(|edit| {
+            edit.document() == document_id && edit.record() == record && edit.field() == field
+        });
+        let display = active_edit.map_or_else(
+            || {
+                value
+                    .as_ref()
+                    .map_or_else(|_| "—".to_owned(), i32::to_string)
+            },
+            |edit| edit.draft().to_owned(),
+        );
+        let row = views::troop::field_row(
+            &self.theme,
+            ("troop-field", index),
+            field.label(),
+            display,
+            active_edit.is_some(),
+            active_edit.is_some_and(NumberEdit::invalid),
+        );
+
+        match value {
+            Ok(value) => row
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.number_edit = Some(NumberEdit::new(document_id, record, field, value));
+                    window.focus(&frame.focus);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            Err(_) => row.into_any_element(),
+        }
+    }
+
+    fn troop_diagnostics(&self, document_id: DocumentId) -> Vec<AnyElement> {
+        let diagnostics = self.workspace.diagnostics(document_id).unwrap_or_default();
+        if diagnostics.is_empty() {
+            return vec![views::troop::no_diagnostics(&self.theme).into_any_element()];
+        }
+
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                views::troop::diagnostic_row(
+                    &self.theme,
+                    diagnostic.severity,
+                    format!(
+                        "{} · {}",
+                        views::troop::troop_name(diagnostic.record),
+                        diagnostic.field.label()
+                    ),
+                    diagnostic.message,
+                )
+                .into_any_element()
+            })
+            .collect()
     }
 
     fn document_tabs(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -458,6 +663,7 @@ impl AppFrame {
                 .on_click(cx.listener(move |frame, _, _, cx| {
                     frame.active_document = Some(document_id);
                     frame.selected_troop = 0;
+                    frame.number_edit = None;
                     cx.notify();
                 }))
                 .into_any_element()
@@ -543,6 +749,24 @@ fn display_name(path: &Path) -> String {
         .into_owned()
 }
 
+fn number_command(event: &KeyDownEvent) -> Option<NumberCommand> {
+    match event.keystroke.key.as_str() {
+        "enter" => Some(NumberCommand::Commit),
+        "escape" => Some(NumberCommand::Cancel),
+        "backspace" => Some(NumberCommand::Backspace),
+        "up" => Some(NumberCommand::Increment),
+        "down" => Some(NumberCommand::Decrement),
+        _ => {
+            let mut characters = event.keystroke.key_char.as_deref()?.chars();
+            let character = characters.next()?;
+            characters
+                .next()
+                .is_none()
+                .then_some(NumberCommand::Insert(character))
+        }
+    }
+}
+
 impl Focusable for AppFrame {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -562,6 +786,7 @@ impl Render for AppFrame {
             .text_size(px(14.0))
             .track_focus(&self.focus)
             .key_context("KufEditor")
+            .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::open_action))
             .on_action(cx.listener(Self::save_action))
             .on_action(cx.listener(Self::save_all_action))
@@ -594,7 +819,10 @@ mod tests {
         reason = "the GPUI test creates one controlled in-memory window"
     )]
 
+    use std::path::PathBuf;
+
     use gpui::{AppContext, TestAppContext, WindowOptions};
+    use kufeditor_workspace::{Document, TroopDocument};
 
     use super::AppFrame;
     use crate::state::Area;
@@ -609,6 +837,42 @@ mod tests {
         window
             .update(cx, |frame, _, _| {
                 assert_eq!(frame.shell.area(), Area::Home);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn troop_editor_builds_for_a_loaded_document(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                let mut bytes = vec![0_u8; 8 + 148 + 64];
+                bytes
+                    .get_mut(0..4)
+                    .unwrap()
+                    .copy_from_slice(&100_u32.to_le_bytes());
+                bytes
+                    .get_mut(4..8)
+                    .unwrap()
+                    .copy_from_slice(&1_u32.to_le_bytes());
+                bytes
+                    .get_mut(108..112)
+                    .unwrap()
+                    .copy_from_slice(&800_i32.to_le_bytes());
+                let document = TroopDocument::parse(bytes).unwrap();
+                let document_id = frame
+                    .workspace
+                    .open_loaded(PathBuf::from("TroopInfo.sox"), Document::Troop(document));
+
+                frame.active_document = Some(document_id);
+                frame.shell.select_area(Area::Files);
+                let _editor = frame.troop_editor(document_id, cx);
+
+                assert_eq!(frame.workspace.record_count(document_id).unwrap(), 1);
             })
             .unwrap();
     }
