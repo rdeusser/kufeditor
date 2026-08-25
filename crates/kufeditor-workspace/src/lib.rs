@@ -2,6 +2,7 @@
 
 mod document;
 mod history;
+mod recent;
 mod storage;
 
 use std::{
@@ -13,6 +14,9 @@ pub use document::{Document, DocumentEdit, DocumentId, DocumentKind, StateId};
 pub use kufeditor_formats::{
     Diagnostic, Severity, SkillDocument, SkillTextField, TextSoxDocument, TextSoxField,
     TroopDocument, TroopField, TroopGroup,
+};
+pub use recent::{
+    DEFAULT_RECENT_FILE_LIMIT, RECENT_FILE_LIMITS, RecentFiles, normalize_recent_limit,
 };
 pub use storage::{LoadedDocument, SaveRequest, SaveToken, SavedDocument, load_path};
 use thiserror::Error;
