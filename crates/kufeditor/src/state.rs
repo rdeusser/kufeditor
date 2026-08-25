@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use kufeditor_game::Game;
-use kufeditor_workspace::DocumentID;
+use kufeditor_workspace::{DocumentID, SaveEquipmentSlot};
 
 #[derive(Debug, Default)]
 pub struct RecordSelections {
@@ -15,6 +15,227 @@ impl RecordSelections {
 
     pub fn select(&mut self, document: DocumentID, record: usize) {
         self.records.insert(document, record);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SaveSection {
+    #[default]
+    Summary,
+    Units,
+    Equipment,
+    Roster,
+    Missions,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(
+    dead_code,
+    reason = "Task 11 stores save presentation state in the GPUI frame"
+)]
+pub struct SavePresentationState {
+    section: SaveSection,
+    inspected_unit: usize,
+    equipment_slot: SaveEquipmentSlot,
+    unit_filter: String,
+}
+
+#[allow(
+    dead_code,
+    reason = "Task 11 reads save presentation state while rendering"
+)]
+impl SavePresentationState {
+    pub const fn section(&self) -> SaveSection {
+        self.section
+    }
+
+    pub const fn inspected_unit(&self) -> usize {
+        self.inspected_unit
+    }
+
+    pub const fn equipment_slot(&self) -> SaveEquipmentSlot {
+        self.equipment_slot
+    }
+
+    pub fn unit_filter(&self) -> &str {
+        &self.unit_filter
+    }
+}
+
+impl Default for SavePresentationState {
+    fn default() -> Self {
+        Self {
+            section: SaveSection::Summary,
+            inspected_unit: 0,
+            equipment_slot: SaveEquipmentSlot::LeaderWeapon,
+            unit_filter: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(
+    dead_code,
+    reason = "Task 11 consumes transition outcomes to cancel active editors"
+)]
+pub enum SavePresentationTransition {
+    Unchanged,
+    Changed,
+    ChangedAndCancelDraft,
+}
+
+#[derive(Debug, Default)]
+#[allow(
+    dead_code,
+    reason = "Task 11 stores document-scoped save presentation state in the frame"
+)]
+pub struct SavePresentationStates {
+    documents: HashMap<DocumentID, SavePresentationState>,
+    active_document: Option<DocumentID>,
+}
+
+#[allow(
+    dead_code,
+    reason = "Task 11 connects document and control transitions to the frame"
+)]
+impl SavePresentationStates {
+    pub fn for_document(&mut self, document: DocumentID) -> &SavePresentationState {
+        self.documents.entry(document).or_default()
+    }
+
+    pub fn get(&self, document: DocumentID) -> Option<&SavePresentationState> {
+        self.documents.get(&document)
+    }
+
+    pub const fn active_document(&self) -> Option<DocumentID> {
+        self.active_document
+    }
+
+    pub fn activate_document(
+        &mut self,
+        document: DocumentID,
+        unit_count: usize,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let reconciliation = self.reconcile_document(document, unit_count, draft_active);
+        if self.active_document == Some(document) {
+            return reconciliation;
+        }
+        self.active_document = Some(document);
+        changed_transition(draft_active)
+    }
+
+    pub fn reconcile_document(
+        &mut self,
+        document: DocumentID,
+        unit_count: usize,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let state = self.documents.entry(document).or_default();
+        let inspected_unit = clamp_unit(state.inspected_unit, unit_count);
+        if state.inspected_unit == inspected_unit {
+            return SavePresentationTransition::Unchanged;
+        }
+        state.inspected_unit = inspected_unit;
+        changed_transition(draft_active)
+    }
+
+    pub fn select_section(
+        &mut self,
+        document: DocumentID,
+        section: SaveSection,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let state = self.documents.entry(document).or_default();
+        if state.section == section {
+            return SavePresentationTransition::Unchanged;
+        }
+        state.section = section;
+        changed_transition(draft_active)
+    }
+
+    pub fn inspect_unit(
+        &mut self,
+        document: DocumentID,
+        unit: usize,
+        unit_count: usize,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let state = self.documents.entry(document).or_default();
+        let unit = clamp_unit(unit, unit_count);
+        if state.inspected_unit == unit {
+            return SavePresentationTransition::Unchanged;
+        }
+        state.inspected_unit = unit;
+        changed_transition(draft_active)
+    }
+
+    pub fn select_equipment_slot(
+        &mut self,
+        document: DocumentID,
+        slot: SaveEquipmentSlot,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let state = self.documents.entry(document).or_default();
+        if state.equipment_slot == slot {
+            return SavePresentationTransition::Unchanged;
+        }
+        state.equipment_slot = slot;
+        changed_transition(draft_active)
+    }
+
+    pub fn set_unit_filter(
+        &mut self,
+        document: DocumentID,
+        filter: String,
+        visible_indices: &[usize],
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let state = self.documents.entry(document).or_default();
+        let inspected_unit = if visible_indices.contains(&state.inspected_unit) {
+            state.inspected_unit
+        } else {
+            visible_indices.first().copied().unwrap_or(0)
+        };
+        if state.unit_filter == filter && state.inspected_unit == inspected_unit {
+            return SavePresentationTransition::Unchanged;
+        }
+        state.unit_filter = filter;
+        state.inspected_unit = inspected_unit;
+        changed_transition(draft_active)
+    }
+
+    pub fn remove_document(&mut self, document: DocumentID) -> bool {
+        if self.active_document == Some(document) {
+            self.active_document = None;
+        }
+        self.documents.remove(&document).is_some()
+    }
+}
+
+#[allow(
+    dead_code,
+    reason = "Task 11 reaches this helper through save presentation reconciliation"
+)]
+const fn clamp_unit(unit: usize, unit_count: usize) -> usize {
+    if unit_count == 0 {
+        0
+    } else if unit >= unit_count {
+        unit_count - 1
+    } else {
+        unit
+    }
+}
+
+#[allow(
+    dead_code,
+    reason = "Task 11 reaches this helper through save presentation controls"
+)]
+const fn changed_transition(draft_active: bool) -> SavePresentationTransition {
+    if draft_active {
+        SavePresentationTransition::ChangedAndCancelDraft
+    } else {
+        SavePresentationTransition::Changed
     }
 }
 
@@ -377,5 +598,154 @@ mod close_tests {
             ClosePolicy::from_dirty_count(2),
             ClosePolicy::PromptForUnsaved { count: 2 },
         );
+    }
+}
+
+#[cfg(test)]
+mod save_presentation_tests {
+    use std::path::PathBuf;
+
+    use kufeditor_workspace::{Document, DocumentID, SaveEquipmentSlot, TroopDocument, Workspace};
+
+    use super::{SavePresentationStates, SavePresentationTransition, SaveSection};
+
+    fn document_ids() -> (DocumentID, DocumentID) {
+        let mut workspace = Workspace::new();
+        let first = workspace.open_loaded(
+            PathBuf::from("first.sox"),
+            Document::Troop(troop_document()),
+        );
+        let second = workspace.open_loaded(
+            PathBuf::from("second.sox"),
+            Document::Troop(troop_document()),
+        );
+        (first, second)
+    }
+
+    fn troop_document() -> TroopDocument {
+        let mut bytes = vec![0_u8; 8 + 148 + 64];
+        bytes
+            .get_mut(..8)
+            .unwrap()
+            .copy_from_slice(&[100, 0, 0, 0, 1, 0, 0, 0]);
+        TroopDocument::parse(bytes).unwrap()
+    }
+
+    #[test]
+    fn save_presentation_starts_at_summary_and_retains_each_document_section() {
+        let (first, second) = document_ids();
+        let mut states = SavePresentationStates::default();
+
+        assert_eq!(states.for_document(first).section(), SaveSection::Summary);
+        assert_eq!(
+            states.select_section(first, SaveSection::Units, false),
+            SavePresentationTransition::Changed,
+        );
+        assert_eq!(
+            states.select_section(second, SaveSection::Equipment, false),
+            SavePresentationTransition::Changed,
+        );
+
+        assert_eq!(states.get(first).unwrap().section(), SaveSection::Units);
+        assert_eq!(
+            states.get(second).unwrap().section(),
+            SaveSection::Equipment,
+        );
+    }
+
+    #[test]
+    fn save_presentation_clamps_inspected_unit_after_document_replacement() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.activate_document(document, 10, false);
+        states.inspect_unit(document, 8, 10, false);
+
+        assert_eq!(
+            states.reconcile_document(document, 3, true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(states.get(document).unwrap().inspected_unit(), 2);
+    }
+
+    #[test]
+    fn save_presentation_activation_preserves_a_reconciliation_cancel_result() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.activate_document(document, 10, false);
+        states.inspect_unit(document, 8, 10, false);
+
+        assert_eq!(
+            states.activate_document(document, 3, true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(states.get(document).unwrap().inspected_unit(), 2);
+    }
+
+    #[test]
+    fn save_presentation_keeps_a_valid_equipment_slot_after_reconciliation() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.select_equipment_slot(document, SaveEquipmentSlot::TroopArmor, false);
+
+        states.reconcile_document(document, 1, false);
+
+        assert_eq!(
+            states.get(document).unwrap().equipment_slot(),
+            SaveEquipmentSlot::TroopArmor,
+        );
+    }
+
+    #[test]
+    fn save_presentation_filter_moves_inspection_to_the_first_visible_unit() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.inspect_unit(document, 7, 10, false);
+
+        assert_eq!(
+            states.set_unit_filter(document, "gerald".to_owned(), &[2, 4], true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        let state = states.get(document).unwrap();
+        assert_eq!(state.unit_filter(), "gerald");
+        assert_eq!(state.inspected_unit(), 2);
+    }
+
+    #[test]
+    fn save_presentation_changes_explicitly_cancel_active_drafts() {
+        let (first, second) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.activate_document(first, 5, false);
+
+        assert_eq!(
+            states.select_section(first, SaveSection::Units, true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(
+            states.inspect_unit(first, 1, 5, true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(
+            states.set_unit_filter(first, "leader".to_owned(), &[1, 3], true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(
+            states.select_equipment_slot(first, SaveEquipmentSlot::LeaderArmor, true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(
+            states.activate_document(second, 2, true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+    }
+
+    #[test]
+    fn save_presentation_removes_document_state_on_close() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.activate_document(document, 1, false);
+
+        assert!(states.remove_document(document));
+        assert!(states.get(document).is_none());
+        assert_eq!(states.active_document(), None);
     }
 }
