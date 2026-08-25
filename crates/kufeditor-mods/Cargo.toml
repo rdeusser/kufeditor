@@ -2,6 +2,7 @@
 name = "kufeditor-mods"
 version.workspace = true
 edition.workspace = true
+publish.workspace = true
 
 [dependencies]
 kufeditor-game.workspace = true

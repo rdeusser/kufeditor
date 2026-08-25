@@ -20,6 +20,12 @@ fn main() -> ExitCode {
 
     Application::new().run(move |cx| {
         actions::bind(cx);
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
         let bounds = Bounds::centered(None, size(px(1180.0), px(780.0)), cx);
         let opened = cx.open_window(
             WindowOptions {
@@ -32,6 +38,14 @@ fn main() -> ExitCode {
             },
             |window, cx| {
                 let frame = cx.new(AppFrame::new);
+                let weak_frame = frame.downgrade();
+                window.on_window_should_close(cx, move |window, cx| {
+                    weak_frame
+                        .update(cx, |frame, frame_cx| {
+                            frame.window_should_close(window, frame_cx)
+                        })
+                        .unwrap_or(true)
+                });
                 window.focus(&frame.read(cx).focus_handle());
                 frame
             },

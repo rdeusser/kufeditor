@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
 use gpui::{
-    Action, AnyElement, App, AsyncApp, Context, Div, FocusHandle, Focusable, KeyDownEvent,
-    PathPromptOptions, Stateful, WeakEntity, Window, div, px,
+    Action, AnyElement, AnyWindowHandle, App, AsyncApp, Context, Div, FocusHandle, Focusable,
+    KeyDownEvent, PathPromptOptions, PromptLevel, Stateful, WeakEntity, Window, div, px,
 };
 use kufeditor_game::Game;
 use kufeditor_workspace::{
@@ -14,7 +14,7 @@ use crate::{
     actions::{OpenFile, Redo, Save, SaveAll, SaveAs, Undo},
     components,
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
-    state::{Area, Notice, NoticeLevel, RequestId, ShellState},
+    state::{Area, ClosePolicy, Notice, NoticeLevel, RequestId, ShellState},
     theme::Theme,
     views,
 };
@@ -28,6 +28,10 @@ pub struct AppFrame {
     selected_troop: usize,
     number_edit: Option<NumberEdit>,
     notice: Option<Notice>,
+    window_handle: Option<AnyWindowHandle>,
+    close_armed: bool,
+    close_after_saves: bool,
+    close_prompt_open: bool,
 }
 
 impl AppFrame {
@@ -41,11 +45,112 @@ impl AppFrame {
             selected_troop: 0,
             number_edit: None,
             notice: None,
+            window_handle: None,
+            close_armed: false,
+            close_after_saves: false,
+            close_prompt_open: false,
         }
     }
 
     pub fn focus_handle(&self) -> FocusHandle {
         self.focus.clone()
+    }
+
+    pub fn window_should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.window_handle = Some(window.window_handle());
+        if std::mem::take(&mut self.close_armed) {
+            return true;
+        }
+        if self.close_prompt_open || self.close_after_saves {
+            return false;
+        }
+
+        match ClosePolicy::from_dirty_count(self.dirty_count()) {
+            ClosePolicy::Allow => true,
+            ClosePolicy::PromptForUnsaved { count } => {
+                self.close_prompt_open = true;
+                let message = format!(
+                    "{count} unsaved {}. Save before closing?",
+                    if count == 1 { "document" } else { "documents" }
+                );
+                let answer = window.prompt(
+                    PromptLevel::Warning,
+                    &message,
+                    None,
+                    &["Save All", "Discard Changes", "Cancel"],
+                    cx,
+                );
+                cx.spawn_in(window, async move |entity, cx| {
+                    let answer = answer.await.ok();
+                    let _ = entity.update_in(cx, move |frame, window, cx| {
+                        frame.finish_close_prompt(answer, window, cx);
+                    });
+                })
+                .detach();
+                false
+            }
+        }
+    }
+
+    fn dirty_count(&self) -> usize {
+        self.workspace
+            .document_ids()
+            .iter()
+            .filter(|document_id| self.workspace.is_dirty(**document_id).unwrap_or(false))
+            .count()
+    }
+
+    fn finish_close_prompt(
+        &mut self,
+        answer: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_prompt_open = false;
+        match answer {
+            Some(0) => {
+                self.close_after_saves = true;
+                self.continue_close_after_saves(cx);
+            }
+            Some(1) => {
+                self.close_armed = true;
+                window.remove_window();
+            }
+            Some(_) | None => {}
+        }
+        cx.notify();
+    }
+
+    fn continue_close_after_saves(&mut self, cx: &mut Context<Self>) {
+        if !self.close_after_saves {
+            return;
+        }
+
+        let document_ids = self.workspace.document_ids().to_vec();
+        let mut dirty_or_saving = false;
+        for document_id in document_ids {
+            let dirty = self.workspace.is_dirty(document_id).unwrap_or(false);
+            let saving = self
+                .workspace
+                .save_in_progress(document_id)
+                .unwrap_or(false);
+            dirty_or_saving |= dirty || saving;
+            if dirty && !saving && !self.start_save(document_id, None, cx) {
+                return;
+            }
+        }
+
+        if dirty_or_saving {
+            return;
+        }
+        self.close_after_saves = false;
+        self.close_armed = true;
+        let Some(window_handle) = self.window_handle else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window_handle.update(cx, |_, window, _| window.remove_window());
+        });
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -278,13 +383,15 @@ impl AppFrame {
         document_id: DocumentId,
         target: Option<PathBuf>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let request = match self.workspace.prepare_save(document_id, target) {
             Ok(request) => request,
             Err(error) => {
                 self.notice = Some(Notice::error("Could not start save", &error));
+                self.close_after_saves = false;
+                self.close_armed = false;
                 cx.notify();
-                return;
+                return false;
             }
         };
         let request_document = request.document_id();
@@ -297,10 +404,12 @@ impl AppFrame {
             let result = task.await;
             let _ = entity.update(cx, move |frame, cx| {
                 frame.finish_save_result(request_document, token, result);
+                frame.continue_close_after_saves(cx);
                 cx.notify();
             });
         })
         .detach();
+        true
     }
 
     fn finish_save_result(
@@ -319,14 +428,20 @@ impl AppFrame {
                     self.notice = Some(Notice::success(format!("Saved {name}")));
                 }
                 Err(error) => {
+                    self.close_after_saves = false;
+                    self.close_armed = false;
                     self.notice = Some(Notice::error("Could not finish save", &error));
                 }
             },
             Err(error) => match self.workspace.finish_save_failure(document_id, token) {
                 Ok(()) => {
+                    self.close_after_saves = false;
+                    self.close_armed = false;
                     self.notice = Some(Notice::error("Could not save document", &error));
                 }
                 Err(cleanup_error) => {
+                    self.close_after_saves = false;
+                    self.close_armed = false;
                     self.notice = Some(Notice::error(
                         "Could not reconcile failed save",
                         &cleanup_error,
@@ -774,7 +889,8 @@ impl Focusable for AppFrame {
 }
 
 impl Render for AppFrame {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.window_handle = Some(window.window_handle());
         div()
             .id("kufeditor-root")
             .size_full()

@@ -30,6 +30,14 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -47,6 +55,10 @@ jobs:
             libwayland-bin \
             wayland-protocols \
             libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libvulkan-dev \
             pkg-config
 
       - name: Install dependencies (macOS)
@@ -66,6 +78,26 @@ jobs:
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: vcpkg install libconfig:${{ matrix.vcpkg_triplet }} libiconv:${{ matrix.vcpkg_triplet }}
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Lint Rust workspace
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --all-features
+
+      - name: Build Rust application
+        run: cargo build --release -p kufeditor
+
+      - name: Install cargo-deny
+        if: matrix.name == 'linux-x64'
+        run: cargo install cargo-deny --locked --version 0.20.2
+
+      - name: Audit Rust dependencies
+        if: matrix.name == 'linux-x64'
+        run: cargo deny check
 
       - name: Configure (Unix)
         if: runner.os != 'Windows'
@@ -98,3 +130,25 @@ jobs:
             build/kufeditor
             build/kufeditor.exe
             build/Release/kufeditor.exe
+
+  generated:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache: false
+
+      - name: Install pinned Cleave
+        env:
+          GOBIN: ${{ github.workspace }}/.bin
+        run: go install github.com/rdeusser/cleave/cmd/cleave@cc43fcc4adcc7220d0dfe069fc056711be423b0f
+
+      - name: Check generated parsers
+        env:
+          CLEAVE: ${{ github.workspace }}/.bin/cleave
+        run: ./scripts/check-generated.sh

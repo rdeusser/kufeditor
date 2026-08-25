@@ -12,14 +12,15 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [workspace.dependencies]
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
-kufeditor-formats = { path = "crates/kufeditor-formats" }
-kufeditor-game = { path = "crates/kufeditor-game" }
-kufeditor-mods = { path = "crates/kufeditor-mods" }
-kufeditor-patches = { path = "crates/kufeditor-patches" }
-kufeditor-workspace = { path = "crates/kufeditor-workspace" }
+kufeditor-formats = { version = "0.1.0", path = "crates/kufeditor-formats" }
+kufeditor-game = { version = "0.1.0", path = "crates/kufeditor-game" }
+kufeditor-mods = { version = "0.1.0", path = "crates/kufeditor-mods" }
+kufeditor-patches = { version = "0.1.0", path = "crates/kufeditor-patches" }
+kufeditor-workspace = { version = "0.1.0", path = "crates/kufeditor-workspace" }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 

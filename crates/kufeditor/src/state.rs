@@ -62,6 +62,22 @@ impl Notice {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestId(u64);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClosePolicy {
+    Allow,
+    PromptForUnsaved { count: usize },
+}
+
+impl ClosePolicy {
+    pub const fn from_dirty_count(count: usize) -> Self {
+        if count == 0 {
+            Self::Allow
+        } else {
+            Self::PromptForUnsaved { count }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Area {
     #[default]
@@ -166,5 +182,19 @@ mod tests {
         let notice = super::Notice::error("Could not open file", &error);
         assert_eq!(notice.summary(), "Could not open file");
         assert!(notice.detail().contains("fixture missing"));
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::ClosePolicy;
+
+    #[test]
+    fn only_dirty_documents_require_a_prompt() {
+        assert_eq!(ClosePolicy::from_dirty_count(0), ClosePolicy::Allow);
+        assert_eq!(
+            ClosePolicy::from_dirty_count(2),
+            ClosePolicy::PromptForUnsaved { count: 2 },
+        );
     }
 }

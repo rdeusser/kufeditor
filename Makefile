@@ -1,4 +1,4 @@
-.PHONY: all build run test clean configure rebuild generate tidy rust-build rust-test rust-run rust-lint
+.PHONY: all build run test clean configure rebuild generate check-generated tidy rust-build rust-test rust-run rust-lint rust-deny rust-release rust-check
 
 BUILD_DIR := build
 BUILD_TYPE := Release
@@ -27,6 +27,9 @@ rebuild: clean build
 generate:
 	@./scripts/generate.sh
 
+check-generated:
+	@./scripts/check-generated.sh
+
 rust-build:
 	@cargo build --workspace
 
@@ -39,6 +42,14 @@ rust-run:
 rust-lint:
 	@cargo fmt --all --check
 	@cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+rust-deny:
+	@cargo deny check
+
+rust-release:
+	@cargo build --release -p kufeditor
+
+rust-check: rust-lint rust-test rust-deny rust-release check-generated
 
 # Debug build variants
 debug:
@@ -72,9 +83,13 @@ help:
 	@echo "  build-verbose - Build with verbose output"
 	@echo "  test-only     - Run tests without rebuilding"
 	@echo "  generate      - Regenerate C++ and Rust parsers"
+	@echo "  check-generated - Verify generated parsers are current"
 	@echo "  rust-build    - Build the Rust workspace"
 	@echo "  rust-test     - Run all Rust tests"
 	@echo "  rust-run      - Run the GPUI application"
 	@echo "  rust-lint     - Check Rust formatting and lints"
+	@echo "  rust-deny     - Audit Rust dependencies"
+	@echo "  rust-release  - Build the release GPUI application"
+	@echo "  rust-check    - Run every local Rust and generation gate"
 	@echo "  tidy          - Format all .cpp and .h files with clang-format"
 	@echo "  help          - Show this help message"
