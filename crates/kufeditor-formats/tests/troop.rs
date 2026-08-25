@@ -3,7 +3,43 @@
     reason = "synthetic fixtures use known fixed-size byte ranges"
 )]
 
-use kufeditor_formats::{Severity, TroopDocument, TroopField};
+use kufeditor_formats::{FormatError, Severity, TroopDocument, TroopField};
+
+const MIXED_CASE_ASCII_HEX_TROOP: &[u8] = concat!(
+    "64000000010000000000000000000000",
+    "82000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "000000000000000000000000dEaDbEeF",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "000000000000000000000000"
+)
+.as_bytes();
+
+const UPPERCASE_ASCII_HEX_EDITED_TROOP: &[u8] = concat!(
+    "64000000010000000000000000000000",
+    "AF000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "000000000000000000000000DEADBEEF",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "000000000000000000000000"
+)
+.as_bytes();
 
 fn troop_fixture() -> Vec<u8> {
     let mut bytes = vec![0_u8; 8 + 148 + 64];
@@ -32,6 +68,69 @@ fn troop_fixture() -> Vec<u8> {
     }
     bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
     bytes
+}
+
+#[test]
+fn ascii_hex_mixed_case_fixture_parses_the_move_speed() {
+    let document = TroopDocument::parse(MIXED_CASE_ASCII_HEX_TROOP.to_vec()).unwrap();
+
+    assert_eq!(document.value(0, TroopField::MoveSpeed).unwrap(), 130);
+}
+
+#[test]
+fn ascii_hex_unchanged_encode_preserves_the_original_letter_case() {
+    let document = TroopDocument::parse(MIXED_CASE_ASCII_HEX_TROOP.to_vec()).unwrap();
+
+    assert_eq!(document.encode().unwrap(), MIXED_CASE_ASCII_HEX_TROOP);
+}
+
+#[test]
+fn ascii_hex_edit_emits_uppercase_hex_and_round_trips() {
+    let mut document = TroopDocument::parse(MIXED_CASE_ASCII_HEX_TROOP.to_vec()).unwrap();
+    document.set_value(0, TroopField::MoveSpeed, 175).unwrap();
+
+    let encoded = document.encode().unwrap();
+    assert_eq!(encoded, UPPERCASE_ASCII_HEX_EDITED_TROOP);
+
+    let reparsed = TroopDocument::parse(encoded).unwrap();
+    assert_eq!(reparsed.value(0, TroopField::MoveSpeed).unwrap(), 175);
+}
+
+#[test]
+fn ascii_hex_odd_length_returns_a_typed_error() {
+    let error = TroopDocument::parse(b"6400000001000000F".to_vec()).unwrap_err();
+
+    assert!(matches!(
+        error,
+        FormatError::OddAsciiHexLength { length: 17 }
+    ));
+}
+
+#[test]
+fn ascii_hex_non_hex_byte_after_a_valid_prefix_returns_a_typed_error() {
+    let error = TroopDocument::parse(b"6400000001000000Z0".to_vec()).unwrap_err();
+
+    assert!(matches!(
+        error,
+        FormatError::InvalidAsciiHexByte { index: 16 }
+    ));
+}
+
+#[test]
+fn ascii_prefix_that_is_not_a_sox_candidate_uses_the_raw_parser() {
+    let error = TroopDocument::parse(b"0000000001000000raw SOX source".to_vec()).unwrap_err();
+
+    assert!(matches!(error, FormatError::TroopParse { .. }));
+}
+
+#[test]
+fn rebase_rejects_a_saved_source_with_a_different_envelope() {
+    let saved = TroopDocument::parse(MIXED_CASE_ASCII_HEX_TROOP.to_vec()).unwrap();
+    let mut document = saved.clone();
+
+    let error = document.rebase_source(&saved, troop_fixture()).unwrap_err();
+
+    assert!(matches!(error, FormatError::InconsistentSoxRebase));
 }
 
 #[test]

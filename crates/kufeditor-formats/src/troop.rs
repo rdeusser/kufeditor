@@ -2,6 +2,7 @@ use crate::{
     diagnostic::{Diagnostic, Severity},
     error::FormatError,
     generated::sox_troop_info::{File, TroopInfoRecord},
+    sox::SoxSource,
 };
 
 macro_rules! troop_fields {
@@ -132,7 +133,7 @@ const RESISTANCE_FIELDS: [TroopField; 10] = [
 
 #[derive(Clone, Debug)]
 pub struct TroopDocument {
-    source_bytes: Vec<u8>,
+    source: SoxSource,
     source_file: File,
     file: File,
     trailing_bytes: Vec<u8>,
@@ -140,15 +141,19 @@ pub struct TroopDocument {
 
 impl TroopDocument {
     pub fn parse(bytes: Vec<u8>) -> Result<Self, FormatError> {
+        let source = SoxSource::parse(bytes)?;
+        let decoded = source.decoded();
         let mut offset = 0;
-        let file = File::parse(&bytes, &mut offset).map_err(|source| FormatError::TroopParse {
+        let file = File::parse(decoded, &mut offset).map_err(|source| FormatError::TroopParse {
             offset,
             source: source.into(),
         })?;
-        let trailing_bytes = bytes.get(offset..).map_or_else(Vec::new, ToOwned::to_owned);
+        let trailing_bytes = decoded
+            .get(offset..)
+            .map_or_else(Vec::new, ToOwned::to_owned);
 
         Ok(Self {
-            source_bytes: bytes,
+            source,
             source_file: file.clone(),
             file,
             trailing_bytes,
@@ -204,7 +209,7 @@ impl TroopDocument {
 
     pub fn encode(&self) -> Result<Vec<u8>, FormatError> {
         if self.file == self.source_file {
-            return Ok(self.source_bytes.clone());
+            return Ok(self.source.original_bytes());
         }
 
         let mut bytes = self
@@ -212,13 +217,14 @@ impl TroopDocument {
             .to_bytes()
             .map_err(|source| FormatError::TroopEncode(source.into()))?;
         bytes.extend_from_slice(&self.trailing_bytes);
-        Ok(bytes)
+        Ok(self.source.apply_envelope(&bytes))
     }
 
-    pub fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) {
-        self.source_bytes = bytes;
+    pub fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) -> Result<(), FormatError> {
+        self.source.rebase(&saved.source, bytes)?;
         self.source_file = saved.file.clone();
         self.trailing_bytes.clone_from(&saved.trailing_bytes);
+        Ok(())
     }
 
     fn record(&self, index: usize) -> Result<&TroopInfoRecord, FormatError> {

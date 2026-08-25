@@ -8,6 +8,15 @@ pub struct CleaveError(#[from] sox_troop_info::Error);
 
 #[derive(Debug, Error)]
 pub enum FormatError {
+    #[error("ASCII-hex SOX input has an odd length of {length} bytes")]
+    OddAsciiHexLength { length: usize },
+
+    #[error("ASCII-hex SOX input has a non-hexadecimal byte at index {index}")]
+    InvalidAsciiHexByte { index: usize },
+
+    #[error("saved SOX source image has an inconsistent encoding envelope")]
+    InconsistentSoxRebase,
+
     #[error("failed to parse TroopInfo at offset {offset}: {source}")]
     TroopParse {
         offset: usize,

@@ -47,11 +47,13 @@ impl Document {
         }
     }
 
-    pub(crate) fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) {
+    pub(crate) fn rebase_source(
+        &mut self,
+        saved: &Self,
+        bytes: Vec<u8>,
+    ) -> Result<(), FormatError> {
         match (self, saved) {
-            (Self::Troop(document), Self::Troop(saved)) => {
-                document.rebase_source(saved, bytes);
-            }
+            (Self::Troop(document), Self::Troop(saved)) => document.rebase_source(saved, bytes),
         }
     }
 }

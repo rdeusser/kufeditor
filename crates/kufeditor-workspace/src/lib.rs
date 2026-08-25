@@ -163,7 +163,9 @@ impl Workspace {
             });
         }
 
-        session.document.rebase_source(&saved.snapshot, saved.bytes);
+        session
+            .document
+            .rebase_source(&saved.snapshot, saved.bytes)?;
         session.path = saved.path;
         session.saved_state = saved.state;
         session.save_in_flight = None;

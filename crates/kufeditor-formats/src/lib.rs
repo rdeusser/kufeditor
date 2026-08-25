@@ -3,6 +3,7 @@
 mod diagnostic;
 mod error;
 mod generated;
+mod sox;
 mod troop;
 
 pub use diagnostic::{Diagnostic, Severity};
