@@ -125,7 +125,7 @@ fn enhancement_prefixes_use_stored_item_type_ids_and_exact_joining() {
     );
     assert_eq!(
         dictionary.weapon_name(0, 0, 1),
-        Some("Rare Sword".to_owned())
+        Some("Rare\u{2003}Sword".to_owned())
     );
     assert_eq!(dictionary.weapon_name(0, 0, 2), Some("Sword".to_owned()));
     assert_eq!(dictionary.weapon_name(0, 0, 3), Some("Sword".to_owned()));
@@ -224,6 +224,28 @@ fn strict_decoding_records_each_bad_field_and_preserves_valid_halves() {
 }
 
 #[test]
+fn empty_item_attribute_halves_are_absent_independently() {
+    let tree = complete_catalog_tree();
+    tree.write(
+        CatalogRole::ItemAttributes,
+        &indexed_fields_table(&[
+            (94, &[b"", b"Description only"]),
+            (95, &[b"Name only", b""]),
+        ]),
+    );
+
+    let loaded = load_name_dictionary(&tree.sox).unwrap();
+
+    assert_eq!(loaded.dictionary.item_attribute_name(94), None);
+    assert_eq!(
+        loaded.dictionary.item_attribute_description(94),
+        Some("Description only")
+    );
+    assert_eq!(loaded.dictionary.item_attribute_name(95), Some("Name only"));
+    assert_eq!(loaded.dictionary.item_attribute_description(95), None);
+}
+
+#[test]
 fn partial_load_keeps_dictionary_and_raw_issue_with_exact_path() {
     let tree = complete_catalog_tree();
     let missing_path = tree.role_path(CatalogRole::LeaderPools);
@@ -308,6 +330,49 @@ fn post_decode_fatal_load_retains_raw_and_decoding_issues() {
         0,
     );
     assert_eq!(issues.len(), 8);
+}
+
+#[test]
+fn fatal_load_decodes_optional_and_extra_localized_fields_before_core_decision() {
+    let tree = CatalogTree::new();
+    tree.write(CatalogRole::TroopNames, &indexed_table(&[]));
+    tree.write(CatalogRole::CharacterNames, &indexed_table(&[]));
+    tree.write(CatalogRole::SpecialNameKeys, &special_names_table(&[]));
+    tree.write(
+        CatalogRole::SpecialDisplayNames,
+        &sequential_table(&[b"\xff"]),
+    );
+    tree.write(
+        CatalogRole::ItemAttributes,
+        &indexed_fields_table(&[(77, &[b"\xff", b"Valid description"])]),
+    );
+
+    let error = load_name_dictionary(&tree.sox).unwrap_err();
+
+    let CatalogLoadError::NoUsableCatalogs { issues } = error else {
+        panic!("expected decoded-core fatal load");
+    };
+    assert_encoding_issue(
+        &issues,
+        CatalogRole::ItemAttributes,
+        &tree.role_path(CatalogRole::ItemAttributes),
+        0,
+        0,
+    );
+    assert_encoding_issue(
+        &issues,
+        CatalogRole::SpecialDisplayNames,
+        &tree.role_path(CatalogRole::SpecialDisplayNames),
+        0,
+        0,
+    );
+    let raw_issue = issues
+        .iter()
+        .find(|issue| issue.role == CatalogRole::LeaderPools)
+        .unwrap();
+    assert_eq!(raw_issue.path, tree.role_path(CatalogRole::LeaderPools));
+    assert!(matches!(raw_issue.error, CatalogFileError::Read { .. }));
+    assert_eq!(issues.len(), 5);
 }
 
 #[test]
@@ -420,7 +485,10 @@ fn complete_catalog_tree() -> CatalogTree {
     );
     tree.write(
         CatalogRole::ItemTypePrefixes,
-        &indexed_fields_table(&[(0, &[b"Fine", b"Rare ", b""]), (1, &[b"Keen", b"", b""])]),
+        &indexed_fields_table(&[
+            (1, &[b"Keen", b"", b""]),
+            (0, &[b"Fine", "Rare\u{2003}".as_bytes(), b""]),
+        ]),
     );
     tree.write(
         CatalogRole::WeaponNames,

@@ -336,8 +336,10 @@ fn decode_item_attributes(
         .into_iter()
         .enumerate()
         .map(|(record, value)| {
-            let name = decode_utf8(&value.name, role, &path, record, 0, issues);
-            let description = decode_utf8(&value.description, role, &path, record, 1, issues);
+            let name = decode_utf8(&value.name, role, &path, record, 0, issues)
+                .filter(|name| !name.is_empty());
+            let description = decode_utf8(&value.description, role, &path, record, 1, issues)
+                .filter(|description| !description.is_empty());
             (value.id, ItemAttribute { name, description })
         })
         .collect()

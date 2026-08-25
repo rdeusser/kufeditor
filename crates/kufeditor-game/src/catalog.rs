@@ -147,10 +147,6 @@ pub(crate) fn load_catalog_data(sox_directory: &Path) -> Result<RawCatalogData, 
         &mut issues,
     );
 
-    if troop_names.is_empty() && character_names.is_empty() && special_names.is_empty() {
-        return Err(CatalogLoadError::NoUsableCatalogs { issues });
-    }
-
     Ok(RawCatalogData {
         troop_names,
         character_names,
@@ -808,16 +804,17 @@ mod tests {
     }
 
     #[test]
-    fn catalog_no_core_result_retains_every_issue() {
+    fn catalog_no_core_returns_every_raw_issue() {
         let tree = CatalogTree::new();
 
-        let error = load_catalog_data(&tree.sox).unwrap_err();
+        let loaded = load_catalog_data(&tree.sox).unwrap();
 
-        let CatalogLoadError::NoUsableCatalogs { issues } = error else {
-            panic!("expected no usable catalogs");
-        };
-        assert_eq!(issues.len(), 8);
-        let roles = issues
+        assert!(loaded.troop_names.is_empty());
+        assert!(loaded.character_names.is_empty());
+        assert!(loaded.special_names.is_empty());
+        assert_eq!(loaded.issues.len(), 8);
+        let roles = loaded
+            .issues
             .iter()
             .map(|issue| issue.role)
             .collect::<HashSet<_>>();
@@ -827,19 +824,24 @@ mod tests {
     }
 
     #[test]
-    fn catalog_empty_core_sources_are_not_usable() {
+    fn catalog_empty_core_sources_return_complete_optional_data() {
         let tree = complete_catalog_tree();
         let empty_indexed = indexed_table(&[]);
         tree.write(CatalogRole::TroopNames, &empty_indexed);
         tree.write(CatalogRole::CharacterNames, &empty_indexed);
         tree.write(CatalogRole::SpecialNameKeys, &special_names_table(&[]));
 
-        let error = load_catalog_data(&tree.sox).unwrap_err();
+        let loaded = load_catalog_data(&tree.sox).unwrap();
 
-        assert!(matches!(
-            error,
-            CatalogLoadError::NoUsableCatalogs { ref issues } if issues.is_empty()
-        ));
+        assert!(loaded.troop_names.is_empty());
+        assert!(loaded.character_names.is_empty());
+        assert!(loaded.special_names.is_empty());
+        assert_eq!(loaded.leader_pools.len(), 1);
+        assert_eq!(loaded.special_display_names.len(), 2);
+        assert_eq!(loaded.item_attributes.len(), 1);
+        assert_eq!(loaded.item_type_prefixes.len(), 1);
+        assert_eq!(loaded.weapon_types.len(), 2);
+        assert!(loaded.issues.is_empty());
     }
 
     #[test]
