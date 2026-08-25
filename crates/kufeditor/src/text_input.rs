@@ -169,7 +169,7 @@ impl TextBuffer {
     fn replace_text(&mut self, range_utf16: Option<Range<usize>>, new_text: &str) {
         let range = self.replacement_range(range_utf16);
         let normalized = normalize_single_line(new_text);
-        self.replace_range(range, &normalized);
+        self.replace_range(range, &normalized.text);
         self.marked_range = None;
     }
 
@@ -181,12 +181,15 @@ impl TextBuffer {
     ) {
         let range = self.replacement_range(range_utf16);
         let normalized = normalize_single_line(new_text);
-        let selection =
-            selected_range_utf16.map(|relative| range_from_utf16_in(&normalized, &relative));
+        let selection = selected_range_utf16.map(|relative| {
+            let normalized_range = normalized.translate_utf16_range(&relative);
+            range_from_utf16_in(&normalized.text, &normalized_range)
+        });
         let start = range.start;
 
-        self.replace_range(range, &normalized);
-        self.marked_range = (!normalized.is_empty()).then(|| start..start + normalized.len());
+        self.replace_range(range, &normalized.text);
+        self.marked_range =
+            (!normalized.text.is_empty()).then(|| start..start + normalized.text.len());
         if let Some(selection) = selection {
             self.selection = start + selection.start..start + selection.end;
         }
@@ -290,22 +293,64 @@ fn utf16_offset_from_byte(text: &str, offset: usize) -> usize {
         .sum()
 }
 
-fn normalize_single_line(text: &str) -> String {
-    let mut normalized = String::with_capacity(text.len());
+struct NormalizedText {
+    text: String,
+    utf16_offset_map: Vec<usize>,
+    utf16_len: usize,
+}
+
+impl NormalizedText {
+    fn translate_utf16_range(&self, source: &Range<usize>) -> Range<usize> {
+        self.translate_utf16_offset(source.start)..self.translate_utf16_offset(source.end)
+    }
+
+    fn translate_utf16_offset(&self, source: usize) -> usize {
+        self.utf16_offset_map
+            .get(source)
+            .copied()
+            .unwrap_or(self.utf16_len)
+    }
+}
+
+fn normalize_single_line(text: &str) -> NormalizedText {
+    let mut output = String::with_capacity(text.len());
+    let mut utf16_offset_map = Vec::with_capacity(text.encode_utf16().count() + 1);
+    utf16_offset_map.push(0);
+    let mut output_utf16_len = 0;
     let mut characters = text.chars().peekable();
     while let Some(character) = characters.next() {
-        match character {
+        let source_utf16_len = match character {
             '\r' => {
+                let mut source_utf16_len = 1;
                 if characters.peek() == Some(&'\n') {
                     characters.next();
+                    source_utf16_len += 1;
                 }
-                normalized.push(' ');
+                output.push(' ');
+                output_utf16_len += 1;
+                source_utf16_len
             }
-            '\n' => normalized.push(' '),
-            _ => normalized.push(character),
+            '\n' => {
+                output.push(' ');
+                output_utf16_len += 1;
+                1
+            }
+            _ => {
+                output.push(character);
+                let character_utf16_len = character.len_utf16();
+                output_utf16_len += character_utf16_len;
+                character_utf16_len
+            }
+        };
+        for _ in 0..source_utf16_len {
+            utf16_offset_map.push(output_utf16_len);
         }
     }
-    normalized
+    NormalizedText {
+        text: output,
+        utf16_offset_map,
+        utf16_len: output_utf16_len,
+    }
 }
 
 pub(crate) fn bind(cx: &mut App) {
@@ -916,6 +961,27 @@ mod tests {
         assert_eq!(buffer.content(), "é");
         assert_eq!(buffer.marked_range(), Some(0..2));
         assert_eq!(buffer.selection(), 0..2);
+    }
+
+    #[test]
+    fn marked_selection_after_crlf_uses_original_utf16_offsets_with_non_bmp_text() {
+        let mut buffer = TextBuffer::new("");
+
+        buffer.replace_and_mark(None, "a\r\n💡b", Some(3..3));
+
+        assert_eq!(buffer.content(), "a 💡b");
+        assert_eq!(buffer.marked_range(), Some(0..7));
+        assert_eq!(buffer.selection(), 2..2);
+    }
+
+    #[test]
+    fn marked_selection_clamps_crlf_interior_and_out_of_bounds_offsets() {
+        let mut buffer = TextBuffer::new("");
+
+        buffer.replace_and_mark(None, "a\r\n💡b", Some(2..99));
+
+        assert_eq!(buffer.content(), "a 💡b");
+        assert_eq!(buffer.selection(), 2..7);
     }
 
     #[test]
