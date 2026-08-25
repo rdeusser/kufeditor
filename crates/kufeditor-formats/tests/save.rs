@@ -5,13 +5,14 @@ use std::{collections::HashSet, fmt::Debug, hash::Hash};
 use kufeditor_formats::{
     DiagnosticField, DiagnosticLocation, FormatError, SaveDocument, SaveEditor, SaveEquipmentField,
     SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveMutation, SaveNumberTarget,
-    SaveParseError, SaveRegion, SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup,
-    Severity, TroopField,
+    SaveParseError, SaveRegion, SaveRosterField, SaveTextField, SaveTextImage, SaveUnitField,
+    SaveUnitGroup, Severity, TroopField,
 };
 use support::{
     SaveFixtureArrays, SaveFixtureOptions, complete_save_fixture, complete_save_offsets,
-    fixture_with_count, fixture_with_unknown_choices, patch_i32, patch_u32, read_i32, read_u32,
-    save_fixture, save_fixture_with_arrays, truncate_save,
+    fixture_with_count, fixture_with_unknown_choices, patch_i32, patch_noncanonical_map_field,
+    patch_u32, read_i32, read_u32, save_fixture, save_fixture_with_arrays,
+    save_with_noncanonical_map_field, truncate_save,
 };
 
 #[test]
@@ -502,6 +503,344 @@ fn absent_context_has_no_text_projection() {
     let document = SaveDocument::parse(source).unwrap();
 
     assert!(document.context_text().is_empty());
+}
+
+#[test]
+fn equal_visible_text_preserves_opaque_post_zero_bytes() {
+    let source = save_with_noncanonical_map_field();
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+
+    assert_eq!(document.text(SaveTextField::MapName).unwrap(), "MapA");
+    assert_eq!(
+        document
+            .set_text(SaveTextField::MapName, "MapA".to_owned())
+            .unwrap(),
+        SaveMutation::Unchanged,
+    );
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn raw_text_restore_returns_every_original_byte() {
+    let source = save_with_noncanonical_map_field();
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+    let before: SaveTextImage = document.text_image(SaveTextField::MapName);
+
+    assert_eq!(
+        document
+            .set_text(SaveTextField::MapName, "MapB".to_owned())
+            .unwrap(),
+        SaveMutation::Changed {
+            previous: before.clone()
+        },
+    );
+    let changed = document.text_image(SaveTextField::MapName);
+    assert_eq!(
+        document.restore_text(SaveTextField::MapName, before),
+        SaveMutation::Changed { previous: changed },
+    );
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn changed_text_zero_fills_the_complete_image() {
+    let source = save_with_noncanonical_map_field();
+    let offsets = complete_save_offsets(true, true);
+    let mut document = SaveDocument::parse(source).unwrap();
+
+    document
+        .set_text(SaveTextField::MapName, "MapB".to_owned())
+        .unwrap();
+
+    let encoded = document.encode().unwrap();
+    let start = offsets.main + 0x20;
+    let end = start + 32;
+    let mut expected = [0; 32];
+    expected.get_mut(..4).unwrap().copy_from_slice(b"MapB");
+    assert_eq!(encoded.get(start..end), Some(expected.as_slice()));
+}
+
+#[test]
+fn equal_text_image_restore_is_unchanged() {
+    let source = save_with_noncanonical_map_field();
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+    let image = document.text_image(SaveTextField::MapName);
+
+    assert_eq!(
+        document.restore_text(SaveTextField::MapName, image),
+        SaveMutation::Unchanged,
+    );
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn non_ascii_text_is_typed_and_atomic() {
+    let source = save_with_noncanonical_map_field();
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+    let before = document.text_image(SaveTextField::MapName);
+
+    assert!(matches!(
+        document.set_text(SaveTextField::MapName, "Mapé".to_owned()),
+        Err(FormatError::SaveInvalidTextByte {
+            field: SaveTextField::MapName,
+            index: 3,
+            byte: 0xc3,
+        })
+    ));
+    assert_eq!(document.text_image(SaveTextField::MapName), before);
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn embedded_zero_text_is_typed_and_atomic() {
+    let source = save_with_noncanonical_map_field();
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+    let before = document.text_image(SaveTextField::MapName);
+
+    assert!(matches!(
+        document.set_text(SaveTextField::MapName, "Map\0B".to_owned()),
+        Err(FormatError::SaveTextContainsZero {
+            field: SaveTextField::MapName,
+            index: 3,
+        })
+    ));
+    assert_eq!(document.text_image(SaveTextField::MapName), before);
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn thirty_two_byte_text_is_typed_and_atomic() {
+    let source = save_with_noncanonical_map_field();
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+    let before = document.text_image(SaveTextField::MapName);
+
+    assert!(matches!(
+        document.set_text(SaveTextField::MapName, "x".repeat(32)),
+        Err(FormatError::SaveTextTooLong {
+            field: SaveTextField::MapName,
+            length: 32,
+            maximum: 31,
+        })
+    ));
+    assert_eq!(document.text_image(SaveTextField::MapName), before);
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn thirty_one_byte_text_fills_the_visible_budget() {
+    let mut document = SaveDocument::parse(save_with_noncanonical_map_field()).unwrap();
+    let value = "x".repeat(31);
+
+    assert!(matches!(
+        document.set_text(SaveTextField::MapName, value.clone()),
+        Ok(SaveMutation::Changed { .. })
+    ));
+    assert_eq!(document.text(SaveTextField::MapName).unwrap(), value);
+}
+
+#[test]
+fn invalid_stored_text_is_read_only_and_atomic() {
+    let mut source = save_with_noncanonical_map_field();
+    let offsets = complete_save_offsets(true, true);
+    *source.get_mut(offsets.main + 0x20 + 1).unwrap() = 0x80;
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+    let before = document.text_image(SaveTextField::MapName);
+
+    assert!(matches!(
+        document.text(SaveTextField::MapName),
+        Err(FormatError::SaveInvalidStoredText {
+            field: SaveTextField::MapName,
+            index: 1,
+            byte: 0x80,
+        })
+    ));
+    for replacement in [
+        "MapB".to_owned(),
+        "Map\0B".to_owned(),
+        "Mapé".to_owned(),
+        "x".repeat(32),
+    ] {
+        assert!(matches!(
+            document.set_text(SaveTextField::MapName, replacement),
+            Err(FormatError::SaveInvalidStoredText {
+                field: SaveTextField::MapName,
+                index: 1,
+                byte: 0x80,
+            })
+        ));
+        assert_eq!(document.text_image(SaveTextField::MapName), before);
+        assert_eq!(document.encode().unwrap(), source);
+    }
+}
+
+#[test]
+fn text_fields_use_their_exact_main_block_offsets() {
+    let mut source = complete_save_fixture(SaveFixtureOptions::default());
+    let offsets = complete_save_offsets(true, true);
+    let cases = [
+        (
+            SaveTextField::MapName,
+            b"Map Original".as_slice(),
+            b"Map New".as_slice(),
+        ),
+        (
+            SaveTextField::SetFile,
+            b"Set Original".as_slice(),
+            b"Set New".as_slice(),
+        ),
+        (
+            SaveTextField::SkyEffects,
+            b"Sky Original".as_slice(),
+            b"Sky New".as_slice(),
+        ),
+    ];
+    for &(field, original, _) in &cases {
+        patch_save_text(&mut source, offsets.main, field, original);
+    }
+    let mut expected = source.clone();
+    let mut document = SaveDocument::parse(source).unwrap();
+
+    for &(field, original, replacement) in &cases {
+        assert_eq!(
+            document.text(field).unwrap().as_bytes(),
+            original,
+            "{field:?}"
+        );
+        assert!(matches!(
+            document.set_text(field, text_value(replacement)),
+            Ok(SaveMutation::Changed { .. })
+        ));
+        patch_save_text(&mut expected, offsets.main, field, replacement);
+    }
+
+    assert_eq!(document.encode().unwrap(), expected);
+}
+
+#[test]
+fn unit_skill_data_returns_an_exact_copy() {
+    let document =
+        SaveDocument::parse(complete_save_fixture(SaveFixtureOptions::default())).unwrap();
+    let expected = [
+        0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae,
+        0xaf, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
+    ];
+
+    let mut skill_data = document.unit_skill_data(0).unwrap();
+    assert_eq!(skill_data, expected);
+    skill_data[0] = 0;
+    assert_ne!(skill_data, expected);
+    assert_eq!(document.unit_skill_data(0).unwrap(), expected);
+}
+
+#[test]
+fn unit_skill_data_reports_the_invalid_unit_and_count() {
+    let document =
+        SaveDocument::parse(complete_save_fixture(SaveFixtureOptions::default())).unwrap();
+
+    assert!(matches!(
+        document.unit_skill_data(1),
+        Err(FormatError::SaveUnitOutOfRange {
+            unit: 1,
+            unit_count: 1,
+        })
+    ));
+}
+
+#[test]
+fn failed_save_rebase_is_strongly_atomic() {
+    let live_tail = [0xde, 0xad, 0, 0xbe, 0xef];
+    let mut source = complete_save_fixture(SaveFixtureOptions {
+        size_prefix: false,
+        context: false,
+        pad_to_32_kib: false,
+        tail: live_tail.to_vec(),
+    });
+    let live_offsets = complete_save_offsets(false, false);
+    patch_noncanonical_map_field(&mut source, live_offsets.main);
+    let mut live = SaveDocument::parse(source.clone()).unwrap();
+    let original_text = live.text_image(SaveTextField::MapName);
+    let skill_level = SaveNumberTarget::Unit {
+        unit: 0,
+        field: SaveUnitField::SkillLevel,
+    };
+    live.set_number(skill_level, 77).unwrap();
+    live.set_text(SaveTextField::MapName, "Live".to_owned())
+        .unwrap();
+    let before = live.encode().unwrap();
+
+    let saved_tail = [0xfa, 0xfb, 0xfc];
+    let mut saved_source = complete_save_fixture(SaveFixtureOptions {
+        tail: saved_tail.to_vec(),
+        ..SaveFixtureOptions::default()
+    });
+    saved_source
+        .get_mut(8..22)
+        .unwrap()
+        .copy_from_slice(b"Saved Context\0");
+    let mut saved = SaveDocument::parse(saved_source).unwrap();
+    saved.set_number(skill_level, 88).unwrap();
+    saved
+        .set_text(SaveTextField::MapName, "Saved".to_owned())
+        .unwrap();
+    let mut inconsistent = saved.encode().unwrap();
+    *inconsistent.last_mut().unwrap() ^= 0xff;
+
+    assert!(matches!(
+        live.rebase_source(&saved, inconsistent),
+        Err(FormatError::InconsistentSaveRebase)
+    ));
+    assert!(!live.has_size_prefix());
+    assert!(!live.has_context());
+    assert!(live.context_text().is_empty());
+    assert_eq!(live.number(skill_level).unwrap(), 77);
+    assert_eq!(live.text(SaveTextField::MapName).unwrap(), "Live");
+    assert_eq!(live.encode().unwrap(), before);
+    assert_eq!(before.get(0x8000..), Some(&live_tail[..]));
+
+    live.set_number(skill_level, 8).unwrap();
+    live.restore_text(SaveTextField::MapName, original_text);
+    assert_eq!(live.encode().unwrap(), source);
+}
+
+#[test]
+fn successful_save_rebase_preserves_newer_live_edits() {
+    let tail = [0xde, 0xad, 0, 0xbe, 0xef];
+    let mut source = complete_save_fixture(SaveFixtureOptions {
+        context: false,
+        tail: tail.to_vec(),
+        ..SaveFixtureOptions::default()
+    });
+    let offsets = complete_save_offsets(true, false);
+    patch_noncanonical_map_field(&mut source, offsets.main);
+    let mut live = SaveDocument::parse(source).unwrap();
+    let skill_level = SaveNumberTarget::Unit {
+        unit: 0,
+        field: SaveUnitField::SkillLevel,
+    };
+    live.set_number(skill_level, 77).unwrap();
+    live.set_text(SaveTextField::MapName, "Saved".to_owned())
+        .unwrap();
+    let saved = live.clone();
+    let written = saved.encode().unwrap();
+
+    live.set_number(skill_level, 78).unwrap();
+    live.set_text(SaveTextField::MapName, "Live".to_owned())
+        .unwrap();
+    live.rebase_source(&saved, written.clone()).unwrap();
+
+    assert!(live.has_size_prefix());
+    assert!(!live.has_context());
+    assert_eq!(live.number(skill_level).unwrap(), 78);
+    assert_eq!(live.text(SaveTextField::MapName).unwrap(), "Live");
+    let newer = live.encode().unwrap();
+    assert_ne!(newer, written);
+    assert_eq!(read_u32(&newer, 0), u32::try_from(newer.len()).unwrap());
+    assert_eq!(newer.get(0x8000..), Some(&tail[..]));
+
+    live.set_number(skill_level, 77).unwrap();
+    live.set_text(SaveTextField::MapName, "Saved".to_owned())
+        .unwrap();
+    assert_eq!(live.encode().unwrap(), written);
 }
 
 #[test]
@@ -1645,6 +1984,29 @@ fn equipment_metadata(field: SaveEquipmentField) -> ((i64, i64), SaveEditor) {
         _ => number(bounds),
     };
     (bounds, editor)
+}
+
+fn patch_save_text(source: &mut [u8], main_offset: usize, field: SaveTextField, value: &[u8]) {
+    assert!(value.len() <= 31);
+    let field_offset = match field {
+        SaveTextField::MapName => 0x20,
+        SaveTextField::SetFile => 0x60,
+        SaveTextField::SkyEffects => 0xa0,
+    };
+    let start = main_offset + field_offset;
+    let end = start + 32;
+    let Some(bytes) = source.get_mut(start..end) else {
+        panic!("fixture save-text field is out of bounds");
+    };
+    bytes.fill(0);
+    let Some(destination) = bytes.get_mut(..value.len()) else {
+        panic!("fixture save text does not fit its field");
+    };
+    destination.copy_from_slice(value);
+}
+
+fn text_value(bytes: &[u8]) -> String {
+    bytes.iter().copied().map(char::from).collect()
 }
 
 fn assert_complete<T>(all: &[T], labels: &[&str], label: impl Fn(T) -> &'static str)

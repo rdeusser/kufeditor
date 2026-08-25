@@ -20,7 +20,7 @@ pub use error::{
 pub use save::{
     SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField, SaveEquipmentGroup,
     SaveEquipmentSlot, SaveMainField, SaveMutation, SaveNumberTarget, SaveRosterField,
-    SaveTextField, SaveUnitField, SaveUnitGroup,
+    SaveTextField, SaveTextImage, SaveUnitField, SaveUnitGroup,
 };
 pub use schema::{SOXSchema, SchemaDocument, SpecialNameRef};
 pub use skill::{SkillDocument, SkillField, SkillTextField};

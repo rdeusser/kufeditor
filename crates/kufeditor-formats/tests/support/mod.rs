@@ -2,6 +2,8 @@ use kufeditor_formats::SaveRegion;
 
 const CONTEXT_SIZE: usize = 0x438;
 const MAIN_SIZE: usize = 0x154;
+const MAP_NAME_OFFSET: usize = 0x20;
+const SAVE_TEXT_SIZE: usize = 32;
 const PADDED_SIZE: usize = 0x8000;
 const UNIT_SIZE: usize = 483;
 const ROSTER_SIZE: usize = 8;
@@ -150,6 +152,31 @@ pub fn complete_save_fixture(options: SaveFixtureOptions) -> Vec<u8> {
     }
 
     source
+}
+
+pub fn save_with_noncanonical_map_field() -> Vec<u8> {
+    let mut source = complete_save_fixture(SaveFixtureOptions::default());
+    let offsets = complete_save_offsets(true, true);
+    patch_noncanonical_map_field(&mut source, offsets.main);
+    source
+}
+
+pub fn patch_noncanonical_map_field(source: &mut [u8], main_offset: usize) {
+    let start = main_offset + MAP_NAME_OFFSET;
+    let end = start + SAVE_TEXT_SIZE;
+    let Some(field) = source.get_mut(start..end) else {
+        panic!("fixture map-name field is out of bounds");
+    };
+
+    field.fill(0);
+    let Some(visible) = field.get_mut(..5) else {
+        panic!("fixture map-name visible text is out of bounds");
+    };
+    visible.copy_from_slice(b"MapA\0");
+    let Some(pattern) = field.get_mut(5..31) else {
+        panic!("fixture map-name post-zero pattern is out of bounds");
+    };
+    pattern.copy_from_slice(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 }
 
 pub fn fixture_with_unknown_choices(ucd: u32, skill: i32, resistance: i32) -> Vec<u8> {

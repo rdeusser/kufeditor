@@ -16,6 +16,7 @@ pub use fields::{
     SaveEquipmentField, SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveNumberTarget,
     SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup,
 };
+pub use text::SaveTextImage;
 
 const COUNT_SIZE: usize = size_of::<u32>();
 const UNIT_SIZE: usize = 483;
@@ -125,6 +126,30 @@ impl SaveDocument {
 
     pub fn second_array_count(&self) -> usize {
         self.file.second_array.len()
+    }
+
+    pub fn unit_skill_data(&self, unit: usize) -> Result<[u8; 24], FormatError> {
+        self.file.units.get(unit).map(|unit| unit.skill_data).ok_or(
+            FormatError::SaveUnitOutOfRange {
+                unit,
+                unit_count: self.file.units.len(),
+            },
+        )
+    }
+
+    pub fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) -> Result<(), FormatError> {
+        if bytes != saved.encode()? {
+            return Err(FormatError::InconsistentSaveRebase);
+        }
+
+        let source_file = saved.file.clone();
+        let context_text = saved.context_text.clone();
+        self.source = bytes;
+        self.source_file = source_file;
+        self.envelope = saved.envelope;
+        self.retained_tail_length = saved.retained_tail_length;
+        self.context_text = context_text;
+        Ok(())
     }
 }
 

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::{
-    SaveNumberTarget,
+    SaveNumberTarget, SaveTextField,
     diagnostic::DiagnosticField,
     generated::{
         kuf_save, sox_ability_by_job, sox_ability_info, sox_char_info, sox_custom_random_table,
@@ -370,6 +370,38 @@ pub enum FormatError {
         minimum: i64,
         maximum: i64,
     },
+
+    #[error(
+        "save text field {field:?} contains non-ASCII stored byte {byte:#04x} at index {index}"
+    )]
+    SaveInvalidStoredText {
+        field: SaveTextField,
+        index: usize,
+        byte: u8,
+    },
+
+    #[error("save text field {field:?} contains non-ASCII byte {byte:#04x} at index {index}")]
+    SaveInvalidTextByte {
+        field: SaveTextField,
+        index: usize,
+        byte: u8,
+    },
+
+    #[error("save text field {field:?} contains a zero byte at index {index}")]
+    SaveTextContainsZero { field: SaveTextField, index: usize },
+
+    #[error("save text field {field:?} has length {length}, but the maximum length is {maximum}")]
+    SaveTextTooLong {
+        field: SaveTextField,
+        length: usize,
+        maximum: usize,
+    },
+
+    #[error("save unit {unit} is outside the unit count {unit_count}")]
+    SaveUnitOutOfRange { unit: usize, unit_count: usize },
+
+    #[error("saved Crusaders source image is inconsistent with the saved snapshot")]
+    InconsistentSaveRebase,
 
     #[error("SOX input is neither a TroopInfo, SkillInfo, nor text SOX document")]
     UnsupportedSOX,
