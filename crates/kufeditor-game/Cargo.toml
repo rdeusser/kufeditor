@@ -9,6 +9,7 @@ kufeditor-formats.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+sha2.workspace = true
 tempfile.workspace = true
 
 [lints]

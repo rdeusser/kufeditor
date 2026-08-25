@@ -2,6 +2,7 @@
 
 mod catalog;
 mod error;
+mod static_translations;
 
 use std::fmt;
 
