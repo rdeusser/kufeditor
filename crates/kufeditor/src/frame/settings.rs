@@ -82,12 +82,14 @@ impl AppFrame {
         cx: &mut Context<Self>,
     ) {
         let finish = self.settings.finish(completion);
+        if finish.result.is_ok() {
+            self.notices.clear(NoticeSource::Startup);
+        }
         if finish.is_latest {
             match finish.result {
                 Ok(()) => {
                     self.notices
                         .complete(NoticeSource::SettingsWrite, finish.revision.get(), None);
-                    self.notices.clear(NoticeSource::Startup);
                 }
                 Err(error) => {
                     self.close_pending = false;

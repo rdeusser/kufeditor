@@ -2323,7 +2323,7 @@ mod tests {
         catalog_status::CatalogStatus,
         frame::discovery_status::DiscoveryStatus,
         notices::{Notice, NoticeLevel, NoticeSource},
-        settings::SettingsStartup,
+        settings::{SettingsQueueResult, SettingsStartup, image_from_runtime},
         state::{Area, RecordSelections, RequestID, navigation_projection},
         text_input::{TextInputEvent, bind as bind_text_input},
     };
@@ -4125,6 +4125,83 @@ mod tests {
         cx.run_until_parked();
 
         assert_eq!(fs::read(path).unwrap(), original);
+    }
+
+    #[gpui::test]
+    fn first_successful_coalesced_settings_replacement_clears_the_startup_error(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        fs::write(&path, b"{").unwrap();
+        let startup = SettingsStartup::load(path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Could not load application settings")
+                );
+
+                let first_image =
+                    image_from_runtime(Game::Heroes, &frame.game_paths, &frame.recent_files)
+                        .unwrap();
+                let SettingsQueueResult::Queued(first_revision) = frame.settings.queue(first_image)
+                else {
+                    panic!("enabled persistence must queue revision 1");
+                };
+                frame.notices.begin(
+                    NoticeSource::SettingsWrite,
+                    first_revision.get(),
+                    Notice::info("Saving application settings"),
+                );
+                let first_request = frame.settings.take_ready().unwrap();
+
+                let latest_image =
+                    image_from_runtime(Game::Crusaders, &frame.game_paths, &frame.recent_files)
+                        .unwrap();
+                let SettingsQueueResult::Queued(latest_revision) =
+                    frame.settings.queue(latest_image)
+                else {
+                    panic!("enabled persistence must queue revision 2");
+                };
+                frame.notices.begin(
+                    NoticeSource::SettingsWrite,
+                    latest_revision.get(),
+                    Notice::info("Saving application settings"),
+                );
+                assert!(frame.settings.take_ready().is_none());
+
+                let first_completion = first_request.run();
+                let saved =
+                    serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap();
+                assert_eq!(
+                    saved.get("active_game").and_then(serde_json::Value::as_str),
+                    Some("heroes")
+                );
+                frame.finish_settings_write(first_completion, cx);
+
+                assert_eq!(
+                    frame.settings.latest_revision_for_test(),
+                    Some(latest_revision)
+                );
+                assert_eq!(
+                    frame.notices.current().map(Notice::level),
+                    Some(NoticeLevel::Info)
+                );
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Saving application settings")
+                );
+            })
+            .unwrap();
+        cx.run_until_parked();
     }
 
     #[gpui::test]
