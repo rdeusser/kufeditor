@@ -210,6 +210,9 @@ impl AppFrame {
         let root = installation.root().to_path_buf();
         let previous = self.game_paths.root(game).map(ToOwned::to_owned);
         if previous.as_ref() == Some(&root) {
+            if game == Game::Crusaders {
+                self.reconcile_save_catalog(cx);
+            }
             self.notices
                 .complete(NoticeSource::Browse(game), request.get(), None);
             cx.notify();
@@ -219,6 +222,9 @@ impl AppFrame {
         self.game_paths.set_root(game, Some(root));
         if !self.schedule_settings_write(self.shell.game(), cx) {
             self.game_paths.set_root(game, previous);
+            if game == Game::Crusaders {
+                self.reconcile_save_catalog(cx);
+            }
             self.notices
                 .complete(NoticeSource::Browse(game), request.get(), None);
             return;
@@ -238,6 +244,9 @@ impl AppFrame {
             }
             self.start_catalog_load(cx);
         }
+        if game == Game::Crusaders {
+            self.reconcile_save_catalog(cx);
+        }
         cx.notify();
     }
 
@@ -249,12 +258,18 @@ impl AppFrame {
 
         let previous = self.game_paths.root(game).map(ToOwned::to_owned);
         if previous.is_none() {
+            if game == Game::Crusaders {
+                self.reconcile_save_catalog(cx);
+            }
             cx.notify();
             return;
         }
         self.game_paths.set_root(game, None);
         if !self.schedule_settings_write(self.shell.game(), cx) {
             self.game_paths.set_root(game, previous);
+            if game == Game::Crusaders {
+                self.reconcile_save_catalog(cx);
+            }
             return;
         }
         #[cfg(test)]
@@ -267,6 +282,9 @@ impl AppFrame {
                 self.task_launches.catalog += 1;
             }
             self.start_catalog_load(cx);
+        }
+        if game == Game::Crusaders {
+            self.reconcile_save_catalog(cx);
         }
         cx.notify();
     }
@@ -357,6 +375,9 @@ impl AppFrame {
                         self.game_paths = previous_paths;
                         self.root_revisions = previous_revisions;
                     }
+                    if update.changed_games.contains(&Game::Crusaders) {
+                        self.reconcile_save_catalog(cx);
+                    }
                 }
 
                 let notice = if update.installation_count == 0 {
@@ -401,13 +422,14 @@ mod tests {
         reason = "controlled GPUI and temporary installation fixtures make failures fatal"
     )]
 
-    use std::{error::Error, fs, path::PathBuf};
+    use std::{error::Error, fs, mem::size_of, path::PathBuf};
 
     use gpui::{AppContext, TestAppContext, WindowOptions};
     use kufeditor_game::{
         DiscoveryError, DiscoveryReport, Game, GameInstallation, scan_steam_common_directories,
         steam_discovery_available,
     };
+    use kufeditor_workspace::{Document, DocumentID, SaveDocument};
 
     use super::{BrowsePromptResult, SelectedRootError, game_folder_prompt_options};
     use crate::{
@@ -417,8 +439,13 @@ mod tests {
             discovery_status::{DiscoveryStatus, RootRevisions},
         },
         notices::{Notice, NoticeLevel, NoticeSource},
+        save_catalog_status::{SaveCatalogKey, SaveCatalogStatus},
         settings::SettingsStartup,
     };
+
+    const SAVE_CONTEXT_SIZE: usize = 0x438;
+    const SAVE_MAIN_SIZE: usize = 0x154;
+    const SAVE_PADDED_SIZE: usize = 0x8000;
 
     struct InstallationFixture {
         _temporary: tempfile::TempDir,
@@ -513,6 +540,48 @@ mod tests {
 
     fn begin_discovery(frame: &mut AppFrame) -> crate::frame::discovery_status::DiscoveryKey {
         frame.begin_discovery_request()
+    }
+
+    fn save_fixture() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        append_u32(&mut bytes, 0);
+        append_u32(&mut bytes, 0x6e);
+        append_u32(&mut bytes, u32::MAX);
+        bytes.resize(bytes.len() + SAVE_CONTEXT_SIZE - size_of::<u32>(), 0);
+        append_u32(&mut bytes, 0);
+        bytes.resize(bytes.len() + SAVE_MAIN_SIZE, 0);
+        append_u32(&mut bytes, 0);
+        append_i32(&mut bytes, -1);
+        append_u32(&mut bytes, 0);
+        append_u32(&mut bytes, 0);
+        for _ in 0..20 {
+            append_u32(&mut bytes, 0);
+        }
+        append_u32(&mut bytes, 0);
+        bytes.resize(SAVE_PADDED_SIZE, 0);
+        let length = u32::try_from(bytes.len()).unwrap();
+        bytes
+            .get_mut(..size_of::<u32>())
+            .unwrap()
+            .copy_from_slice(&length.to_le_bytes());
+        bytes
+    }
+
+    fn append_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn append_i32(bytes: &mut Vec<u8>, value: i32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn open_active_save(frame: &mut AppFrame, cx: &mut gpui::Context<AppFrame>) -> DocumentID {
+        let document = frame.workspace.open_loaded(
+            PathBuf::from("campaign.sav"),
+            Document::Save(SaveDocument::parse(save_fixture()).unwrap()),
+        );
+        frame.activate_document(document, cx);
+        document
     }
 
     #[test]
@@ -731,6 +800,11 @@ mod tests {
 
         window
             .update(cx, |frame, _, cx| {
+                open_active_save(frame, cx);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::NotConfigured
+                ));
                 let request = begin_browse(frame, Game::Crusaders);
                 frame.finish_browse_inspection(
                     Game::Crusaders,
@@ -749,6 +823,128 @@ mod tests {
                 assert_eq!(frame.settings.latest_revision_for_test().unwrap().get(), 1);
                 assert_eq!(frame.task_launches.settings, 1);
                 assert_eq!(frame.task_launches.catalog, 1);
+                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key }
+                        if key.root() == fixture.crusaders
+                ));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn same_root_browse_completion_reconciles_the_existing_crusaders_root(cx: &mut TestAppContext) {
+        let fixture = InstallationFixture::complete();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(fixture.crusaders.clone()));
+                open_active_save(frame, cx);
+                let stale_request = frame.shell.begin_save_catalog();
+                frame
+                    .save_catalog
+                    .begin(SaveCatalogKey::new(stale_request, "/stale/crusaders"));
+                let request = begin_browse(frame, Game::Crusaders);
+
+                frame.finish_browse_inspection(
+                    Game::Crusaders,
+                    request,
+                    Ok(GameInstallation::inspect(Game::Crusaders, &fixture.crusaders).unwrap()),
+                    cx,
+                );
+
+                assert_eq!(frame.task_launches.settings, 0);
+                assert_eq!(frame.task_launches.save_catalog, 2);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key }
+                        if key.root() == fixture.crusaders
+                            && key.request() != stale_request
+                ));
+            })
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn browse_snapshot_rollback_reconciles_the_restored_crusaders_root(cx: &mut TestAppContext) {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let previous = InstallationFixture::complete();
+        let selected = InstallationFixture::complete();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(previous.crusaders.clone()));
+                open_active_save(frame, cx);
+                let stale_request = frame.shell.begin_save_catalog();
+                frame
+                    .save_catalog
+                    .begin(SaveCatalogKey::new(stale_request, "/stale/crusaders"));
+                frame
+                    .recent_files
+                    .add(PathBuf::from(OsString::from_vec(vec![b'/', 0xff])));
+                let request = begin_browse(frame, Game::Crusaders);
+
+                frame.finish_browse_inspection(
+                    Game::Crusaders,
+                    request,
+                    Ok(GameInstallation::inspect(Game::Crusaders, &selected.crusaders).unwrap()),
+                    cx,
+                );
+
+                assert_eq!(
+                    frame.game_paths.root(Game::Crusaders),
+                    Some(previous.crusaders.as_path())
+                );
+                assert_eq!(frame.task_launches.settings, 0);
+                assert_eq!(frame.task_launches.save_catalog, 2);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key }
+                        if key.root() == previous.crusaders
+                            && key.request() != stale_request
+                ));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn heroes_browse_does_not_restart_the_crusaders_save_catalog(cx: &mut TestAppContext) {
+        let fixture = InstallationFixture::complete();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(fixture.crusaders.clone()));
+                open_active_save(frame, cx);
+                let save_key = match frame.save_catalog.status() {
+                    SaveCatalogStatus::Loading { key } => key.clone(),
+                    _ => panic!("configured active save must start loading"),
+                };
+                let request = begin_browse(frame, Game::Heroes);
+
+                frame.finish_browse_inspection(
+                    Game::Heroes,
+                    request,
+                    Ok(GameInstallation::inspect(Game::Heroes, &fixture.heroes).unwrap()),
+                    cx,
+                );
+
+                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key } if key == &save_key
+                ));
             })
             .unwrap();
     }
@@ -763,6 +959,11 @@ mod tests {
                 frame
                     .game_paths
                     .set_root(Game::Crusaders, Some(fixture.crusaders.clone()));
+                open_active_save(frame, cx);
+                let save_key = match frame.save_catalog.status() {
+                    SaveCatalogStatus::Loading { key } => key.clone(),
+                    _ => panic!("configured active save must start loading"),
+                };
                 frame.start_catalog_load(cx);
                 let browse = begin_browse(frame, Game::Crusaders);
                 let discovery = begin_discovery(frame);
@@ -776,6 +977,11 @@ mod tests {
                     frame.catalog.status(),
                     CatalogStatus::NotConfigured
                 ));
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::NotConfigured
+                ));
+                assert!(!frame.shell.accepts_save_catalog(save_key.request()));
                 assert!(!frame.notices.complete(
                     NoticeSource::Browse(Game::Crusaders),
                     browse.get(),
@@ -799,6 +1005,85 @@ mod tests {
                     browse.get(),
                     Some(Notice::info("stale browse")),
                 ));
+            })
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn clear_snapshot_rollback_reconciles_the_restored_crusaders_root(cx: &mut TestAppContext) {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let fixture = InstallationFixture::complete();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(fixture.crusaders.clone()));
+                open_active_save(frame, cx);
+                let stale_request = frame.shell.begin_save_catalog();
+                frame
+                    .save_catalog
+                    .begin(SaveCatalogKey::new(stale_request, "/stale/crusaders"));
+                frame
+                    .recent_files
+                    .add(PathBuf::from(OsString::from_vec(vec![b'/', 0xff])));
+
+                frame.clear_game_root(Game::Crusaders, cx);
+
+                assert_eq!(
+                    frame.game_paths.root(Game::Crusaders),
+                    Some(fixture.crusaders.as_path())
+                );
+                assert_eq!(frame.task_launches.settings, 0);
+                assert_eq!(frame.task_launches.save_catalog, 2);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key }
+                        if key.root() == fixture.crusaders
+                            && key.request() != stale_request
+                ));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn clear_while_sox_is_active_invalidates_retained_save_work(cx: &mut TestAppContext) {
+        let fixture = InstallationFixture::complete();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(fixture.crusaders.clone()));
+                open_active_save(frame, cx);
+                let save_request = match frame.save_catalog.status() {
+                    SaveCatalogStatus::Loading { key } => key.request(),
+                    _ => panic!("configured active save must start loading"),
+                };
+                let sox = frame.workspace.open_loaded(
+                    PathBuf::from("TroopInfo.sox"),
+                    Document::Troop({
+                        let mut bytes = vec![0_u8; 8 + 148 + 64];
+                        bytes
+                            .get_mut(..8)
+                            .unwrap()
+                            .copy_from_slice(&[100, 0, 0, 0, 1, 0, 0, 0]);
+                        kufeditor_workspace::TroopDocument::parse(bytes).unwrap()
+                    }),
+                );
+                frame.activate_document(sox, cx);
+
+                frame.clear_game_root(Game::Crusaders, cx);
+
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Dormant
+                ));
+                assert!(!frame.shell.accepts_save_catalog(save_request));
             })
             .unwrap();
     }
@@ -853,12 +1138,21 @@ mod tests {
             .update(cx, |frame, _, cx| {
                 let browse = begin_browse(frame, Game::Crusaders);
                 let discovery = begin_discovery(frame);
+                let stale_request = frame.shell.begin_save_catalog();
+                frame
+                    .save_catalog
+                    .begin(SaveCatalogKey::new(stale_request, "/stale/crusaders"));
 
                 frame.clear_game_root(Game::Crusaders, cx);
 
                 assert_eq!(frame.root_revisions.revision(Game::Crusaders), 1);
                 assert!(frame.settings.latest_revision_for_test().is_none());
                 assert!(matches!(frame.discovery.status(), DiscoveryStatus::Idle));
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Dormant
+                ));
+                assert!(!frame.shell.accepts_save_catalog(stale_request));
                 frame.finish_browse_inspection(
                     Game::Crusaders,
                     browse,
@@ -1000,6 +1294,7 @@ mod tests {
                 frame
                     .game_paths
                     .set_root(Game::Heroes, Some(configured_heroes.clone()));
+                open_active_save(frame, cx);
                 let key = begin_discovery(frame);
                 frame.finish_discovery(key, Ok(fixture.report), cx);
 
@@ -1016,6 +1311,12 @@ mod tests {
                 assert_eq!(frame.settings.latest_revision_for_test().unwrap().get(), 1);
                 assert_eq!(frame.task_launches.settings, 1);
                 assert_eq!(frame.task_launches.catalog, 1);
+                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::Loading { key }
+                        if key.root() == expected_crusaders
+                ));
             })
             .unwrap();
     }
@@ -1035,6 +1336,7 @@ mod tests {
                 frame
                     .recent_files
                     .add(PathBuf::from(OsString::from_vec(vec![b'/', 0xff])));
+                open_active_save(frame, cx);
                 let key = begin_discovery(frame);
                 frame.finish_discovery(key, Ok(fixture.report), cx);
 
@@ -1043,6 +1345,11 @@ mod tests {
                 assert_eq!(frame.root_revisions, RootRevisions::default());
                 assert_eq!(frame.task_launches.settings, 0);
                 assert_eq!(frame.task_launches.catalog, 0);
+                assert_eq!(frame.task_launches.save_catalog, 0);
+                assert!(matches!(
+                    frame.save_catalog.status(),
+                    SaveCatalogStatus::NotConfigured
+                ));
                 assert!(matches!(
                     frame.discovery.status(),
                     DiscoveryStatus::Ready { .. }

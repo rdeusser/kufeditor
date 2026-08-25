@@ -4,6 +4,7 @@ mod components;
 mod frame;
 mod notices;
 mod number_edit;
+mod save_catalog_status;
 mod settings;
 mod state;
 mod text_input;
@@ -46,6 +47,7 @@ fn main() -> ExitCode {
             |window, cx| {
                 let frame = cx.new(|cx| AppFrame::new(startup, cx));
                 frame.update(cx, AppFrame::start_catalog_load);
+                frame.update(cx, AppFrame::reconcile_save_catalog);
                 let weak_frame = frame.downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
                     weak_frame

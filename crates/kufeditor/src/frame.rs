@@ -21,6 +21,7 @@ use crate::{
     components,
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
+    save_catalog_status::SaveCatalogSession,
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
     state::{Area, ClosePolicy, RecordSelections, RequestID, ShellState, navigation_projection},
     text_input::{TextInput, TextInputColors, TextInputEvent},
@@ -32,6 +33,7 @@ mod catalog;
 mod discovery;
 #[path = "discovery_status.rs"]
 pub(crate) mod discovery_status;
+mod save_catalog;
 mod settings;
 use self::discovery::{BrowsePromptLauncher, PlatformBrowsePromptLauncher};
 use self::settings::protected_settings_notice;
@@ -42,6 +44,7 @@ struct TaskLaunchCounts {
     catalog: usize,
     discovery: usize,
     inspection: usize,
+    save_catalog: usize,
     settings: usize,
 }
 
@@ -426,6 +429,7 @@ pub struct AppFrame {
     root_revisions: discovery_status::RootRevisions,
     recent_files: kufeditor_workspace::RecentFiles,
     catalog: CatalogSession<NameDictionary, CatalogRequestError>,
+    save_catalog: SaveCatalogSession,
     discovery: discovery_status::DiscoveryStatus,
     settings: SettingsWritePump,
     notices: NoticeCenter,
@@ -479,6 +483,7 @@ impl AppFrame {
             root_revisions: discovery_status::RootRevisions::default(),
             recent_files,
             catalog: CatalogSession::default(),
+            save_catalog: SaveCatalogSession::default(),
             discovery: discovery_status::DiscoveryStatus::default(),
             settings,
             notices,
@@ -511,15 +516,17 @@ impl AppFrame {
         self.number_edit = Some(edit);
     }
 
-    fn activate_document(&mut self, document: DocumentID) {
+    fn activate_document(&mut self, document: DocumentID, cx: &mut Context<Self>) {
         self.cancel_property_edit();
         self.active_document = Some(document);
+        self.reconcile_save_catalog(cx);
     }
 
-    fn select_record(&mut self, document: DocumentID, record: usize) {
+    fn select_record(&mut self, document: DocumentID, record: usize, cx: &mut Context<Self>) {
         self.cancel_property_edit();
         self.active_document = Some(document);
         self.selections.select(document, record);
+        self.reconcile_save_catalog(cx);
     }
 
     fn text_input_colors(&self) -> TextInputColors {
@@ -1015,7 +1022,7 @@ impl AppFrame {
             let (_, loaded_document) = loaded.into_parts();
             let document = self.workspace.open_loaded(path, loaded_document);
             if index == 0 {
-                self.activate_document(document);
+                self.activate_document(document, cx);
                 self.shell.select_area(Area::Files);
             }
         }
@@ -1657,7 +1664,7 @@ impl AppFrame {
                     record == selected,
                 )
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.select_record(document_id, record);
+                    frame.select_record(document_id, record, cx);
                     window.focus(&frame.focus);
                     cx.notify();
                 }))
@@ -1895,7 +1902,7 @@ impl AppFrame {
                     record == selected,
                 )
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.select_record(document_id, record);
+                    frame.select_record(document_id, record, cx);
                     window.focus(&frame.focus);
                     cx.notify();
                 }))
@@ -2009,7 +2016,7 @@ impl AppFrame {
                     record == selected,
                 )
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.select_record(document_id, record);
+                    frame.select_record(document_id, record, cx);
                     window.focus(&frame.focus);
                     cx.notify();
                 }))
@@ -2140,7 +2147,7 @@ impl AppFrame {
                     dirty,
                 )
                 .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.activate_document(document_id);
+                    frame.activate_document(document_id, cx);
                     cx.notify();
                 }))
                 .into_any_element()
@@ -3213,7 +3220,7 @@ mod tests {
         let document = window
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.shell.select_area(Area::Files);
                 frame.start_text_edit(
                     TextEditTarget::text_sox(document, 0),
@@ -3253,7 +3260,7 @@ mod tests {
         window
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.shell.select_area(Area::Files);
                 frame.start_text_edit(
                     TextEditTarget::text_sox(document, 0),
@@ -3301,7 +3308,7 @@ mod tests {
         window
             .update(cx, |frame, window, cx| {
                 let document = open_troop(frame, "original.sox", 100);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.save_as_action(&SaveAs, window, cx);
                 frame.notices.replace(
                     NoticeSource::Workspace,
@@ -3378,7 +3385,7 @@ mod tests {
         let (document, token, result, notice_identity) = window
             .update(cx, |frame, window, cx| {
                 let document = open_troop(frame, &document_path.to_string_lossy(), 100);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 let request = frame.workspace.prepare_save(document, None).unwrap();
                 let token = request.token();
                 let result = request.run();
@@ -3437,7 +3444,7 @@ mod tests {
             let (document, token, result, notice_identity) = window
                 .update(cx, |frame, window, cx| {
                     let document = open_troop(frame, &document_path.to_string_lossy(), 100);
-                    frame.activate_document(document);
+                    frame.activate_document(document, cx);
                     let request = frame.workspace.prepare_save(document, None).unwrap();
                     let token = request.token();
                     let result = request.run();
@@ -3485,7 +3492,7 @@ mod tests {
         let (document, state, input) = window
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.shell.select_area(Area::Files);
                 let state = frame.workspace.state_id(document).unwrap();
                 frame.start_text_edit(
@@ -3528,7 +3535,7 @@ mod tests {
         let (document, state, input) = window
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.shell.select_area(Area::Files);
                 let state = frame.workspace.state_id(document).unwrap();
                 frame.start_text_edit(
@@ -3570,7 +3577,7 @@ mod tests {
         let (document, state, input) = window
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.shell.select_area(Area::Files);
                 let state = frame.workspace.state_id(document).unwrap();
                 frame.start_text_edit(
@@ -3622,7 +3629,7 @@ mod tests {
                 let second = open_text_sox(frame, "second.sox", &[(2, "Bravo")]);
                 let first_state = frame.workspace.state_id(first).unwrap();
                 let second_state = frame.workspace.state_id(second).unwrap();
-                frame.activate_document(first);
+                frame.activate_document(first, cx);
                 frame.start_text_edit(
                     TextEditTarget::text_sox(first, 0),
                     "Alpha".to_owned(),
@@ -3677,7 +3684,7 @@ mod tests {
             .update(cx, |frame, window, cx| {
                 let document =
                     open_text_sox(frame, "StringTable.sox", &[(1, "Alpha"), (2, "Bravo")]);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.start_text_edit(
                     TextEditTarget::text_sox(document, 0),
                     "Alpha".to_owned(),
@@ -3685,7 +3692,7 @@ mod tests {
                     cx,
                 );
 
-                frame.select_record(document, 1);
+                frame.select_record(document, 1, cx);
 
                 assert_eq!(frame.selections.selected(document), 1);
                 assert!(frame.text_edit.is_none());
@@ -3704,9 +3711,9 @@ mod tests {
             .unwrap()
         });
         window
-            .update(cx, |frame, window, _| {
+            .update(cx, |frame, window, cx| {
                 let document = open_skill(frame, "SkillInfo.sox", 1);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.begin_number_edit(ActiveNumberEdit::skill_max_level(document, 0, 50));
                 window.focus(&frame.focus);
             })
@@ -3776,10 +3783,10 @@ mod tests {
         });
 
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, _, cx| {
                 let first = open_troop(frame, "first.sox", 100);
                 let second = open_troop(frame, "second.sox", 200);
-                frame.activate_document(first);
+                frame.activate_document(first, cx);
                 frame.number_edit = Some(ActiveNumberEdit::troop_field(
                     first,
                     0,
@@ -3787,7 +3794,7 @@ mod tests {
                     100,
                 ));
 
-                frame.activate_document(second);
+                frame.activate_document(second, cx);
 
                 assert_eq!(frame.active_document, Some(second));
                 assert!(frame.number_edit.is_none());
@@ -3825,7 +3832,7 @@ mod tests {
             .update(cx, |frame, window, cx| {
                 let first = open_skill(frame, "first.sox", 1);
                 let second = open_skill(frame, "second.sox", 1);
-                frame.activate_document(first);
+                frame.activate_document(first, cx);
                 frame.start_text_edit(
                     TextEditTarget::skill(first, 0, SkillTextField::LocalizationKey),
                     "@(S_Melee)".to_owned(),
@@ -3835,7 +3842,7 @@ mod tests {
                 let input = frame.text_edit.as_ref().unwrap().input.clone();
                 assert!(input.read(cx).focus_handle().is_focused(window));
 
-                frame.activate_document(second);
+                frame.activate_document(second, cx);
                 assert!(frame.text_edit.is_none());
                 (first, second, input)
             })
@@ -3874,7 +3881,7 @@ mod tests {
         let (document, stale_input, active_input) = window
             .update(cx, |frame, window, cx| {
                 let document = open_skill(frame, "SkillInfo.sox", 1);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.begin_number_edit(ActiveNumberEdit::skill_id(document, 0, 0));
                 assert!(frame.number_edit.is_some());
 
@@ -3946,14 +3953,14 @@ mod tests {
         let (document, canceled_input) = window
             .update(cx, |frame, window, cx| {
                 let document = open_skill(frame, "SkillInfo.sox", 2);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.start_text_edit(
                     TextEditTarget::skill(document, 0, SkillTextField::LocalizationKey),
                     "@(S_Melee)".to_owned(),
                     window,
                     cx,
                 );
-                frame.select_record(document, 1);
+                frame.select_record(document, 1, cx);
                 assert_eq!(frame.selections.selected(document), 1);
                 assert!(frame.text_edit.is_none());
 
@@ -4707,7 +4714,7 @@ mod tests {
 
         window
             .update(cx, |frame, window, cx| {
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.begin_number_edit(ActiveNumberEdit::troop_field(
                     document,
                     0,
@@ -4958,9 +4965,9 @@ mod tests {
         });
 
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, _, cx| {
                 let document = open_troop(frame, "TroopInfo.sox", 100);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.begin_number_edit(ActiveNumberEdit::troop_field(
                     document,
                     0,
@@ -5006,7 +5013,7 @@ mod tests {
         let (document, input, before) = window
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.start_text_edit(
                     TextEditTarget::text_sox(document, 0),
                     "Alpha".to_owned(),
@@ -5061,9 +5068,9 @@ mod tests {
         });
 
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, _, cx| {
                 let document = open_skill(frame, "SkillInfo.sox", 1);
-                frame.activate_document(document);
+                frame.activate_document(document, cx);
                 frame.close_documents = CloseDocuments::Discard;
                 frame.close_pending = true;
                 frame.close_armed = true;

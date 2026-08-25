@@ -28,6 +28,19 @@ impl RequestID {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SaveCatalogRequestID(u64);
+
+impl SaveCatalogRequestID {
+    #[allow(
+        dead_code,
+        reason = "save-catalog request identities are exposed to later inline status views"
+    )]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClosePolicy {
     Allow,
     PromptForUnsaved { count: usize },
@@ -95,8 +108,10 @@ pub struct ShellState {
     area: Area,
     game: Game,
     next_request_id: u64,
+    next_save_catalog_request_id: u64,
     active_open_request: Option<RequestID>,
     active_catalog_request: Option<RequestID>,
+    active_save_catalog_request: Option<SaveCatalogRequestID>,
     active_crusaders_browse_request: Option<RequestID>,
     active_heroes_browse_request: Option<RequestID>,
     active_discovery_request: Option<RequestID>,
@@ -150,6 +165,21 @@ impl ShellState {
 
     pub fn invalidate_catalog(&mut self) {
         self.active_catalog_request = None;
+    }
+
+    pub fn begin_save_catalog(&mut self) -> SaveCatalogRequestID {
+        self.next_save_catalog_request_id += 1;
+        let request = SaveCatalogRequestID(self.next_save_catalog_request_id);
+        self.active_save_catalog_request = Some(request);
+        request
+    }
+
+    pub fn accepts_save_catalog(&self, request: SaveCatalogRequestID) -> bool {
+        self.active_save_catalog_request == Some(request)
+    }
+
+    pub fn invalidate_save_catalog(&mut self) {
+        self.active_save_catalog_request = None;
     }
 
     pub fn begin_browse(&mut self, game: Game) -> RequestID {
@@ -241,6 +271,43 @@ mod tests {
 
         state.invalidate_catalog();
         assert!(!state.accepts_catalog(second));
+    }
+
+    #[test]
+    fn global_and_save_catalog_requests_use_independent_generations() {
+        let mut state = ShellState::default();
+
+        let first_global = state.begin_catalog();
+        let first_save = state.begin_save_catalog();
+        let second_global = state.begin_catalog();
+        let second_save = state.begin_save_catalog();
+
+        assert_eq!(first_global.get(), 1);
+        assert_eq!(second_global.get(), 2);
+        assert_eq!(first_save.get(), 1);
+        assert_eq!(second_save.get(), 2);
+        assert!(!state.accepts_catalog(first_global));
+        assert!(state.accepts_catalog(second_global));
+        assert!(!state.accepts_save_catalog(first_save));
+        assert!(state.accepts_save_catalog(second_save));
+    }
+
+    #[test]
+    fn global_and_save_catalog_invalidations_are_independent() {
+        let mut state = ShellState::default();
+        let global = state.begin_catalog();
+        let save = state.begin_save_catalog();
+
+        state.invalidate_save_catalog();
+
+        assert!(state.accepts_catalog(global));
+        assert!(!state.accepts_save_catalog(save));
+
+        let next_save = state.begin_save_catalog();
+        state.invalidate_catalog();
+
+        assert!(!state.accepts_catalog(global));
+        assert!(state.accepts_save_catalog(next_save));
     }
 
     #[test]
