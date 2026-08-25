@@ -312,6 +312,58 @@ fn impossible_record_count_stops_at_the_handwritten_preflight() {
 }
 
 #[test]
+fn header_driven_preflights_reject_two_records_with_one_minimum_body() {
+    let cases = [
+        (SoxSchema::AbilityByJob, 100, 24, 64),
+        (SoxSchema::AbilityInfo, 100, 64, 64),
+        (SoxSchema::CharInfo, 100, 136, 64),
+        (SoxSchema::ItemAttInfo, 100, 12, 64),
+        (SoxSchema::ItemTypeInfo, 2, 178, 0),
+        (SoxSchema::JobInfo, 100, 72, 64),
+        (SoxSchema::LeaderGeneration, 100, 72, 64),
+        (SoxSchema::LibraryInfo, 100, 6, 64),
+        (SoxSchema::ResistInfo, 100, 12, 64),
+        (SoxSchema::SkillInfo, 100, 16, 64),
+        (SoxSchema::SkillPointTable, 100, 8, 64),
+        (SoxSchema::SpecialNames, 100, 4, 64),
+        (SoxSchema::TroopInfo, 100, 148, 64),
+        (SoxSchema::UnitUvInfo, 100, 36, 64),
+        (SoxSchema::UnitUvid, 100, 72, 64),
+        (SoxSchema::WorldmapCharInfo, 100, 28, 64),
+        (SoxSchema::WorldmapTroopInfo, 100, 28, 64),
+    ];
+
+    for (schema, marker, minimum_record_bytes, footer_bytes) in cases {
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, marker);
+        push_u32(&mut bytes, 2);
+        bytes.resize(bytes.len() + minimum_record_bytes, 0);
+        match footer_bytes {
+            0 => {}
+            64 => push_footer(&mut bytes),
+            _ => unreachable!("fixture table contains an unsupported footer size"),
+        }
+
+        let error = SchemaDocument::parse(schema, bytes).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                FormatError::SchemaParse {
+                    schema: actual_schema,
+                    offset: 8,
+                    source: GeneratedSoxError::InvalidLength {
+                        field: "records",
+                        value: 2,
+                    },
+                } if actual_schema == schema
+            ),
+            "{schema}: {error}"
+        );
+    }
+}
+
+#[test]
 fn odd_ascii_hex_length_remains_typed() {
     let error = SchemaDocument::parse(
         SoxSchema::ItemTypeInfo,

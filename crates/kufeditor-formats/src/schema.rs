@@ -344,3 +344,94 @@ define_schema_models!(
     WorldmapCharInfo => sox_worldmap_char_info;
     WorldmapTroopInfo => sox_worldmap_troop_info;
 );
+
+const _: fn(SchemaModel) = |model| match model {
+    SchemaModel::AbilityByJob(file) => {
+        let _: Box<sox_ability_by_job::File> = file;
+    }
+    SchemaModel::AbilityInfo(file) => {
+        let _: Box<sox_ability_info::File> = file;
+    }
+    SchemaModel::CharInfo(file) => {
+        let _: Box<sox_char_info::File> = file;
+    }
+    SchemaModel::CustomRandomTable(file) => {
+        let _: Box<sox_custom_random_table::File> = file;
+    }
+    SchemaModel::ItemAttInfo(file) => {
+        let _: Box<sox_item_att_info::File> = file;
+    }
+    SchemaModel::ItemTypeInfo(file) => {
+        let _: Box<sox_item_type_info::File> = file;
+    }
+    SchemaModel::JobInfo(file) => {
+        let _: Box<sox_job_info::File> = file;
+    }
+    SchemaModel::LeaderGeneration(file) => {
+        let _: Box<sox_leader_generation::File> = file;
+    }
+    SchemaModel::LibraryInfo(file) => {
+        let _: Box<sox_library_info::File> = file;
+    }
+    SchemaModel::ResistInfo(file) => {
+        let _: Box<sox_resist_info::File> = file;
+    }
+    SchemaModel::SkillInfo(file) => {
+        let _: Box<sox_skill_info::File> = file;
+    }
+    SchemaModel::SkillPointTable(file) => {
+        let _: Box<sox_skill_point_table::File> = file;
+    }
+    SchemaModel::SpecialNames(file) => {
+        let _: Box<sox_special_names::File> = file;
+    }
+    SchemaModel::TroopInfo(file) => {
+        let _: Box<sox_troop_info::File> = file;
+    }
+    SchemaModel::UnitUvInfo(file) => {
+        let _: Box<sox_unit_uv_info::File> = file;
+    }
+    SchemaModel::UnitUvid(file) => {
+        let _: Box<sox_unit_uvid::File> = file;
+    }
+    SchemaModel::WorldmapCharInfo(file) => {
+        let _: Box<sox_worldmap_char_info::File> = file;
+    }
+    SchemaModel::WorldmapTroopInfo(file) => {
+        let _: Box<sox_worldmap_troop_info::File> = file;
+    }
+};
+
+#[cfg(test)]
+mod tests {
+    use super::{CUSTOM_RANDOM_TABLE_BYTES, SoxSchema};
+
+    #[test]
+    fn schema_record_layouts_match_generated_minimums() {
+        let cases = [
+            (SoxSchema::AbilityByJob, Some((24, 64))),
+            (SoxSchema::AbilityInfo, Some((64, 64))),
+            (SoxSchema::CharInfo, Some((136, 64))),
+            (SoxSchema::CustomRandomTable, None),
+            (SoxSchema::ItemAttInfo, Some((12, 64))),
+            (SoxSchema::ItemTypeInfo, Some((178, 0))),
+            (SoxSchema::JobInfo, Some((72, 64))),
+            (SoxSchema::LeaderGeneration, Some((72, 64))),
+            (SoxSchema::LibraryInfo, Some((6, 64))),
+            (SoxSchema::ResistInfo, Some((12, 64))),
+            (SoxSchema::SkillInfo, Some((16, 64))),
+            (SoxSchema::SkillPointTable, Some((8, 64))),
+            (SoxSchema::SpecialNames, Some((4, 64))),
+            (SoxSchema::TroopInfo, Some((148, 64))),
+            (SoxSchema::UnitUvInfo, Some((36, 64))),
+            (SoxSchema::UnitUvid, Some((72, 64))),
+            (SoxSchema::WorldmapCharInfo, Some((28, 64))),
+            (SoxSchema::WorldmapTroopInfo, Some((28, 64))),
+        ];
+
+        for (schema, expected) in cases {
+            assert_eq!(schema.record_layout(), expected, "{schema}");
+        }
+        assert_eq!(CUSTOM_RANDOM_TABLE_BYTES, 1_272);
+    }
+}
