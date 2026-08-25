@@ -742,6 +742,7 @@ impl AppFrame {
 
     fn save_as_action(&mut self, _: &SaveAs, _: &mut Window, cx: &mut Context<Self>) {
         self.cancel_property_edit();
+        cx.notify();
         let Some(document_id) = self.active_document else {
             return;
         };
@@ -1745,9 +1746,9 @@ mod tests {
         reason = "the GPUI test creates one controlled in-memory window"
     )]
 
-    use std::path::PathBuf;
+    use std::{cell::Cell, path::PathBuf, rc::Rc};
 
-    use gpui::{AppContext, TestAppContext, WindowOptions};
+    use gpui::{AppContext, EntityInputHandler, TestAppContext, WindowOptions};
     use kufeditor_workspace::{
         Document, DocumentEdit, DocumentId, DocumentKind, SkillDocument, SkillTextField,
         TextSoxDocument, TroopDocument, TroopField, Workspace,
@@ -1758,6 +1759,7 @@ mod tests {
         TextEditTarget, editor_route, invalid_number_notice, skill_text_projection,
     };
     use crate::{
+        actions::SaveAs,
         state::{Area, Notice, NoticeLevel, RecordSelections},
         text_input::{TextInputEvent, bind as bind_text_input},
     };
@@ -2058,11 +2060,57 @@ mod tests {
         window
             .update(cx, |frame, _, _| {
                 assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Bravo");
-                assert!(frame.workspace.can_undo(document).unwrap());
-                assert!(!frame.workspace.can_redo(document).unwrap());
+                assert!(frame.text_edit.is_none());
+                assert!(frame.workspace.undo(document).unwrap());
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
+                assert!(!frame.workspace.undo(document).unwrap());
+                assert!(frame.workspace.redo(document).unwrap());
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Bravo");
+                assert!(!frame.workspace.redo(document).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn text_sox_canceled_save_as_notifies_after_canceling_the_draft(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        window
+            .update(cx, |frame, window, cx| {
+                let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
+                frame.activate_document(document);
+                frame.shell.select_area(Area::Files);
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+            })
+            .unwrap();
+        let frame_entity = window.root(cx).unwrap();
+        let notification_count = Rc::new(Cell::new(0_usize));
+        cx.update(|cx| {
+            let notification_count = Rc::clone(&notification_count);
+            cx.observe(&frame_entity, move |_, _| {
+                notification_count.set(notification_count.get() + 1);
+            })
+            .detach();
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                frame.save_as_action(&SaveAs, window, cx);
                 assert!(frame.text_edit.is_none());
             })
             .unwrap();
+        assert!(cx.did_prompt_for_new_path());
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+
+        assert_eq!(notification_count.get(), 1);
     }
 
     #[gpui::test]
@@ -2091,11 +2139,13 @@ mod tests {
 
         cx.simulate_keystrokes(window.into(), "backspace enter");
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, window, cx| {
                 assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
                 assert_eq!(frame.workspace.state_id(document).unwrap(), state);
                 assert!(!frame.workspace.can_undo(document).unwrap());
                 assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
+                assert_eq!(input.read(cx).content(), "");
+                assert!(input.read(cx).focus_handle().is_focused(window));
                 let notice = frame.notice.as_ref().unwrap();
                 assert!(notice.is_editor_feedback());
                 assert!(notice.summary().contains("text SOX"));
@@ -2130,11 +2180,13 @@ mod tests {
 
         cx.simulate_keystrokes(window.into(), "L o n g e r enter");
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, window, cx| {
                 assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
                 assert_eq!(frame.workspace.state_id(document).unwrap(), state);
                 assert!(!frame.workspace.can_undo(document).unwrap());
                 assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
+                assert_eq!(input.read(cx).content(), "Longer");
+                assert!(input.read(cx).focus_handle().is_focused(window));
                 let notice = frame.notice.as_ref().unwrap();
                 assert!(notice.is_editor_feedback());
                 assert!(notice.summary().contains("text SOX"));
@@ -2153,6 +2205,7 @@ mod tests {
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
                 frame.activate_document(document);
+                frame.shell.select_area(Area::Files);
                 let state = frame.workspace.state_id(document).unwrap();
                 frame.start_text_edit(
                     TextEditTarget::text_sox(document, 0),
@@ -2161,6 +2214,9 @@ mod tests {
                     cx,
                 );
                 let input = frame.text_edit.as_ref().unwrap().input.clone();
+                input.update(cx, |input, input_cx| {
+                    input.replace_text_in_range(None, "Café", window, input_cx);
+                });
                 (document, state, input)
             })
             .unwrap();
@@ -2171,11 +2227,13 @@ mod tests {
         cx.run_until_parked();
 
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, window, cx| {
                 assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
                 assert_eq!(frame.workspace.state_id(document).unwrap(), state);
                 assert!(!frame.workspace.can_undo(document).unwrap());
                 assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
+                assert_eq!(input.read(cx).content(), "Café");
+                assert!(input.read(cx).focus_handle().is_focused(window));
                 let notice = frame.notice.as_ref().unwrap();
                 assert!(notice.is_editor_feedback());
                 assert!(notice.summary().contains("text SOX"));
@@ -2203,8 +2261,8 @@ mod tests {
                 );
                 let input = frame.text_edit.as_ref().unwrap().input.clone();
 
-                frame.activate_document(second);
-                assert!(frame.text_edit.is_none());
+                frame.active_document = Some(second);
+                assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
                 (first, second, input)
             })
             .unwrap();
@@ -2217,8 +2275,15 @@ mod tests {
         window
             .update(cx, |frame, _, _| {
                 assert_eq!(frame.active_document, Some(second));
+                assert!(frame.text_edit.is_none());
                 assert_eq!(frame.workspace.text_sox_text(first, 0).unwrap(), "Alpha");
+                assert_eq!(frame.workspace.text_sox_text(second, 0).unwrap(), "Bravo");
                 assert!(!frame.workspace.is_dirty(first).unwrap());
+                assert!(!frame.workspace.is_dirty(second).unwrap());
+                assert_eq!(
+                    frame.notice.as_ref().map(Notice::summary),
+                    Some("The active document changed; edit canceled")
+                );
             })
             .unwrap();
     }
