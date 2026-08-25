@@ -3,7 +3,7 @@
     reason = "Task 11 connects this Task 10 projection surface to GPUI rendering"
 )]
 
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use gpui::{
     AnyElement, App, Div, ElementId, IntoElement, SharedString, Stateful, UniformList, Window, div,
@@ -25,7 +25,10 @@ pub type SaveProjectionResult<T> = Result<T, Box<WorkspaceError>>;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SaveProjectionField {
-    Row,
+    UnitRow,
+    PlayerLeaderRow,
+    EquipmentRow,
+    RosterRow,
     Campaign,
     Text(SaveTextField),
     Main(SaveMainField),
@@ -59,12 +62,29 @@ pub struct SaveNumberProjection {
     pub editor: SaveEditor,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SaveTextProjection {
     pub id: SaveProjectionID,
     pub field: SaveTextField,
     pub label: String,
-    pub value: Result<String, String>,
+    pub value: Result<String, SaveTextReadError>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SaveTextReadError {
+    source: Arc<WorkspaceError>,
+}
+
+impl SaveTextReadError {
+    fn new(source: WorkspaceError) -> Self {
+        Self {
+            source: Arc::new(source),
+        }
+    }
+
+    pub(crate) fn workspace_error(&self) -> &WorkspaceError {
+        &self.source
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -76,7 +96,13 @@ pub struct SaveUnitRoleCounts {
     pub unknown: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SaveNameAvailability {
+    Resolved,
+    Unavailable,
+}
+
+#[derive(Clone, Debug)]
 pub struct SaveSummaryProjection {
     pub campaign: SaveNumberProjection,
     pub text_fields: Vec<SaveTextProjection>,
@@ -96,6 +122,7 @@ pub struct SaveUnitRowProjection {
     pub id: SaveProjectionID,
     pub source_index: usize,
     pub label: String,
+    pub name_availability: SaveNameAvailability,
     pub role_value: i64,
     pub role: String,
     pub skill_level: i64,
@@ -127,6 +154,7 @@ pub struct SaveEquipmentProjection {
     pub variant: i64,
     pub enhancement_tier: i64,
     pub item_name: String,
+    pub name_availability: SaveNameAvailability,
     pub attributes: Vec<SaveEquipmentAttributeProjection>,
     pub fields: Vec<SaveNumberProjection>,
 }
@@ -146,7 +174,7 @@ pub struct SaveMissionProjection {
     pub second_array_count: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum SaveSectionModel {
     Summary(SaveSummaryProjection),
     Units {
@@ -187,7 +215,9 @@ impl SaveRowKind {
 
     const fn projection_field(self) -> SaveProjectionField {
         match self {
-            Self::Units | Self::PlayerLeaders | Self::Roster => SaveProjectionField::Row,
+            Self::Units => SaveProjectionField::UnitRow,
+            Self::PlayerLeaders => SaveProjectionField::PlayerLeaderRow,
+            Self::Roster => SaveProjectionField::RosterRow,
             Self::SecondArray => SaveProjectionField::SecondArray,
         }
     }
@@ -542,15 +572,22 @@ pub fn equipment_projection(
     let variant = workspace.save_number(document, target(SaveEquipmentField::VariantIndex))?;
     let enhancement_tier =
         workspace.save_number(document, target(SaveEquipmentField::EnhancementTier))?;
-    let item_name = dictionary
-        .and_then(|dictionary| {
-            dictionary.weapon_name(
-                i32::try_from(item_type).ok()?,
-                u16::try_from(variant).ok()?,
-                i16::try_from(enhancement_tier).ok()?,
+    let resolved_item_name = dictionary.and_then(|dictionary| {
+        dictionary.weapon_name(
+            i32::try_from(item_type).ok()?,
+            u16::try_from(variant).ok()?,
+            i16::try_from(enhancement_tier).ok()?,
+        )
+    });
+    let (item_name, name_availability) = resolved_item_name.map_or_else(
+        || {
+            (
+                format!("Item Type {item_type} · Variant {variant}"),
+                SaveNameAvailability::Unavailable,
             )
-        })
-        .unwrap_or_else(|| format!("Item Type {item_type} · Variant {variant}"));
+        },
+        |name| (name.clone(), SaveNameAvailability::Resolved),
+    );
     let attributes = [
         SaveEquipmentField::Attribute1Index,
         SaveEquipmentField::Attribute2Index,
@@ -569,7 +606,7 @@ pub fn equipment_projection(
             SaveSection::Equipment,
             unit,
             Some(slot),
-            SaveProjectionField::Row,
+            SaveProjectionField::EquipmentRow,
         ),
         unit,
         slot,
@@ -578,6 +615,7 @@ pub fn equipment_projection(
         variant,
         enhancement_tier,
         item_name,
+        name_availability,
         attributes,
         fields,
     })
@@ -680,25 +718,28 @@ fn unit_row_projection(
     let troop_info_index = value(SaveUnitField::TroopInfoIndex)?;
     let job_type = value(SaveUnitField::JobType)?;
     let role_value = value(SaveUnitField::UCD)?;
-    let label = dictionary
-        .and_then(|dictionary| {
-            dictionary.unit_name(
-                i32::try_from(leader_name_index).ok()?,
-                i32::try_from(troop_info_index).ok()?,
-                u32::try_from(job_type).ok()?,
-            )
-        })
-        .map_or_else(|| format!("Job {job_type}"), ToOwned::to_owned);
+    let resolved_label = dictionary.and_then(|dictionary| {
+        dictionary.unit_name(
+            i32::try_from(leader_name_index).ok()?,
+            i32::try_from(troop_info_index).ok()?,
+            u32::try_from(job_type).ok()?,
+        )
+    });
+    let (label, name_availability) = resolved_label.map_or_else(
+        || (format!("Job {job_type}"), SaveNameAvailability::Unavailable),
+        |name| (name.to_owned(), SaveNameAvailability::Resolved),
+    );
     Ok(SaveUnitRowProjection {
         id: projection_id(
             document,
             SaveSection::Units,
             unit,
             None,
-            SaveProjectionField::Row,
+            SaveProjectionField::UnitRow,
         ),
         source_index: unit,
         label,
+        name_availability,
         role_value,
         role: display_editor_value(SaveEditor::UCD, role_value),
         skill_level: value(SaveUnitField::SkillLevel)?,
@@ -727,7 +768,7 @@ fn roster_row_projection(
             SaveSection::Roster,
             record,
             None,
-            SaveProjectionField::Row,
+            SaveProjectionField::RosterRow,
         ),
         source_index: record,
         label: format!("World Map State {}", record + 1),
@@ -805,7 +846,7 @@ fn text_projection(
         label: field.label().to_owned(),
         value: workspace
             .save_text(document, field)
-            .map_err(|error| error.to_string()),
+            .map_err(SaveTextReadError::new),
     }
 }
 
@@ -1573,7 +1614,6 @@ mod tests {
         cell::RefCell,
         collections::HashSet,
         fs,
-        mem::size_of,
         ops::Range,
         path::{Path, PathBuf},
     };
@@ -1583,24 +1623,21 @@ mod tests {
     use kufeditor_workspace::{
         Document, DocumentID, SaveDocument, SaveEquipmentField, SaveEquipmentGroup,
         SaveEquipmentSlot, SaveNumberTarget, SaveUnitField, SaveUnitGroup, Workspace,
+        WorkspaceError,
     };
     use tempfile::TempDir;
 
     use super::{
-        SaveProjectionField, SaveRowKind, SaveRowProjection, SaveRows, SaveSectionModel,
-        equipment_projection, mission_projection, render_editor, roster_field_element_id,
-        roster_row, save_section_model, summary_projection, unit_projection, unit_row_metadata,
-        visible_unit_indices,
+        SaveNameAvailability, SaveProjectionField, SaveRowKind, SaveRowProjection, SaveRows,
+        SaveSectionModel, equipment_projection, mission_projection, render_editor,
+        roster_field_element_id, roster_row, save_section_model, summary_projection,
+        unit_projection, unit_row_metadata, visible_unit_indices,
     };
     use crate::{
         state::{SavePresentationState, SavePresentationStates, SaveSection, SaveUnitVisibility},
+        test_support::SaveFixture,
         theme::Theme,
     };
-
-    const CONTEXT_SIZE: usize = 0x438;
-    const MAIN_SIZE: usize = 0x154;
-    const UNIT_SIZE: usize = 483;
-    const EQUIPMENT_SIZE: usize = 64;
 
     struct CatalogTree {
         _temporary: TempDir,
@@ -1624,6 +1661,22 @@ mod tests {
             tree.write(
                 CatalogRole::WeaponNames,
                 b"2\n\n2\t// swords\n9\nSword\nLong Sword\n27\nSabre\nLong Sabre\n  \n1 // axes\n3\nAxe\nWar Axe\n",
+            );
+            tree
+        }
+
+        fn fallback_shaped_names() -> Self {
+            let temporary = tempfile::tempdir().unwrap();
+            let sox = temporary.path().join("Data/SOX");
+            fs::create_dir_all(&sox).unwrap();
+            let tree = Self {
+                _temporary: temporary,
+                sox,
+            };
+            tree.write(CatalogRole::TroopNames, &indexed_table(&[(2, b"Job 2")]));
+            tree.write(
+                CatalogRole::WeaponNames,
+                b"1\n\n1\t// swords\n9\nSword\nItem Type 0 - Variant 0\n",
             );
             tree
         }
@@ -1679,14 +1732,19 @@ mod tests {
         bytes.extend_from_slice(value);
     }
 
+    fn append_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
     fn workspace_with_save(
         unit_count: usize,
         roster_count: usize,
         second_array_count: usize,
     ) -> (Workspace, DocumentID) {
-        let document =
-            SaveDocument::parse(save_fixture(unit_count, roster_count, second_array_count))
-                .unwrap();
+        let document = SaveDocument::parse(
+            SaveFixture::new(unit_count, roster_count, second_array_count).build(),
+        )
+        .unwrap();
         let mut workspace = Workspace::new();
         let document =
             workspace.open_loaded(PathBuf::from("campaign.sav"), Document::Save(document));
@@ -1713,16 +1771,9 @@ mod tests {
         roster_count: usize,
         second_array_count: usize,
     ) -> (Workspace, DocumentID) {
-        let mut bytes = save_fixture(roles.len(), roster_count, second_array_count);
-        let unit_offset =
-            2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>() + MAIN_SIZE + size_of::<u32>();
-        for (unit, role) in roles.iter().copied().enumerate() {
-            let ucd_offset = unit_offset + unit * UNIT_SIZE + 10 * size_of::<u32>();
-            bytes
-                .get_mut(ucd_offset..ucd_offset + size_of::<u32>())
-                .unwrap()
-                .copy_from_slice(&role.to_le_bytes());
-        }
+        let bytes = SaveFixture::new(roles.len(), roster_count, second_array_count)
+            .with_unit_roles(roles.iter().copied())
+            .build();
         let document = SaveDocument::parse(bytes).unwrap();
         let mut workspace = Workspace::new();
         let document =
@@ -1731,120 +1782,15 @@ mod tests {
     }
 
     fn workspace_with_invalid_text_save() -> (Workspace, DocumentID) {
-        let mut bytes = save_fixture(0, 0, 0);
-        let main_offset = 2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>();
-        *bytes.get_mut(main_offset + 0x20).unwrap() = 0x80;
-        bytes
-            .get_mut(main_offset + 0x60..main_offset + 0x68)
-            .unwrap()
-            .copy_from_slice(b"GOOD.SOX");
+        let bytes = SaveFixture::new(0, 0, 0)
+            .with_invalid_map_name_byte(0x80)
+            .with_save_file_name(b"GOOD.SOX".to_vec())
+            .build();
         let document = SaveDocument::parse(bytes).unwrap();
         let mut workspace = Workspace::new();
         let document =
             workspace.open_loaded(PathBuf::from("campaign.sav"), Document::Save(document));
         (workspace, document)
-    }
-
-    fn save_fixture(unit_count: usize, roster_count: usize, second_array_count: usize) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        append_u32(&mut bytes, 0);
-        append_u32(&mut bytes, 0x6e);
-        append_u32(&mut bytes, u32::MAX);
-        bytes.resize(bytes.len() + CONTEXT_SIZE - size_of::<u32>(), 0);
-        append_u32(&mut bytes, 0);
-        bytes.resize(bytes.len() + MAIN_SIZE, 0);
-
-        append_u32(&mut bytes, u32::try_from(unit_count).unwrap());
-        if unit_count > 0 {
-            append_complete_unit(&mut bytes);
-            append_zero_records(&mut bytes, unit_count - 1, UNIT_SIZE);
-        }
-
-        append_i32(&mut bytes, -1);
-        append_u32(&mut bytes, u32::try_from(roster_count).unwrap());
-        append_zero_records(&mut bytes, roster_count, 8);
-
-        append_u32(&mut bytes, u32::try_from(second_array_count).unwrap());
-        for value in 0..second_array_count {
-            append_u32(&mut bytes, u32::try_from(value).unwrap());
-        }
-        for slot in 0_i32..20 {
-            append_i32(&mut bytes, slot - 1);
-        }
-        append_i32(&mut bytes, -2);
-
-        if bytes.len() < 0x8000 {
-            bytes.resize(0x8000, 0);
-        }
-        let length = u32::try_from(bytes.len()).unwrap();
-        bytes
-            .get_mut(..size_of::<u32>())
-            .unwrap()
-            .copy_from_slice(&length.to_le_bytes());
-        bytes
-    }
-
-    fn append_complete_unit(bytes: &mut Vec<u8>) {
-        let start = bytes.len();
-        append_i32(bytes, -1);
-        for value in [2_u32, 2, 4, 0x34, 0x38, 0x3c, 0x40] {
-            append_u32(bytes, value);
-        }
-        append_i32(bytes, -1);
-        for value in [5_u32, 99, 6, 7, 8] {
-            append_u32(bytes, value);
-        }
-        bytes.extend_from_slice(&[1, 0, 1]);
-        for value in [60_u32, 64, 68] {
-            append_u32(bytes, value);
-        }
-        bytes.extend(0xa0_u8..=0xb7);
-        append_named_equipment(bytes);
-        append_zero_records(bytes, 5, EQUIPMENT_SIZE);
-        append_u32(bytes, 504);
-        assert_eq!(bytes.len() - start, UNIT_SIZE);
-    }
-
-    fn append_named_equipment(bytes: &mut Vec<u8>) {
-        append_u32(bytes, 1_000);
-        append_i32(bytes, 0);
-        append_u16(bytes, 5);
-        append_i16(bytes, -1);
-        append_u16(bytes, 0);
-        append_i16(bytes, 12);
-        append_u16(bytes, 1);
-        append_u16(bytes, 0);
-        append_i32(bytes, 91);
-        append_i32(bytes, -1);
-        append_i32(bytes, -1);
-        append_i32(bytes, 3);
-        append_i32(bytes, 9);
-        append_i32(bytes, 4);
-        append_i32(bytes, -1);
-        append_i32(bytes, 5);
-        append_i32(bytes, 4);
-        append_i32(bytes, 6);
-        append_i32(bytes, 0);
-    }
-
-    fn append_zero_records(bytes: &mut Vec<u8>, count: usize, size: usize) {
-        bytes.resize(bytes.len() + count * size, 0);
-    }
-
-    fn append_u32(bytes: &mut Vec<u8>, value: u32) {
-        bytes.extend_from_slice(&value.to_le_bytes());
-    }
-
-    fn append_i32(bytes: &mut Vec<u8>, value: i32) {
-        bytes.extend_from_slice(&value.to_le_bytes());
-    }
-
-    fn append_u16(bytes: &mut Vec<u8>, value: u16) {
-        bytes.extend_from_slice(&value.to_le_bytes());
-    }
-
-    fn append_i16(bytes: &mut Vec<u8>, value: i16) {
-        bytes.extend_from_slice(&value.to_le_bytes());
     }
 
     fn presentation(document: DocumentID, section: SaveSection) -> SavePresentationState {
@@ -1918,17 +1864,26 @@ mod tests {
         assert_eq!(summary.campaign.raw_value, 0);
         assert_eq!(summary.main_fields.len(), 7);
         assert_eq!(summary.text_fields.len(), 3);
+        let error = summary
+            .text_fields
+            .first()
+            .unwrap()
+            .value
+            .as_ref()
+            .unwrap_err();
+        assert!(matches!(error.workspace_error(), WorkspaceError::Format(_)));
         assert_eq!(
-            summary.text_fields.first().unwrap().value,
-            Err(
-                "save text field MapName contains non-ASCII stored byte 0x80 at index 0".to_owned()
-            )
+            error.workspace_error().to_string(),
+            "save text field MapName contains non-ASCII stored byte 0x80 at index 0"
         );
-        assert_eq!(
-            summary.text_fields.get(1).unwrap().value,
-            Ok("GOOD.SOX".to_owned())
-        );
-        assert_eq!(summary.text_fields.get(2).unwrap().value, Ok(String::new()));
+        assert!(matches!(
+            &summary.text_fields.get(1).unwrap().value,
+            Ok(value) if value == "GOOD.SOX"
+        ));
+        assert!(matches!(
+            &summary.text_fields.get(2).unwrap().value,
+            Ok(value) if value.is_empty()
+        ));
         assert_eq!(summary.unit_count, 0);
         assert!(summary.has_size_prefix);
         assert!(summary.has_context);
@@ -2132,6 +2087,18 @@ mod tests {
         assert_eq!(world_map_rows.len(), 2);
     }
 
+    #[test]
+    fn save_projection_roster_list_ids_are_unique_across_row_kinds() {
+        let (workspace, document) = workspace_with_leader_save(1, 0);
+        let player_leaders = SaveRows::player_leaders(&workspace, document).unwrap();
+        let world_map_rows = SaveRows::roster(&workspace, document).unwrap();
+
+        let player_leader_id = player_leaders.locations(0..1).first().unwrap().id;
+        let world_map_id = world_map_rows.locations(0..1).first().unwrap().id;
+
+        assert_ne!(player_leader_id, world_map_id);
+    }
+
     #[gpui::test]
     fn save_view_world_map_row_renders_five_labeled_stable_fields(cx: &mut TestAppContext) {
         let (workspace, document) = workspace_with_save(0, 1, 0);
@@ -2262,6 +2229,27 @@ mod tests {
         let missing_attribute = equipment.attributes.get(1).unwrap();
         assert_eq!(missing_attribute.name, "Attribute -1");
         assert_eq!(missing_attribute.effect, None);
+    }
+
+    #[test]
+    fn save_projection_keeps_catalog_name_availability_separate_from_name_text() {
+        let (workspace, document) = workspace_with_save(1, 0, 0);
+        let dictionary = CatalogTree::fallback_shaped_names().load();
+
+        let unit = unit_projection(&workspace, document, 0, Some(&dictionary)).unwrap();
+        let equipment = equipment_projection(
+            &workspace,
+            document,
+            0,
+            SaveEquipmentSlot::LeaderWeapon,
+            Some(&dictionary),
+        )
+        .unwrap();
+
+        assert_eq!(unit.row.label, "Job 2");
+        assert_eq!(unit.row.name_availability, SaveNameAvailability::Resolved);
+        assert!(equipment.item_name.starts_with("Item Type "));
+        assert_eq!(equipment.name_availability, SaveNameAvailability::Resolved);
     }
 
     #[test]

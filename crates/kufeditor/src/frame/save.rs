@@ -207,7 +207,7 @@ impl AppFrame {
                     field.label.clone(),
                     match &field.value {
                         Ok(value) => empty_label(value),
-                        Err(error) => error.clone(),
+                        Err(error) => error.workspace_error().to_string(),
                     },
                 );
                 if field.value.is_ok() {
@@ -352,8 +352,10 @@ impl AppFrame {
             .enumerate()
             .map(|(index, (label, filter))| {
                 let selected = state.unit_filter() == filter;
+                let selector = format!("save-unit-filter-{}", label.to_lowercase());
                 components::choice_button(&self.theme, ("save-unit-filter", index), label, selected)
                     .child(if selected { " ✓" } else { "" })
+                    .debug_selector(move || selector.clone())
                     .tab_stop(true)
                     .on_click(cx.listener(move |frame, _, window, cx| {
                         frame.set_save_unit_filter(document, filter.to_owned(), cx);
@@ -420,13 +422,14 @@ impl AppFrame {
                     .save_presentations
                     .get(document)
                     .is_some_and(|state| state.inspected_unit() == row.source_index);
+                let selector = format!("save-unit-master-row-{}", row.source_index);
                 save::unit_row(
                     &self.theme,
                     projection_element_id("save-unit-row", row.id),
                     &row,
                     selected,
                 )
-                .debug_selector(|| "save-unit-master-row".to_owned())
+                .debug_selector(move || selector.clone())
                 .tab_stop(true)
                 .on_click(cx.listener(move |frame, _, window, cx| {
                     frame.inspect_save_unit(document, location.source_index, cx);
@@ -446,7 +449,9 @@ impl AppFrame {
         unit: &SaveUnitProjection,
     ) -> Vec<AnyElement> {
         let mut details = Vec::new();
-        if self.save_dictionary().is_some() && unit.row.label.starts_with("Job ") {
+        if self.save_dictionary().is_some()
+            && unit.row.name_availability == save::SaveNameAvailability::Unavailable
+        {
             details.push(save::inline_name_unavailable(&self.theme, "Unit").into_any_element());
         }
         details.push(
@@ -611,7 +616,9 @@ impl AppFrame {
             )
             .into_any_element(),
         ];
-        if self.save_dictionary().is_some() && equipment.item_name.starts_with("Item Type ") {
+        if self.save_dictionary().is_some()
+            && equipment.name_availability == save::SaveNameAvailability::Unavailable
+        {
             content
                 .push(save::inline_name_unavailable(&self.theme, "Equipment").into_any_element());
         }
@@ -961,6 +968,7 @@ impl AppFrame {
                     save_section_label(section, unit_count, roster_count),
                     selected == section,
                 )
+                .debug_selector(move || save_section_id(section).to_owned())
                 .tab_stop(true)
                 .on_click(cx.listener(move |frame, _, window, cx| {
                     frame.select_save_section(document, section, cx);
@@ -1216,7 +1224,7 @@ mod tests {
         reason = "controlled GPUI and save fixtures make failures fatal"
     )]
 
-    use std::{fs, mem::size_of, path::PathBuf, sync::Arc};
+    use std::{fs, path::PathBuf, sync::Arc};
 
     use gpui::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
     use kufeditor_game::{CatalogRole, Game, InstallationError, load_name_dictionary};
@@ -1228,12 +1236,8 @@ mod tests {
         save_catalog_status::SaveCatalogKey,
         settings::SettingsStartup,
         state::{Area, SaveSection},
+        test_support::SaveFixture,
     };
-
-    const CONTEXT_SIZE: usize = 0x438;
-    const MAIN_SIZE: usize = 0x154;
-    const UNIT_SIZE: usize = 483;
-    const EQUIPMENT_SIZE: usize = 64;
 
     #[test]
     fn save_view_section_rail_has_stable_labels_and_focus_order() {
@@ -1277,7 +1281,11 @@ mod tests {
     fn save_view_draws_each_real_section_from_the_app_frame(cx: &mut TestAppContext) {
         let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
         let cx = cx.add_empty_window();
-        let document = activate_save(&frame, cx, save_fixture(1, 1, 1));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(1, 1, 1).with_unit_roles([0]).build(),
+        );
 
         draw_frame(cx, &frame);
         assert!(cx.debug_bounds("save-summary").is_some());
@@ -1285,7 +1293,7 @@ mod tests {
 
         select_and_draw(&frame, cx, document, SaveSection::Units);
         assert!(cx.debug_bounds("save-units").is_some());
-        assert!(cx.debug_bounds("save-unit-master-row").is_some());
+        assert!(cx.debug_bounds("save-unit-master-row-0").is_some());
 
         select_and_draw(&frame, cx, document, SaveSection::Equipment);
         assert!(cx.debug_bounds("save-equipment").is_some());
@@ -1309,10 +1317,49 @@ mod tests {
     }
 
     #[gpui::test]
+    fn save_view_clicks_wire_sections_filters_units_and_equipment_slots(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(2, 0, 0).with_unit_roles([3, 0]).build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        assert_eq!(
+            save_state(&frame, cx, document).section(),
+            SaveSection::Units
+        );
+
+        click(cx, "save-unit-filter-troops");
+        let state = save_state(&frame, cx, document);
+        assert_eq!(state.unit_filter(), "troop");
+        assert_eq!(state.inspected_unit(), 0);
+        assert!(cx.debug_bounds("save-unit-master-row-0").is_some());
+
+        click(cx, "save-unit-filter-all");
+        click(cx, "save-unit-master-row-1");
+        assert_eq!(save_state(&frame, cx, document).inspected_unit(), 1);
+
+        click(cx, "save-section-equipment");
+        assert_eq!(
+            save_state(&frame, cx, document).section(),
+            SaveSection::Equipment
+        );
+        click(cx, "save-equipment-slot-troop-armor");
+        assert_eq!(
+            save_state(&frame, cx, document).equipment_slot(),
+            SaveEquipmentSlot::TroopArmor
+        );
+        assert!(cx.debug_bounds("save-equipment").is_some());
+    }
+
+    #[gpui::test]
     fn save_view_draws_empty_states_without_duplicate_or_inert_panes(cx: &mut TestAppContext) {
         let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
         let cx = cx.add_empty_window();
-        let document = activate_save(&frame, cx, save_fixture(0, 0, 0));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 0, 0).build());
 
         select_and_draw(&frame, cx, document, SaveSection::Units);
         assert!(cx.debug_bounds("save-unit-empty").is_some());
@@ -1346,7 +1393,11 @@ mod tests {
     fn save_view_draws_filtered_equipment_as_no_match_not_empty_save(cx: &mut TestAppContext) {
         let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
         let cx = cx.add_empty_window();
-        let document = activate_save(&frame, cx, save_fixture_with_role(3));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(1, 0, 0).with_unit_roles([3]).build(),
+        );
         frame.update(cx, |frame, cx| {
             frame.set_save_unit_filter(document, "leader".to_owned(), cx);
             frame.select_save_section(document, SaveSection::Equipment, cx);
@@ -1361,10 +1412,13 @@ mod tests {
     fn save_view_draws_one_fixed_text_error_without_hiding_summary(cx: &mut TestAppContext) {
         let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
         let cx = cx.add_empty_window();
-        let mut bytes = save_fixture(0, 0, 0);
-        let main_offset = 2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>();
-        *bytes.get_mut(main_offset + 0x20).unwrap() = 0x80;
-        activate_save(&frame, cx, bytes);
+        activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_invalid_map_name_byte(0x80)
+                .build(),
+        );
 
         draw_frame(cx, &frame);
         assert!(cx.debug_bounds("save-summary").is_some());
@@ -1377,7 +1431,7 @@ mod tests {
     fn save_view_draws_catalog_states_inline(cx: &mut TestAppContext) {
         let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
         let cx = cx.add_empty_window();
-        let document = activate_save(&frame, cx, save_fixture(1, 0, 0));
+        let document = activate_save(&frame, cx, SaveFixture::new(1, 0, 0).build());
 
         draw_frame(cx, &frame);
         assert!(cx.debug_bounds("save-catalog-not-configured").is_some());
@@ -1465,6 +1519,23 @@ mod tests {
         );
     }
 
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("missing click target {selector}"));
+        cx.simulate_click(bounds.center(), Modifiers::none());
+    }
+
+    fn save_state(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        document: DocumentID,
+    ) -> crate::state::SavePresentationState {
+        frame.update(cx, |frame, _| {
+            frame.save_presentations.get(document).unwrap().clone()
+        })
+    }
+
     fn missing_name_dictionary() -> kufeditor_game::NameDictionary {
         let temporary = tempfile::tempdir().unwrap();
         let sox = temporary.path().join("Data/SOX");
@@ -1477,86 +1548,5 @@ mod tests {
         bytes.extend_from_slice(b"Missing");
         fs::write(path, bytes).unwrap();
         load_name_dictionary(&sox).unwrap().dictionary
-    }
-
-    fn save_fixture(unit_count: usize, roster_count: usize, second_array_count: usize) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        append_u32(&mut bytes, 0);
-        append_u32(&mut bytes, 0x6e);
-        append_u32(&mut bytes, u32::MAX);
-        bytes.resize(bytes.len() + CONTEXT_SIZE - size_of::<u32>(), 0);
-        append_u32(&mut bytes, 0);
-        bytes.resize(bytes.len() + MAIN_SIZE, 0);
-
-        append_u32(&mut bytes, u32::try_from(unit_count).unwrap());
-        if unit_count > 0 {
-            append_complete_unit(&mut bytes);
-            append_zero_records(&mut bytes, unit_count - 1, UNIT_SIZE);
-        }
-
-        append_i32(&mut bytes, -1);
-        append_u32(&mut bytes, u32::try_from(roster_count).unwrap());
-        append_zero_records(&mut bytes, roster_count, 8);
-
-        append_u32(&mut bytes, u32::try_from(second_array_count).unwrap());
-        for value in 0..second_array_count {
-            append_u32(&mut bytes, u32::try_from(value).unwrap());
-        }
-        for slot in 0_i32..20 {
-            append_i32(&mut bytes, slot - 1);
-        }
-        append_i32(&mut bytes, -2);
-
-        bytes.resize(0x8000, 0);
-        let length = u32::try_from(bytes.len()).unwrap();
-        bytes
-            .get_mut(..size_of::<u32>())
-            .unwrap()
-            .copy_from_slice(&length.to_le_bytes());
-        bytes
-    }
-
-    fn save_fixture_with_role(role: u32) -> Vec<u8> {
-        let mut bytes = save_fixture(1, 0, 0);
-        let unit_offset =
-            2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>() + MAIN_SIZE + size_of::<u32>();
-        let ucd_offset = unit_offset + 10 * size_of::<u32>();
-        bytes
-            .get_mut(ucd_offset..ucd_offset + size_of::<u32>())
-            .unwrap()
-            .copy_from_slice(&role.to_le_bytes());
-        bytes
-    }
-
-    fn append_complete_unit(bytes: &mut Vec<u8>) {
-        let start = bytes.len();
-        append_i32(bytes, -1);
-        for value in [2_u32, 2, 4, 0x34, 0x38, 0x3c, 0x40] {
-            append_u32(bytes, value);
-        }
-        append_i32(bytes, -1);
-        for value in [5_u32, 0, 6, 7, 8] {
-            append_u32(bytes, value);
-        }
-        bytes.extend_from_slice(&[1, 0, 1]);
-        for value in [60_u32, 64, 68] {
-            append_u32(bytes, value);
-        }
-        bytes.extend(0xa0_u8..=0xb7);
-        append_zero_records(bytes, 6, EQUIPMENT_SIZE);
-        append_u32(bytes, 504);
-        assert_eq!(bytes.len() - start, UNIT_SIZE);
-    }
-
-    fn append_zero_records(bytes: &mut Vec<u8>, count: usize, record_size: usize) {
-        bytes.resize(bytes.len() + count * record_size, 0);
-    }
-
-    fn append_u32(bytes: &mut Vec<u8>, value: u32) {
-        bytes.extend_from_slice(&value.to_le_bytes());
-    }
-
-    fn append_i32(bytes: &mut Vec<u8>, value: i32) {
-        bytes.extend_from_slice(&value.to_le_bytes());
     }
 }

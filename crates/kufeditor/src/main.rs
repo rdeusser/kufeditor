@@ -7,6 +7,8 @@ mod number_edit;
 mod save_catalog_status;
 mod settings;
 mod state;
+#[cfg(test)]
+mod test_support;
 mod text_input;
 mod theme;
 mod views;

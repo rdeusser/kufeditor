@@ -2356,6 +2356,7 @@ mod tests {
         notices::{Notice, NoticeLevel, NoticeSource},
         settings::{SettingsQueueResult, SettingsStartup, image_from_runtime},
         state::{Area, RecordSelections, RequestID, navigation_projection},
+        test_support::SaveFixture,
         text_input::{TextInputEvent, bind as bind_text_input},
     };
 
@@ -2385,29 +2386,6 @@ mod tests {
 
     fn write_invalid_sox(path: &std::path::Path) {
         fs::write(path, b"not a valid SOX document").unwrap();
-    }
-
-    fn save_fixture(unit_count: usize) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&0x6e_u32.to_le_bytes());
-        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-        bytes.resize(bytes.len() + 0x438 - size_of::<u32>(), 0);
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.resize(bytes.len() + 0x154, 0);
-        bytes.extend_from_slice(&u32::try_from(unit_count).unwrap().to_le_bytes());
-        bytes.resize(bytes.len() + unit_count * 483, 0);
-        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.resize(bytes.len() + 84, 0);
-        bytes.resize(0x8000, 0);
-        let length = u32::try_from(bytes.len()).unwrap();
-        bytes
-            .get_mut(..size_of::<u32>())
-            .unwrap()
-            .copy_from_slice(&length.to_le_bytes());
-        bytes
     }
 
     fn begin_open_paths(
@@ -2731,7 +2709,7 @@ mod tests {
 
         window
             .update(cx, |frame, _, cx| {
-                let save = SaveDocument::parse(save_fixture(0)).unwrap();
+                let save = SaveDocument::parse(SaveFixture::new(0, 0, 0).build()).unwrap();
                 let document = frame
                     .workspace
                     .open_loaded(PathBuf::from("campaign.sav"), Document::Save(save));
@@ -2757,7 +2735,7 @@ mod tests {
 
         window
             .update(cx, |frame, _, cx| {
-                let save = SaveDocument::parse(save_fixture(1)).unwrap();
+                let save = SaveDocument::parse(SaveFixture::new(1, 0, 0).build()).unwrap();
                 let save = frame
                     .workspace
                     .open_loaded(PathBuf::from("campaign.sav"), Document::Save(save));
