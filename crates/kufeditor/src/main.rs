@@ -3,6 +3,7 @@ mod components;
 mod frame;
 mod number_edit;
 mod state;
+mod text_input;
 mod theme;
 mod views;
 
@@ -20,6 +21,7 @@ fn main() -> ExitCode {
 
     Application::new().run(move |cx| {
         actions::bind(cx);
+        text_input::bind(cx);
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

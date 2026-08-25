@@ -10,6 +10,7 @@ kufeditor-game.workspace = true
 kufeditor-mods.workspace = true
 kufeditor-patches.workspace = true
 kufeditor-workspace.workspace = true
+unicode-segmentation.workspace = true
 
 [lints]
 workspace = true

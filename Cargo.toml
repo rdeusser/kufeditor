@@ -23,6 +23,7 @@ kufeditor-patches = { version = "0.1.0", path = "crates/kufeditor-patches" }
 kufeditor-workspace = { version = "0.1.0", path = "crates/kufeditor-workspace" }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
+unicode-segmentation = "1.13.3"
 
 [profile.dev]
 opt-level = 1
