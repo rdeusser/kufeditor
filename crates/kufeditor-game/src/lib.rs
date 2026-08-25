@@ -2,16 +2,23 @@
 
 mod catalog;
 mod dictionary;
+mod discovery;
 mod error;
+mod installation;
 mod static_translations;
 
 use std::fmt;
 
 pub use catalog::CatalogRole;
 pub use dictionary::{CatalogLoad, NameDictionary, load_name_dictionary};
+pub use discovery::{
+    DiscoveryError, DiscoveryIssue, DiscoveryReport, discover_steam_installations,
+    scan_steam_common_directories, steam_discovery_available,
+};
 pub use error::{CatalogFileError, CatalogIssue, CatalogLoadError};
+pub use installation::{GameInstallation, GamePaths, InstallationError};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum Game {
     #[default]
     Crusaders,
