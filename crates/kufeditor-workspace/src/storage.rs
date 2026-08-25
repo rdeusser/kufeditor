@@ -4,9 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use kufeditor_formats::{SOXDocument, parse_sox};
+use kufeditor_formats::{SOXDocument, SaveDocument, parse_sox};
 
-use crate::{Document, DocumentID, StateID, WorkspaceError};
+use crate::{Document, DocumentID, DocumentKind, StateID, WorkspaceError};
 
 #[derive(Debug)]
 pub struct LoadedDocument {
@@ -105,11 +105,10 @@ pub struct SavedDocument {
 }
 
 pub fn load_path(path: PathBuf) -> Result<LoadedDocument, WorkspaceError> {
-    let supported = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("sox"));
-    if !supported {
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    let is_sox = extension.is_some_and(|extension| extension.eq_ignore_ascii_case("sox"));
+    let is_save = extension.is_some_and(|extension| extension.eq_ignore_ascii_case("sav"));
+    if !is_sox && !is_save {
         return Err(WorkspaceError::UnsupportedFile { path });
     }
 
@@ -117,16 +116,51 @@ pub fn load_path(path: PathBuf) -> Result<LoadedDocument, WorkspaceError> {
         path: path.clone(),
         source,
     })?;
-    let document = parse_sox(bytes).map_err(|source| WorkspaceError::Parse {
-        path: path.clone(),
-        source,
-    })?;
-    let document = match document {
-        SOXDocument::Troop(document) => Document::Troop(document),
-        SOXDocument::Skill(document) => Document::Skill(document),
-        SOXDocument::Text(document) => Document::TextSOX(document),
+    let document = if is_save {
+        SaveDocument::parse(bytes)
+            .map(Document::Save)
+            .map_err(|source| WorkspaceError::Parse {
+                path: path.clone(),
+                source,
+            })?
+    } else {
+        match parse_sox(bytes).map_err(|source| WorkspaceError::Parse {
+            path: path.clone(),
+            source,
+        })? {
+            SOXDocument::Troop(document) => Document::Troop(document),
+            SOXDocument::Skill(document) => Document::Skill(document),
+            SOXDocument::Text(document) => Document::TextSOX(document),
+        }
     };
     Ok(LoadedDocument { path, document })
+}
+
+pub(crate) fn normalize_save_target(
+    mut path: PathBuf,
+    kind: DocumentKind,
+) -> Result<PathBuf, WorkspaceError> {
+    let expected = match kind {
+        DocumentKind::TroopInfo | DocumentKind::SkillInfo | DocumentKind::TextSOX => "sox",
+        DocumentKind::CrusadersSave => "sav",
+    };
+    let Some(actual) = path.extension() else {
+        path.set_extension(expected);
+        return Ok(path);
+    };
+    if actual
+        .to_str()
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(expected))
+    {
+        return Ok(path);
+    }
+
+    let actual = actual.to_string_lossy().into_owned();
+    Err(WorkspaceError::WrongExtension {
+        path,
+        expected,
+        actual,
+    })
 }
 
 fn save_parent(path: &Path) -> Result<&Path, WorkspaceError> {

@@ -5,12 +5,21 @@
 
 use std::{fs, path::PathBuf};
 
+#[cfg(unix)]
+use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
 use kufeditor_formats::FormatError;
 use kufeditor_workspace::{
-    Document, DocumentEdit, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument,
-    TroopField, Workspace, WorkspaceError, load_path,
+    Document, DocumentEdit, DocumentID, SaveDocument, SaveNumberTarget, SkillDocument,
+    SkillTextField, TextSOXDocument, TroopDocument, TroopField, Workspace, WorkspaceError,
+    load_path,
 };
 use tempfile::tempdir;
+
+const SAVE_CONTEXT_SIZE: usize = 0x438;
+const SAVE_MAIN_SIZE: usize = 0x154;
+const SAVE_PADDED_SIZE: usize = 0x8000;
+const SAVE_MAP_NAME_OFFSET: usize = 0x20;
 
 fn troop_fixture() -> Vec<u8> {
     let mut bytes = vec![0_u8; 8 + 148 + 64];
@@ -124,6 +133,71 @@ fn workspace_with_text_sox() -> (Workspace, kufeditor_workspace::DocumentID) {
     (workspace, id)
 }
 
+fn save_fixture() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    append_u32(&mut bytes, 0);
+    append_u32(&mut bytes, 0x6e);
+
+    append_u32(&mut bytes, u32::MAX);
+    bytes.resize(bytes.len() + SAVE_CONTEXT_SIZE - size_of::<u32>(), 0);
+
+    append_u32(&mut bytes, 0);
+    let main = bytes.len();
+    bytes.resize(main + SAVE_MAIN_SIZE, 0);
+    let map_name = bytes
+        .get_mut(main + SAVE_MAP_NAME_OFFSET..main + SAVE_MAP_NAME_OFFSET + 32)
+        .unwrap();
+    map_name.get_mut(..5).unwrap().copy_from_slice(b"MapA\0");
+    map_name
+        .get_mut(5..31)
+        .unwrap()
+        .copy_from_slice(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+
+    append_u32(&mut bytes, 0);
+    append_i32(&mut bytes, -1);
+    append_u32(&mut bytes, 0);
+    append_u32(&mut bytes, 0);
+    for _ in 0..20 {
+        append_u32(&mut bytes, 0);
+    }
+    append_u32(&mut bytes, 0);
+
+    bytes.resize(SAVE_PADDED_SIZE, 0);
+    bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+    let length = u32::try_from(bytes.len()).unwrap();
+    patch_u32(&mut bytes, 0, length);
+    bytes
+}
+
+fn append_u32(bytes: &mut Vec<u8>, value: u32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn append_i32(bytes: &mut Vec<u8>, value: i32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn patch_u32(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes
+        .get_mut(offset..offset + size_of::<u32>())
+        .unwrap()
+        .copy_from_slice(&value.to_le_bytes());
+}
+
+fn workspace_with_save(path: PathBuf) -> (Workspace, DocumentID) {
+    let document = SaveDocument::parse(save_fixture()).unwrap();
+    let mut workspace = Workspace::new();
+    let id = workspace.open_loaded(path, Document::Save(document));
+    (workspace, id)
+}
+
+fn campaign_index(value: i64) -> DocumentEdit {
+    DocumentEdit::SetSaveNumber {
+        target: SaveNumberTarget::CampaignIndex,
+        value,
+    }
+}
+
 fn move_speed(value: i32) -> DocumentEdit {
     DocumentEdit::SetTroopField {
         record: 0,
@@ -216,6 +290,319 @@ fn load_rejects_a_non_sox_file() {
     let error = load_path(path.clone()).unwrap_err();
 
     assert!(matches!(error, WorkspaceError::UnsupportedFile { path: found } if found == path));
+}
+
+#[test]
+fn load_supports_save_and_sox_extensions_case_insensitively() {
+    let directory = tempdir().unwrap();
+    let source = save_fixture();
+
+    for name in ["campaign.sav", "campaign.SAV"] {
+        let path = directory.path().join(name);
+        fs::write(&path, &source).unwrap();
+
+        let loaded = load_path(path.clone()).unwrap();
+        let Document::Save(document) = loaded.document() else {
+            panic!("Crusaders save was detected as a SOX document");
+        };
+        assert_eq!(document.number(SaveNumberTarget::CampaignIndex).unwrap(), 0);
+
+        let mut workspace = Workspace::new();
+        let id = workspace.insert_loaded(loaded);
+        let saved = workspace.prepare_save(id, None).unwrap().run().unwrap();
+        workspace.finish_save(saved).unwrap();
+        assert_eq!(fs::read(path).unwrap(), source);
+    }
+
+    for name in ["TroopInfo.sox", "TroopInfo.SOX"] {
+        let path = directory.path().join(name);
+        fs::write(&path, troop_fixture()).unwrap();
+
+        let loaded = load_path(path).unwrap();
+        assert!(matches!(loaded.document(), Document::Troop(_)));
+    }
+}
+
+#[test]
+fn load_rejects_an_unknown_save_extension_before_reading() {
+    let directory = tempdir().unwrap();
+    let paths = [
+        directory.path().join("missing.campaign"),
+        directory.path().join("missing"),
+    ];
+
+    for path in paths {
+        let error = load_path(path.clone()).unwrap_err();
+
+        assert!(matches!(error, WorkspaceError::UnsupportedFile { path: found } if found == path));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn load_rejects_a_non_utf8_save_extension_before_reading() {
+    let directory = tempdir().unwrap();
+    let path = directory
+        .path()
+        .join(OsString::from_vec(b"missing.\xff".to_vec()));
+
+    let error = load_path(path.clone()).unwrap_err();
+
+    assert!(matches!(error, WorkspaceError::UnsupportedFile { path: found } if found == path));
+}
+
+#[test]
+fn save_as_without_an_extension_appends_the_document_extension_and_writes_there() {
+    let directory = tempdir().unwrap();
+    let cases = vec![
+        (
+            "campaign-copy",
+            Document::Save(SaveDocument::parse(save_fixture()).unwrap()),
+            "sav",
+        ),
+        (
+            "troop-copy",
+            Document::Troop(TroopDocument::parse(troop_fixture()).unwrap()),
+            "sox",
+        ),
+        (
+            "skill-copy",
+            Document::Skill(SkillDocument::parse(skill_fixture(&[])).unwrap()),
+            "sox",
+        ),
+        (
+            "text-copy",
+            Document::TextSOX(TextSOXDocument::parse(text_sox_fixture(&[])).unwrap()),
+            "sox",
+        ),
+    ];
+
+    for (name, document, extension) in cases {
+        let target = directory.path().join(name);
+        let expected = target.with_extension(extension);
+        let mut workspace = Workspace::new();
+        let id = workspace.open_loaded(PathBuf::from("source"), document);
+
+        let saved = workspace
+            .prepare_save(id, Some(target.clone()))
+            .unwrap()
+            .run()
+            .unwrap();
+        workspace.finish_save(saved).unwrap();
+
+        assert_eq!(workspace.path(id).unwrap(), expected);
+        assert!(expected.is_file());
+        assert!(!target.exists());
+    }
+}
+
+#[test]
+fn save_as_rejects_wrong_explicit_extensions_without_starting_a_save() {
+    let directory = tempdir().unwrap();
+    let cases = vec![
+        (
+            "campaign",
+            Document::Save(SaveDocument::parse(save_fixture()).unwrap()),
+            "sox",
+            "sav",
+        ),
+        (
+            "troop",
+            Document::Troop(TroopDocument::parse(troop_fixture()).unwrap()),
+            "sav",
+            "sox",
+        ),
+        (
+            "skill",
+            Document::Skill(SkillDocument::parse(skill_fixture(&[])).unwrap()),
+            "sav",
+            "sox",
+        ),
+        (
+            "text",
+            Document::TextSOX(TextSOXDocument::parse(text_sox_fixture(&[])).unwrap()),
+            "sav",
+            "sox",
+        ),
+    ];
+
+    for (name, document, actual, expected) in cases {
+        let path = directory.path().join(format!("{name}.{actual}"));
+        let mut workspace = Workspace::new();
+        let id = workspace.open_loaded(PathBuf::from("source"), document);
+
+        let error = workspace.prepare_save(id, Some(path.clone())).unwrap_err();
+        let display = error.to_string();
+
+        assert!(matches!(
+            error,
+            WorkspaceError::WrongExtension {
+                path: found,
+                expected: found_expected,
+                actual: found_actual,
+            } if found == path && found_expected == expected && found_actual == actual
+        ));
+        assert!(display.contains(&format!(".{expected}")));
+        assert!(display.contains(&format!(".{actual}")));
+        assert!(!workspace.save_in_progress(id).unwrap());
+    }
+}
+
+#[test]
+fn save_as_accepts_uppercase_extensions_without_rewriting_the_path() {
+    let directory = tempdir().unwrap();
+    let cases = vec![
+        (
+            "campaign.SAV",
+            Document::Save(SaveDocument::parse(save_fixture()).unwrap()),
+        ),
+        (
+            "troop.SOX",
+            Document::Troop(TroopDocument::parse(troop_fixture()).unwrap()),
+        ),
+        (
+            "skill.SOX",
+            Document::Skill(SkillDocument::parse(skill_fixture(&[])).unwrap()),
+        ),
+        (
+            "text.SOX",
+            Document::TextSOX(TextSOXDocument::parse(text_sox_fixture(&[])).unwrap()),
+        ),
+    ];
+
+    for (name, document) in cases {
+        let target = directory.path().join(name);
+        let mut workspace = Workspace::new();
+        let id = workspace.open_loaded(PathBuf::from("source"), document);
+
+        let saved = workspace
+            .prepare_save(id, Some(target.clone()))
+            .unwrap()
+            .run()
+            .unwrap();
+        workspace.finish_save(saved).unwrap();
+
+        assert_eq!(workspace.path(id).unwrap(), target);
+        assert!(target.is_file());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn save_as_wrong_non_utf8_extension_retains_the_original_path() {
+    let directory = tempdir().unwrap();
+    let target = directory
+        .path()
+        .join(OsString::from_vec(b"campaign.\xff".to_vec()));
+    let (mut workspace, id) = workspace_with_save(PathBuf::from("campaign.sav"));
+
+    let error = workspace
+        .prepare_save(id, Some(target.clone()))
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        WorkspaceError::WrongExtension {
+            path: found,
+            expected: "sav",
+            actual,
+        } if found == target && actual == "\u{fffd}"
+    ));
+    assert!(!workspace.save_in_progress(id).unwrap());
+}
+
+#[test]
+fn normal_save_keeps_the_current_path_exactly() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("legacy-campaign-name");
+    let source = save_fixture();
+    let (mut workspace, id) = workspace_with_save(path.clone());
+
+    let saved = workspace.prepare_save(id, None).unwrap().run().unwrap();
+    workspace.finish_save(saved).unwrap();
+
+    assert_eq!(workspace.path(id).unwrap(), path);
+    assert_eq!(fs::read(path).unwrap(), source);
+}
+
+#[test]
+fn concurrent_save_rebases_the_live_document_and_preserves_history() {
+    let directory = tempdir().unwrap();
+    let target = directory.path().join("campaign.sav");
+    let (mut workspace, id) = workspace_with_save(PathBuf::from("original.sav"));
+
+    workspace.apply(id, campaign_index(1)).unwrap();
+    let request = workspace.prepare_save(id, Some(target.clone())).unwrap();
+    let saved = request.run().unwrap();
+    let committed = fs::read(&target).unwrap();
+    workspace.apply(id, campaign_index(2)).unwrap();
+
+    workspace.finish_save(saved).unwrap();
+
+    assert_eq!(
+        workspace
+            .save_number(id, SaveNumberTarget::CampaignIndex)
+            .unwrap(),
+        2
+    );
+    assert!(workspace.is_dirty(id).unwrap());
+
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(
+        workspace
+            .save_number(id, SaveNumberTarget::CampaignIndex)
+            .unwrap(),
+        1
+    );
+    assert!(!workspace.is_dirty(id).unwrap());
+
+    let round_trip = directory.path().join("round-trip.sav");
+    let request = workspace
+        .prepare_save(id, Some(round_trip.clone()))
+        .unwrap();
+    let token = request.token();
+    request.run().unwrap();
+    workspace.finish_save_failure(id, token).unwrap();
+    assert_eq!(fs::read(round_trip).unwrap(), committed);
+
+    assert!(workspace.redo(id).unwrap());
+    assert_eq!(
+        workspace
+            .save_number(id, SaveNumberTarget::CampaignIndex)
+            .unwrap(),
+        2
+    );
+    assert!(workspace.is_dirty(id).unwrap());
+}
+
+#[test]
+fn stale_save_completion_keeps_the_current_save_token() {
+    let directory = tempdir().unwrap();
+    let original_path = PathBuf::from("original.sav");
+    let (mut workspace, id) = workspace_with_save(original_path.clone());
+
+    let first = workspace
+        .prepare_save(id, Some(directory.path().join("first.sav")))
+        .unwrap();
+    let first_token = first.token();
+    let stale = first.run().unwrap();
+    workspace.finish_save_failure(id, first_token).unwrap();
+
+    let current = workspace
+        .prepare_save(id, Some(directory.path().join("current.sav")))
+        .unwrap();
+    let current_token = current.token();
+
+    let error = workspace.finish_save(stale).unwrap_err();
+
+    assert!(matches!(
+        error,
+        WorkspaceError::StaleSave { document, token }
+            if document == id && token == first_token
+    ));
+    assert!(workspace.save_in_progress(id).unwrap());
+    assert_eq!(workspace.path(id).unwrap(), original_path);
+    workspace.finish_save_failure(id, current_token).unwrap();
 }
 
 #[test]

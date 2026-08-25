@@ -52,8 +52,17 @@ pub enum WorkspaceError {
     #[error(transparent)]
     Format(#[from] kufeditor_formats::FormatError),
 
-    #[error("unsupported file {path}: expected a .sox TroopInfo, SkillInfo, or text SOX file")]
+    #[error(
+        "unsupported file {path}: expected a .sox TroopInfo, SkillInfo, or text SOX file, or a .sav Crusaders save file"
+    )]
     UnsupportedFile { path: PathBuf },
+
+    #[error("cannot save {path}: expected .{expected}, found .{actual}")]
+    WrongExtension {
+        path: PathBuf,
+        expected: &'static str,
+        actual: String,
+    },
 
     #[error("failed to read {path}: {source}")]
     Read {
@@ -81,6 +90,13 @@ pub enum WorkspaceError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+
+    #[error("save reconciliation failed after commit to {path}: {source}")]
+    CommittedSaveReconciliation {
+        path: PathBuf,
+        #[source]
+        source: kufeditor_formats::FormatError,
     },
 
     #[error("document {0:?} already has a save in progress")]
@@ -162,11 +178,11 @@ impl Workspace {
             if session.save_in_flight.is_some() {
                 return Err(WorkspaceError::SaveInProgress(id));
             }
-            (
-                target.unwrap_or_else(|| session.path.clone()),
-                session.current_state,
-                session.document.clone(),
-            )
+            let path = match target {
+                Some(path) => storage::normalize_save_target(path, session.document.kind())?,
+                None => session.path.clone(),
+            };
+            (path, session.current_state, session.document.clone())
         };
         let token = self.allocate_save();
         self.session_mut(id)?.save_in_flight = Some(token);
@@ -188,9 +204,15 @@ impl Workspace {
             });
         }
 
-        session
-            .document
-            .rebase_source(&saved.snapshot, saved.bytes)?;
+        let mut document = session.document.clone();
+        if let Err(source) = document.rebase_source(&saved.snapshot, saved.bytes) {
+            session.save_in_flight = None;
+            return Err(WorkspaceError::CommittedSaveReconciliation {
+                path: saved.path,
+                source,
+            });
+        }
+        session.document = document;
         session.path = saved.path;
         session.saved_state = saved.state;
         session.save_in_flight = None;
@@ -461,5 +483,120 @@ impl Workspace {
 impl Default for Workspace {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use kufeditor_formats::FormatError;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    fn troop_fixture() -> Vec<u8> {
+        let mut bytes = vec![0_u8; 8 + 148 + 64];
+        bytes
+            .get_mut(0..4)
+            .unwrap()
+            .copy_from_slice(&100_u32.to_le_bytes());
+        bytes
+            .get_mut(4..8)
+            .unwrap()
+            .copy_from_slice(&1_u32.to_le_bytes());
+        bytes
+            .get_mut(16..20)
+            .unwrap()
+            .copy_from_slice(&130_i32.to_le_bytes());
+        bytes
+            .get_mut(64..68)
+            .unwrap()
+            .copy_from_slice(&100_i32.to_le_bytes());
+        bytes
+            .get_mut(108..112)
+            .unwrap()
+            .copy_from_slice(&800_i32.to_le_bytes());
+        bytes
+    }
+
+    fn move_speed(value: i32) -> DocumentEdit {
+        DocumentEdit::SetTroopField {
+            record: 0,
+            field: TroopField::MoveSpeed,
+            value,
+        }
+    }
+
+    #[test]
+    fn committed_save_reconciliation_failure_is_atomic_and_unlocks_the_document() {
+        let directory = tempdir().unwrap();
+        let original_path = PathBuf::from("TroopInfo.sox");
+        let committed_path = directory.path().join("Committed.sox");
+        let document = TroopDocument::parse(troop_fixture()).unwrap();
+        let mut workspace = Workspace::new();
+        let id = workspace.open_loaded(original_path.clone(), Document::Troop(document));
+
+        workspace.apply(id, move_speed(175)).unwrap();
+        let request = workspace
+            .prepare_save(id, Some(committed_path.clone()))
+            .unwrap();
+        let mut saved = request.run().unwrap();
+        let committed_bytes = fs::read(&committed_path).unwrap();
+        workspace.apply(id, move_speed(200)).unwrap();
+
+        let before = workspace.session(id).unwrap();
+        let before_document = before.document.encode().unwrap();
+        let before_state = before.current_state;
+        let before_saved_state = before.saved_state;
+        let before_undo_len = before.undo.len();
+        let before_redo_len = before.redo.len();
+        saved.bytes.clear();
+
+        let error = workspace.finish_save(saved).unwrap_err();
+
+        assert!(matches!(
+            error,
+            WorkspaceError::CommittedSaveReconciliation {
+                path,
+                source: FormatError::InconsistentSOXRebase,
+            } if path == committed_path
+        ));
+        let after = workspace.session(id).unwrap();
+        assert_eq!(after.path, original_path);
+        assert_eq!(after.document.encode().unwrap(), before_document);
+        assert_eq!(after.current_state, before_state);
+        assert_eq!(after.saved_state, before_saved_state);
+        assert_eq!(after.undo.len(), before_undo_len);
+        assert_eq!(after.redo.len(), before_redo_len);
+        assert!(after.save_in_flight.is_none());
+        assert_eq!(fs::read(&committed_path).unwrap(), committed_bytes);
+
+        let loaded = load_path(committed_path).unwrap();
+        let Document::Troop(document) = loaded.document() else {
+            panic!("committed TroopInfo was detected as another document kind");
+        };
+        assert_eq!(document.value(0, TroopField::MoveSpeed).unwrap(), 175);
+
+        let retry = workspace
+            .prepare_save(id, Some(directory.path().join("Retry.sox")))
+            .unwrap();
+        workspace.finish_save_failure(id, retry.token()).unwrap();
+    }
+
+    #[test]
+    fn wrong_save_extension_does_not_allocate_a_token() {
+        let document = TroopDocument::parse(troop_fixture()).unwrap();
+        let mut workspace = Workspace::new();
+        let id = workspace.open_loaded(PathBuf::from("TroopInfo.sox"), Document::Troop(document));
+        let next_save = workspace.next_save;
+
+        let error = workspace
+            .prepare_save(id, Some(PathBuf::from("TroopInfo.sav")))
+            .unwrap_err();
+
+        assert!(matches!(error, WorkspaceError::WrongExtension { .. }));
+        assert_eq!(workspace.next_save, next_save);
+        assert!(workspace.session(id).unwrap().save_in_flight.is_none());
     }
 }
