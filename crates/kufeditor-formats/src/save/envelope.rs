@@ -31,8 +31,9 @@ pub(super) fn normalize(source: &[u8]) -> Result<NormalizedSave, SaveParseError>
 pub(super) fn restore(
     canonical: &[u8],
     envelope: SaveEnvelope,
+    tail_length: usize,
 ) -> Result<Vec<u8>, SaveEncodeError> {
-    restore_with_reserve(canonical, envelope, |bytes, requested| {
+    restore_with_reserve(canonical, envelope, tail_length, |bytes, requested| {
         bytes.try_reserve_exact(requested).map_err(|_| ())
     })
 }
@@ -40,6 +41,7 @@ pub(super) fn restore(
 fn restore_with_reserve<F>(
     canonical: &[u8],
     envelope: SaveEnvelope,
+    tail_length: usize,
     reserve: F,
 ) -> Result<Vec<u8>, SaveEncodeError>
 where
@@ -67,6 +69,26 @@ where
                 length: canonical.len(),
                 minimum: CANONICAL_BODY_OFFSET,
             })?;
+    let minimum_length = CANONICAL_BODY_OFFSET.saturating_add(tail_length);
+    let main_body_length =
+        body.len()
+            .checked_sub(tail_length)
+            .ok_or(SaveEncodeError::InvalidCanonicalShape {
+                length: canonical.len(),
+                minimum: minimum_length,
+            })?;
+    let main_body = body
+        .get(..main_body_length)
+        .ok_or(SaveEncodeError::InvalidCanonicalShape {
+            length: canonical.len(),
+            minimum: minimum_length,
+        })?;
+    let tail = body
+        .get(main_body_length..)
+        .ok_or(SaveEncodeError::InvalidCanonicalShape {
+            length: canonical.len(),
+            minimum: minimum_length,
+        })?;
 
     let prefix_length = if envelope.has_size_prefix {
         SIZE_PREFIX_SIZE
@@ -78,12 +100,15 @@ where
     } else {
         0
     };
-    let unpadded_length = prefix_length
+    let unpadded_main_length = prefix_length
         .checked_add(MAGIC_SIZE)
         .and_then(|length| length.checked_add(context_length))
-        .and_then(|length| length.checked_add(body.len()))
+        .and_then(|length| length.checked_add(main_body.len()))
         .ok_or(SaveEncodeError::LengthOverflow { length: usize::MAX })?;
-    let final_length = unpadded_length.max(PADDED_SIZE);
+    let padded_main_length = unpadded_main_length.max(PADDED_SIZE);
+    let final_length = padded_main_length
+        .checked_add(tail.len())
+        .ok_or(SaveEncodeError::LengthOverflow { length: usize::MAX })?;
     let prefix_value = if envelope.has_size_prefix {
         Some(
             u32::try_from(final_length).map_err(|_| SaveEncodeError::LengthOverflow {
@@ -105,8 +130,9 @@ where
     if envelope.has_context {
         output.extend_from_slice(context);
     }
-    output.extend_from_slice(body);
-    output.resize(final_length, 0);
+    output.extend_from_slice(main_body);
+    output.resize(padded_main_length, 0);
+    output.extend_from_slice(tail);
 
     if let Some(prefix_value) = prefix_value {
         let output_length = output.len();

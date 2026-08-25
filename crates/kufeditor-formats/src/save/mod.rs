@@ -94,7 +94,8 @@ impl SaveDocument {
             .map_err(SaveCleaveError::from)
             .map_err(crate::error::SaveEncodeError::Cleave)
             .map_err(FormatError::SaveEncode)?;
-        restore(&canonical, self.envelope).map_err(FormatError::SaveEncode)
+        restore(&canonical, self.envelope, self.file.tail_data.len())
+            .map_err(FormatError::SaveEncode)
     }
 
     pub const fn has_size_prefix(&self) -> bool {

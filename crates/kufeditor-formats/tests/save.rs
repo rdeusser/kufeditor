@@ -1291,7 +1291,7 @@ fn edited_envelope_restores_flags_context_tail_padding_and_prefix_length() {
 
             let encoded = document.encode().unwrap();
 
-            assert_eq!(encoded.len(), 0x8000);
+            assert_eq!(encoded.len(), 0x8000 + tail.len());
             assert_eq!(read_u32(&encoded, offsets.magic), 0x6e);
             if size_prefix {
                 assert_eq!(read_u32(&encoded, 0), u32::try_from(encoded.len()).unwrap());
@@ -1311,13 +1311,15 @@ fn edited_envelope_restores_flags_context_tail_padding_and_prefix_length() {
                 source.get(offsets.magic..edited)
             );
             assert_eq!(
-                encoded.get(edited + 4..source.len()),
-                source.get(edited + 4..)
+                encoded.get(edited + 4..offsets.tail),
+                source.get(edited + 4..offsets.tail)
             );
-            assert_eq!(
-                encoded.get(offsets.tail..offsets.tail + tail.len()),
-                Some(&tail[..])
+            assert!(
+                encoded
+                    .get(offsets.tail..0x8000)
+                    .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
             );
+            assert_eq!(encoded.get(0x8000..0x8000 + tail.len()), Some(&tail[..]));
 
             let reparsed = SaveDocument::parse(encoded).unwrap();
             assert_eq!(reparsed.has_size_prefix(), size_prefix);
