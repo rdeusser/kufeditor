@@ -6,15 +6,18 @@ mod generated;
 mod schema;
 mod skill;
 mod sox;
+mod string_table;
 mod text;
 mod troop;
 
 pub use diagnostic::{Diagnostic, DiagnosticField, Severity};
 pub use error::{
-    FormatError, GeneratedSoxError, SkillCleaveError, TextSoxParseError, TroopCleaveError,
+    FormatError, GeneratedSoxError, SkillCleaveError, StringTableEncodeError,
+    StringTableParseError, TextSoxParseError, TroopCleaveError,
 };
 pub use schema::{SchemaDocument, SoxSchema};
 pub use skill::{SkillDocument, SkillField, SkillTextField};
 pub use sox::{SoxDocument, parse_sox};
+pub use string_table::{SoxStringTableDocument, SoxStringTableLayout};
 pub use text::{TextSoxDocument, TextSoxField};
 pub use troop::{TroopDocument, TroopField, TroopGroup};

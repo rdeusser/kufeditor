@@ -11,6 +11,7 @@ use crate::{
     },
     schema::SoxSchema,
     skill::SkillTextField,
+    string_table::SoxStringTableLayout,
 };
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -204,6 +205,58 @@ pub enum TextSoxParseError {
     },
 }
 
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum StringTableParseError {
+    #[error("string-table header is truncated: have {actual} bytes")]
+    TruncatedHeader { actual: usize },
+
+    #[error("string-table marker {marker} is invalid")]
+    InvalidMarker { marker: u32 },
+
+    #[error(
+        "record count {count} cannot fit the source: each record needs at least {minimum_record_size} bytes, and {remaining} bytes remain"
+    )]
+    ImpossibleRecordCount {
+        count: u32,
+        minimum_record_size: usize,
+        remaining: usize,
+    },
+
+    #[error("stored ID for record {record} is truncated: {remaining} bytes remain")]
+    TruncatedStoredId { record: usize, remaining: usize },
+
+    #[error("length for record {record} field {field} is truncated: {remaining} bytes remain")]
+    TruncatedFieldLength {
+        record: usize,
+        field: usize,
+        remaining: usize,
+    },
+
+    #[error(
+        "payload for record {record} field {field} is truncated: declared {length} bytes, and {remaining} bytes remain"
+    )]
+    TruncatedFieldPayload {
+        record: usize,
+        field: usize,
+        length: u16,
+        remaining: usize,
+    },
+}
+
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum StringTableEncodeError {
+    #[error("record count {count} exceeds the maximum {maximum}")]
+    RecordCountOverflow { count: usize, maximum: u32 },
+
+    #[error("record {record} field {field} length {length} exceeds the maximum {maximum}")]
+    FieldLengthOverflow {
+        record: usize,
+        field: usize,
+        length: usize,
+        maximum: u16,
+    },
+}
+
 #[derive(Debug, Error)]
 #[error(transparent)]
 pub struct TroopCleaveError(#[from] sox_troop_info::Error);
@@ -225,6 +278,38 @@ pub enum FormatError {
 
     #[error("saved SOX source image has an inconsistent encoding envelope")]
     InconsistentSoxRebase,
+
+    #[error("failed to parse {layout} string table at offset {offset}: {source}")]
+    StringTableParse {
+        layout: SoxStringTableLayout,
+        offset: usize,
+        #[source]
+        source: StringTableParseError,
+    },
+
+    #[error("failed to encode {layout} string table: {source}")]
+    StringTableEncode {
+        layout: SoxStringTableLayout,
+        #[source]
+        source: StringTableEncodeError,
+    },
+
+    #[error("{layout} string-table record {record} is outside the record count {record_count}")]
+    StringTableRecordOutOfRange {
+        layout: SoxStringTableLayout,
+        record: usize,
+        record_count: usize,
+    },
+
+    #[error(
+        "{layout} string-table record {record} field {field} is outside the field count {field_count}"
+    )]
+    StringTableFieldOutOfRange {
+        layout: SoxStringTableLayout,
+        record: usize,
+        field: usize,
+        field_count: usize,
+    },
 
     #[error("failed to parse {schema} at offset {offset}: {source}")]
     SchemaParse {
