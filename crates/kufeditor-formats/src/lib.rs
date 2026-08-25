@@ -19,8 +19,8 @@ pub use error::{
 };
 pub use save::{
     SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField, SaveEquipmentGroup,
-    SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField,
-    SaveUnitField, SaveUnitGroup,
+    SaveEquipmentSlot, SaveMainField, SaveMutation, SaveNumberTarget, SaveRosterField,
+    SaveTextField, SaveUnitField, SaveUnitGroup,
 };
 pub use schema::{SOXSchema, SchemaDocument, SpecialNameRef};
 pub use skill::{SkillDocument, SkillField, SkillTextField};

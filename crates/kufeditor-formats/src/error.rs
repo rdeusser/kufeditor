@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::{
+    SaveNumberTarget,
     diagnostic::DiagnosticField,
     generated::{
         kuf_save, sox_ability_by_job, sox_ability_info, sox_char_info, sox_custom_random_table,
@@ -341,6 +342,9 @@ pub enum SaveEncodeError {
 
     #[error("failed to reserve {requested} bytes for the encoded save")]
     Allocation { requested: usize },
+
+    #[error("canonical save image has length {length}, but needs at least {minimum} bytes")]
+    InvalidCanonicalShape { length: usize, minimum: usize },
 }
 
 #[derive(Debug, Error)]
@@ -350,6 +354,22 @@ pub enum FormatError {
 
     #[error("failed to encode Crusaders save: {0}")]
     SaveEncode(#[source] SaveEncodeError),
+
+    #[error("save numeric target {target:?} is outside the record count {record_count}")]
+    SaveTargetOutOfRange {
+        target: SaveNumberTarget,
+        record_count: usize,
+    },
+
+    #[error(
+        "save numeric target {target:?} cannot store {value}; expected {minimum} through {maximum}"
+    )]
+    SaveValueOutOfRange {
+        target: SaveNumberTarget,
+        value: i64,
+        minimum: i64,
+        maximum: i64,
+    },
 
     #[error("SOX input is neither a TroopInfo, SkillInfo, nor text SOX document")]
     UnsupportedSOX,

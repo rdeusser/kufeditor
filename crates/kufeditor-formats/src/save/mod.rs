@@ -1,12 +1,13 @@
 mod envelope;
 mod fields;
+mod number;
 mod text;
 
 use crate::{
     error::{FormatError, SaveCleaveError, SaveParseError, SaveRegion},
     generated::kuf_save,
 };
-use envelope::{CANONICAL_CONTEXT_OFFSET, CONTEXT_SIZE, SaveEnvelope, normalize};
+use envelope::{CANONICAL_CONTEXT_OFFSET, CONTEXT_SIZE, SaveEnvelope, normalize, restore};
 use text::extract_context_text;
 
 pub use fields::{
@@ -83,8 +84,17 @@ impl SaveDocument {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, FormatError> {
-        debug_assert_eq!(self.file, self.source_file);
-        Ok(self.source.clone())
+        if self.file == self.source_file {
+            return Ok(self.source.clone());
+        }
+
+        let canonical = self
+            .file
+            .to_bytes()
+            .map_err(SaveCleaveError::from)
+            .map_err(crate::error::SaveEncodeError::Cleave)
+            .map_err(FormatError::SaveEncode)?;
+        restore(&canonical, self.envelope).map_err(FormatError::SaveEncode)
     }
 
     pub const fn has_size_prefix(&self) -> bool {
@@ -299,6 +309,12 @@ pub struct SaveChoice {
 pub enum SaveEditor {
     Number { minimum: i64, maximum: i64 },
     Choice { choices: &'static [SaveChoice] },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SaveMutation<T> {
+    Unchanged,
+    Changed { previous: T },
 }
 
 impl SaveEditor {

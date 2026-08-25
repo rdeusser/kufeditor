@@ -1,10 +1,13 @@
-use crate::error::{SaveParseError, SaveRegion};
+use crate::error::{SaveEncodeError, SaveParseError, SaveRegion};
 
 pub(super) const CONTEXT_SIZE: usize = 0x438;
 pub(super) const CANONICAL_CONTEXT_OFFSET: usize = 8;
 
 const SIZE_PREFIX_SIZE: usize = size_of::<u32>();
 const MAGIC: u32 = 0x6e;
+const MAGIC_SIZE: usize = size_of::<u32>();
+const CANONICAL_BODY_OFFSET: usize = CANONICAL_CONTEXT_OFFSET + CONTEXT_SIZE;
+const PADDED_SIZE: usize = 0x8000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct SaveEnvelope {
@@ -23,6 +26,101 @@ pub(super) fn normalize(source: &[u8]) -> Result<NormalizedSave, SaveParseError>
     normalize_with_reserve(source, |bytes, requested| {
         bytes.try_reserve_exact(requested).map_err(|_| ())
     })
+}
+
+pub(super) fn restore(
+    canonical: &[u8],
+    envelope: SaveEnvelope,
+) -> Result<Vec<u8>, SaveEncodeError> {
+    restore_with_reserve(canonical, envelope, |bytes, requested| {
+        bytes.try_reserve_exact(requested).map_err(|_| ())
+    })
+}
+
+fn restore_with_reserve<F>(
+    canonical: &[u8],
+    envelope: SaveEnvelope,
+    reserve: F,
+) -> Result<Vec<u8>, SaveEncodeError>
+where
+    F: FnOnce(&mut Vec<u8>, usize) -> Result<(), ()>,
+{
+    let magic_end = SIZE_PREFIX_SIZE
+        .checked_add(MAGIC_SIZE)
+        .ok_or(SaveEncodeError::LengthOverflow { length: usize::MAX })?;
+    let magic = canonical.get(SIZE_PREFIX_SIZE..magic_end).ok_or(
+        SaveEncodeError::InvalidCanonicalShape {
+            length: canonical.len(),
+            minimum: CANONICAL_BODY_OFFSET,
+        },
+    )?;
+    let context = canonical
+        .get(CANONICAL_CONTEXT_OFFSET..CANONICAL_BODY_OFFSET)
+        .ok_or(SaveEncodeError::InvalidCanonicalShape {
+            length: canonical.len(),
+            minimum: CANONICAL_BODY_OFFSET,
+        })?;
+    let body =
+        canonical
+            .get(CANONICAL_BODY_OFFSET..)
+            .ok_or(SaveEncodeError::InvalidCanonicalShape {
+                length: canonical.len(),
+                minimum: CANONICAL_BODY_OFFSET,
+            })?;
+
+    let prefix_length = if envelope.has_size_prefix {
+        SIZE_PREFIX_SIZE
+    } else {
+        0
+    };
+    let context_length = if envelope.has_context {
+        CONTEXT_SIZE
+    } else {
+        0
+    };
+    let unpadded_length = prefix_length
+        .checked_add(MAGIC_SIZE)
+        .and_then(|length| length.checked_add(context_length))
+        .and_then(|length| length.checked_add(body.len()))
+        .ok_or(SaveEncodeError::LengthOverflow { length: usize::MAX })?;
+    let final_length = unpadded_length.max(PADDED_SIZE);
+    let prefix_value = if envelope.has_size_prefix {
+        Some(
+            u32::try_from(final_length).map_err(|_| SaveEncodeError::LengthOverflow {
+                length: final_length,
+            })?,
+        )
+    } else {
+        None
+    };
+
+    let mut output = Vec::new();
+    reserve(&mut output, final_length).map_err(|()| SaveEncodeError::Allocation {
+        requested: final_length,
+    })?;
+    if envelope.has_size_prefix {
+        output.extend_from_slice(&[0; SIZE_PREFIX_SIZE]);
+    }
+    output.extend_from_slice(magic);
+    if envelope.has_context {
+        output.extend_from_slice(context);
+    }
+    output.extend_from_slice(body);
+    output.resize(final_length, 0);
+
+    if let Some(prefix_value) = prefix_value {
+        let output_length = output.len();
+        let prefix =
+            output
+                .get_mut(..SIZE_PREFIX_SIZE)
+                .ok_or(SaveEncodeError::InvalidCanonicalShape {
+                    length: output_length,
+                    minimum: SIZE_PREFIX_SIZE,
+                })?;
+        prefix.copy_from_slice(&prefix_value.to_le_bytes());
+    }
+
+    Ok(output)
 }
 
 fn normalize_with_reserve<F>(source: &[u8], reserve: F) -> Result<NormalizedSave, SaveParseError>

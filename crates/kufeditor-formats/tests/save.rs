@@ -4,12 +4,14 @@ use std::{collections::HashSet, fmt::Debug, hash::Hash};
 
 use kufeditor_formats::{
     DiagnosticField, DiagnosticLocation, FormatError, SaveDocument, SaveEditor, SaveEquipmentField,
-    SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveParseError,
-    SaveRegion, SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup, TroopField,
+    SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveMutation, SaveNumberTarget,
+    SaveParseError, SaveRegion, SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup,
+    Severity, TroopField,
 };
 use support::{
-    SaveFixtureArrays, SaveFixtureOptions, fixture_with_count, patch_u32, save_fixture,
-    save_fixture_with_arrays, truncate_save,
+    SaveFixtureArrays, SaveFixtureOptions, complete_save_fixture, complete_save_offsets,
+    fixture_with_count, fixture_with_unknown_choices, patch_i32, patch_u32, read_i32, read_u32,
+    save_fixture, save_fixture_with_arrays, truncate_save,
 };
 
 #[test]
@@ -861,6 +863,702 @@ fn save_choice_editors_keep_the_exact_legacy_values_and_labels() {
             (9, "Curse"),
         ],
     );
+}
+
+#[test]
+fn complete_numeric_fixture_has_the_expected_wire_values() {
+    let source = complete_save_fixture(SaveFixtureOptions {
+        pad_to_32_kib: false,
+        ..SaveFixtureOptions::default()
+    });
+    let offsets = complete_save_offsets(true, true);
+
+    assert_eq!(read_u32(&source, offsets.magic), 0x6e);
+    assert_eq!(offsets.context, Some(8));
+    assert_eq!(read_u32(&source, offsets.campaign), 0);
+    assert_eq!(read_i32(&source, offsets.main + 8), -8);
+    assert_eq!(read_i32(&source, offsets.unit), -1);
+    assert_eq!(read_i32(&source, offsets.selected_unit), -1);
+    assert_eq!(
+        source.get(offsets.roster..offsets.roster + 4),
+        Some(&[61, 60, 62, 63][..])
+    );
+    assert_eq!(read_u32(&source, offsets.second_array), 0x0203_0405);
+    assert_eq!(read_i32(&source, offsets.mission_completion), -1);
+    assert_eq!(read_i32(&source, offsets.current_mission), -2);
+    assert_eq!(offsets.tail, source.len());
+}
+
+#[test]
+fn number_projects_every_numeric_save_leaf_and_equipment_slot() {
+    let document =
+        SaveDocument::parse(complete_save_fixture(SaveFixtureOptions::default())).unwrap();
+
+    assert_eq!(document.number(SaveNumberTarget::CampaignIndex).unwrap(), 0);
+    for (field, expected) in SaveMainField::ALL
+        .into_iter()
+        .zip([256, 260, -8, 268, 272, 276, 280])
+    {
+        assert_eq!(
+            document.number(SaveNumberTarget::Main(field)).unwrap(),
+            expected,
+            "{field:?}"
+        );
+    }
+    assert_eq!(document.number(SaveNumberTarget::SelectedUnit).unwrap(), -1);
+
+    let unit_values = [
+        -1, 2, 3, 4, 0x34, 0x38, 0x3c, 0x40, -1, 5, 0, 6, 7, 8, 1, 0, 1, 60, 64, 68, 504,
+    ];
+    for (field, expected) in SaveUnitField::ALL.into_iter().zip(unit_values) {
+        let target = SaveNumberTarget::Unit { unit: 0, field };
+        assert_eq!(document.number(target).unwrap(), expected, "{target:?}");
+    }
+
+    let equipment_values = [
+        [
+            1_000, -100, 200, -200, 300, -300, 400, 500, -400, 600, 0, -500, 9, 700, 0, -600, 4,
+            800, -700,
+        ],
+        [
+            1_001, -101, 201, -201, 301, -301, 401, 501, -401, 601, 1, -501, 10, 701, 1, -601, 5,
+            801, -701,
+        ],
+        [
+            1_002, -102, 202, -202, 302, -302, 402, 502, -402, 602, 2, -502, 11, 702, 2, -602, 6,
+            802, -702,
+        ],
+        [
+            1_003, -103, 203, -203, 303, -303, 403, 503, -403, 603, 3, -503, 12, 703, 3, -603, 7,
+            803, -703,
+        ],
+        [
+            1_004, -104, 204, -204, 304, -304, 404, 504, -404, 604, 4, -504, 13, 704, 4, -604, 8,
+            804, -704,
+        ],
+        [
+            1_005, -105, 205, -205, 305, -305, 405, 505, -405, 605, 5, -505, 14, 705, 5, -605, 9,
+            805, -705,
+        ],
+    ];
+    for (slot_index, slot) in SaveEquipmentSlot::ALL.into_iter().enumerate() {
+        for (field_index, field) in SaveEquipmentField::ALL.into_iter().enumerate() {
+            let target = SaveNumberTarget::Equipment {
+                unit: 0,
+                slot,
+                field,
+            };
+            let expected = equipment_values
+                .get(slot_index)
+                .and_then(|values| values.get(field_index))
+                .copied()
+                .unwrap();
+            assert_eq!(document.number(target).unwrap(), expected, "{target:?}");
+        }
+    }
+
+    for (field, expected) in SaveRosterField::ALL
+        .into_iter()
+        .zip([60, 61, 62, 63, 6_400])
+    {
+        let target = SaveNumberTarget::Roster { record: 0, field };
+        assert_eq!(document.number(target).unwrap(), expected, "{target:?}");
+    }
+    for slot in 0..20 {
+        let target = SaveNumberTarget::MissionCompletion { slot };
+        assert_eq!(
+            document.number(target).unwrap(),
+            i64::try_from(slot).unwrap() - 1
+        );
+    }
+    assert_eq!(
+        document
+            .number(SaveNumberTarget::CurrentMissionIndex)
+            .unwrap(),
+        -2
+    );
+    assert_eq!(
+        document
+            .number(SaveNumberTarget::SecondArray { record: 0 })
+            .unwrap(),
+        0x0203_0405,
+    );
+}
+
+#[test]
+fn number_storage_bounds_and_editors_cover_every_target_family() {
+    let document =
+        SaveDocument::parse(complete_save_fixture(SaveFixtureOptions::default())).unwrap();
+
+    assert_number_metadata(
+        &document,
+        SaveNumberTarget::CampaignIndex,
+        (0, 3),
+        SaveEditor::CAMPAIGN,
+    );
+    for field in SaveMainField::ALL {
+        let bounds = if field == SaveMainField::Field08 {
+            I32_BOUNDS
+        } else {
+            U32_BOUNDS
+        };
+        assert_number_metadata(
+            &document,
+            SaveNumberTarget::Main(field),
+            bounds,
+            number(bounds),
+        );
+    }
+    assert_number_metadata(
+        &document,
+        SaveNumberTarget::SelectedUnit,
+        I32_BOUNDS,
+        number(I32_BOUNDS),
+    );
+    for field in SaveUnitField::ALL {
+        let (bounds, editor) = unit_metadata(field);
+        assert_number_metadata(
+            &document,
+            SaveNumberTarget::Unit { unit: 0, field },
+            bounds,
+            editor,
+        );
+    }
+    for slot in SaveEquipmentSlot::ALL {
+        for field in SaveEquipmentField::ALL {
+            let (bounds, editor) = equipment_metadata(field);
+            assert_number_metadata(
+                &document,
+                SaveNumberTarget::Equipment {
+                    unit: 0,
+                    slot,
+                    field,
+                },
+                bounds,
+                editor,
+            );
+        }
+    }
+    for field in SaveRosterField::ALL {
+        let bounds = if field == SaveRosterField::Value64 {
+            U32_BOUNDS
+        } else {
+            U8_BOUNDS
+        };
+        assert_number_metadata(
+            &document,
+            SaveNumberTarget::Roster { record: 0, field },
+            bounds,
+            number(bounds),
+        );
+    }
+    for slot in 0..20 {
+        assert_number_metadata(
+            &document,
+            SaveNumberTarget::MissionCompletion { slot },
+            I32_BOUNDS,
+            number(I32_BOUNDS),
+        );
+    }
+    assert_number_metadata(
+        &document,
+        SaveNumberTarget::CurrentMissionIndex,
+        I32_BOUNDS,
+        number(I32_BOUNDS),
+    );
+    assert_number_metadata(
+        &document,
+        SaveNumberTarget::SecondArray { record: 0 },
+        U32_BOUNDS,
+        number(U32_BOUNDS),
+    );
+}
+
+#[test]
+fn signed_wire_bit_patterns_project_without_unsigned_widening() {
+    let mut source = complete_save_fixture(SaveFixtureOptions::default());
+    let offsets = complete_save_offsets(true, true);
+    patch_i32(&mut source, offsets.main + 8, -8);
+    patch_i32(&mut source, offsets.unit + 4, -2);
+    patch_i32(&mut source, offsets.unit + 32, -3);
+    patch_i32(&mut source, offsets.unit + 36, -4);
+    patch_i32(&mut source, offsets.selected_unit, -5);
+    patch_i32(&mut source, offsets.mission_completion, -6);
+    patch_i32(&mut source, offsets.current_mission, -7);
+    let document = SaveDocument::parse(source).unwrap();
+
+    let cases = [
+        (SaveNumberTarget::Main(SaveMainField::Field08), -8),
+        (
+            SaveNumberTarget::Unit {
+                unit: 0,
+                field: SaveUnitField::TroopInfoIndex,
+            },
+            -2,
+        ),
+        (
+            SaveNumberTarget::Unit {
+                unit: 0,
+                field: SaveUnitField::CharacterID,
+            },
+            -3,
+        ),
+        (
+            SaveNumberTarget::Unit {
+                unit: 0,
+                field: SaveUnitField::TroopInfoIndex2,
+            },
+            -4,
+        ),
+        (SaveNumberTarget::SelectedUnit, -5),
+        (SaveNumberTarget::MissionCompletion { slot: 0 }, -6),
+        (SaveNumberTarget::CurrentMissionIndex, -7),
+    ];
+    for (target, expected) in cases {
+        assert_eq!(document.number(target).unwrap(), expected, "{target:?}");
+    }
+}
+
+#[test]
+fn equal_numeric_edit_is_unchanged_and_keeps_exact_source_bytes() {
+    let source = complete_save_fixture(SaveFixtureOptions::default());
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+
+    assert_eq!(
+        document
+            .set_number(SaveNumberTarget::CampaignIndex, 0)
+            .unwrap(),
+        SaveMutation::Unchanged,
+    );
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn unknown_choice_values_survive_an_unrelated_edit_and_reparse() {
+    let source = fixture_with_unknown_choices(99, 1_234, -99);
+    let mut document = SaveDocument::parse(source).unwrap();
+    assert_eq!(
+        document
+            .number(SaveNumberTarget::Unit {
+                unit: 0,
+                field: SaveUnitField::UCD
+            })
+            .unwrap(),
+        99,
+    );
+
+    assert_eq!(
+        document
+            .set_number(
+                SaveNumberTarget::Unit {
+                    unit: 0,
+                    field: SaveUnitField::SkillLevel
+                },
+                77,
+            )
+            .unwrap(),
+        SaveMutation::Changed { previous: 8 },
+    );
+
+    let reparsed = SaveDocument::parse(document.encode().unwrap()).unwrap();
+    assert_eq!(
+        reparsed
+            .number(SaveNumberTarget::Unit {
+                unit: 0,
+                field: SaveUnitField::UCD
+            })
+            .unwrap(),
+        99,
+    );
+    assert_eq!(
+        reparsed
+            .number(SaveNumberTarget::Equipment {
+                unit: 0,
+                slot: SaveEquipmentSlot::LeaderWeapon,
+                field: SaveEquipmentField::SkillType1,
+            })
+            .unwrap(),
+        1_234,
+    );
+    assert_eq!(
+        reparsed
+            .number(SaveNumberTarget::Equipment {
+                unit: 0,
+                slot: SaveEquipmentSlot::LeaderWeapon,
+                field: SaveEquipmentField::ResistType1,
+            })
+            .unwrap(),
+        -99,
+    );
+}
+
+#[test]
+fn changed_numeric_mutation_round_trips_every_leaf_and_equipment_slot() {
+    let mut document =
+        SaveDocument::parse(complete_save_fixture(SaveFixtureOptions::default())).unwrap();
+    let cases = changed_numeric_cases();
+
+    for &(target, value) in &cases {
+        let previous = document.number(target).unwrap();
+        assert_ne!(
+            previous, value,
+            "fixture did not force a change for {target:?}"
+        );
+        assert_eq!(
+            document.set_number(target, value).unwrap(),
+            SaveMutation::Changed { previous },
+            "{target:?}",
+        );
+        assert_eq!(document.number(target).unwrap(), value, "{target:?}");
+    }
+
+    let reparsed = SaveDocument::parse(document.encode().unwrap()).unwrap();
+    for (target, expected) in cases {
+        assert_eq!(reparsed.number(target).unwrap(), expected, "{target:?}");
+    }
+}
+
+#[test]
+fn invalid_numeric_target_and_value_leave_document_bytes_unchanged() {
+    let source = complete_save_fixture(SaveFixtureOptions::default());
+    let mut document = SaveDocument::parse(source.clone()).unwrap();
+    let target = SaveNumberTarget::Equipment {
+        unit: 9,
+        slot: SaveEquipmentSlot::TroopArmor,
+        field: SaveEquipmentField::EnhancementTier,
+    };
+
+    assert!(matches!(
+        document.set_number(target, 1),
+        Err(FormatError::SaveTargetOutOfRange {
+            target: actual,
+            record_count: 1,
+        }) if actual == target
+    ));
+    assert_eq!(document.encode().unwrap(), source);
+
+    let target = SaveNumberTarget::Equipment {
+        unit: 0,
+        slot: SaveEquipmentSlot::TroopArmor,
+        field: SaveEquipmentField::EnhancementTier,
+    };
+    assert!(matches!(
+        document.set_number(target, 32_768),
+        Err(FormatError::SaveValueOutOfRange {
+            target: actual,
+            value: 32_768,
+            minimum: -32_768,
+            maximum: 32_767,
+        }) if actual == target
+    ));
+    assert_eq!(document.encode().unwrap(), source);
+
+    assert!(matches!(
+        document.set_number(SaveNumberTarget::CampaignIndex, 4),
+        Err(FormatError::SaveValueOutOfRange {
+            target: SaveNumberTarget::CampaignIndex,
+            value: 4,
+            minimum: 0,
+            maximum: 3,
+        })
+    ));
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
+fn edited_envelope_restores_flags_context_tail_padding_and_prefix_length() {
+    let tail = [0xde, 0xad, 0, 0xbe, 0xef];
+    for size_prefix in [false, true] {
+        for context in [false, true] {
+            let source = complete_save_fixture(SaveFixtureOptions {
+                size_prefix,
+                context,
+                pad_to_32_kib: false,
+                tail: tail.to_vec(),
+            });
+            let offsets = complete_save_offsets(size_prefix, context);
+            let mut document = SaveDocument::parse(source.clone()).unwrap();
+            assert!(matches!(
+                document.set_number(
+                    SaveNumberTarget::Unit {
+                        unit: 0,
+                        field: SaveUnitField::SkillLevel
+                    },
+                    77,
+                ),
+                Ok(SaveMutation::Changed { previous: 8 })
+            ));
+
+            let encoded = document.encode().unwrap();
+
+            assert_eq!(encoded.len(), 0x8000);
+            assert_eq!(read_u32(&encoded, offsets.magic), 0x6e);
+            if size_prefix {
+                assert_eq!(read_u32(&encoded, 0), u32::try_from(encoded.len()).unwrap());
+            }
+            if let Some(context_start) = offsets.context {
+                let context_end = context_start + 0x438;
+                assert_eq!(
+                    encoded.get(context_start..context_end),
+                    source.get(context_start..context_end)
+                );
+            }
+
+            let edited = offsets.unit + 52;
+            assert_eq!(read_u32(&encoded, edited), 77);
+            assert_eq!(
+                encoded.get(offsets.magic..edited),
+                source.get(offsets.magic..edited)
+            );
+            assert_eq!(
+                encoded.get(edited + 4..source.len()),
+                source.get(edited + 4..)
+            );
+            assert_eq!(
+                encoded.get(offsets.tail..offsets.tail + tail.len()),
+                Some(&tail[..])
+            );
+
+            let reparsed = SaveDocument::parse(encoded).unwrap();
+            assert_eq!(reparsed.has_size_prefix(), size_prefix);
+            assert_eq!(reparsed.has_context(), context);
+            assert_eq!(
+                reparsed
+                    .number(SaveNumberTarget::Unit {
+                        unit: 0,
+                        field: SaveUnitField::SkillLevel,
+                    })
+                    .unwrap(),
+                77,
+            );
+        }
+    }
+}
+
+#[test]
+fn save_diagnostics_use_exact_numeric_targets_for_unknown_values() {
+    let document = SaveDocument::parse(fixture_with_unknown_choices(99, 1_234, -99)).unwrap();
+    let diagnostics = document.diagnostics();
+
+    let expected = [
+        SaveNumberTarget::Unit {
+            unit: 0,
+            field: SaveUnitField::UCD,
+        },
+        SaveNumberTarget::Equipment {
+            unit: 0,
+            slot: SaveEquipmentSlot::LeaderWeapon,
+            field: SaveEquipmentField::SkillType1,
+        },
+        SaveNumberTarget::Equipment {
+            unit: 0,
+            slot: SaveEquipmentSlot::LeaderWeapon,
+            field: SaveEquipmentField::ResistType1,
+        },
+        SaveNumberTarget::CurrentMissionIndex,
+    ];
+    assert_eq!(diagnostics.len(), expected.len());
+    for target in expected {
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == Severity::Warning
+                    && diagnostic.location == DiagnosticLocation::Save(target)
+            }),
+            "missing diagnostic for {target:?}"
+        );
+    }
+}
+
+const I32_BOUNDS: (i64, i64) = (-2_147_483_648, 2_147_483_647);
+const U32_BOUNDS: (i64, i64) = (0, 4_294_967_295);
+const I16_BOUNDS: (i64, i64) = (-32_768, 32_767);
+const U16_BOUNDS: (i64, i64) = (0, 65_535);
+const U8_BOUNDS: (i64, i64) = (0, 255);
+
+fn changed_numeric_cases() -> Vec<(SaveNumberTarget, i64)> {
+    let mut cases = vec![(SaveNumberTarget::CampaignIndex, 2)];
+    for (field, value) in SaveMainField::ALL
+        .into_iter()
+        .zip([10_000, 10_001, -10_002, 10_003, 10_004, 10_005, 10_006])
+    {
+        cases.push((SaveNumberTarget::Main(field), value));
+    }
+    cases.push((SaveNumberTarget::SelectedUnit, -10_010));
+
+    for (index, field) in SaveUnitField::ALL.into_iter().enumerate() {
+        let Ok(index) = i64::try_from(index) else {
+            panic!("unit field index does not fit i64");
+        };
+        let value = match field {
+            SaveUnitField::LeaderNameIndex
+            | SaveUnitField::TroopInfoIndex
+            | SaveUnitField::CharacterID
+            | SaveUnitField::TroopInfoIndex2 => -20_000 - index,
+            SaveUnitField::Byte58 | SaveUnitField::HeroFlag | SaveUnitField::Byte5A => 20 + index,
+            SaveUnitField::JobType
+            | SaveUnitField::ModelID
+            | SaveUnitField::STGField34
+            | SaveUnitField::STGField38
+            | SaveUnitField::STGField3C
+            | SaveUnitField::STGField40
+            | SaveUnitField::UCD
+            | SaveUnitField::FormationType
+            | SaveUnitField::GridConfig
+            | SaveUnitField::SkillLevel
+            | SaveUnitField::Field60
+            | SaveUnitField::Field64
+            | SaveUnitField::Field68
+            | SaveUnitField::Field504 => 20_000 + index,
+        };
+        cases.push((SaveNumberTarget::Unit { unit: 0, field }, value));
+    }
+
+    for (slot_index, slot) in SaveEquipmentSlot::ALL.into_iter().enumerate() {
+        let Ok(slot_index) = i64::try_from(slot_index) else {
+            panic!("equipment slot index does not fit i64");
+        };
+        for (field_index, field) in SaveEquipmentField::ALL.into_iter().enumerate() {
+            let Ok(field_index) = i64::try_from(field_index) else {
+                panic!("equipment field index does not fit i64");
+            };
+            let magnitude = 30_000 + slot_index * 100 + field_index;
+            let value = match field {
+                SaveEquipmentField::AutoID
+                | SaveEquipmentField::Level
+                | SaveEquipmentField::VariantIndex
+                | SaveEquipmentField::EquippedFlag
+                | SaveEquipmentField::Reserved => magnitude,
+                SaveEquipmentField::EnhancementTier
+                | SaveEquipmentField::ItemPower
+                | SaveEquipmentField::ItemTypeID
+                | SaveEquipmentField::Attribute1Index
+                | SaveEquipmentField::Attribute2Index
+                | SaveEquipmentField::SkillType1
+                | SaveEquipmentField::SkillBonus1
+                | SaveEquipmentField::SkillType2
+                | SaveEquipmentField::SkillBonus2
+                | SaveEquipmentField::ResistType1
+                | SaveEquipmentField::ResistBonus1
+                | SaveEquipmentField::ResistType2
+                | SaveEquipmentField::ResistBonus2
+                | SaveEquipmentField::SlotCategory => -magnitude,
+            };
+            cases.push((
+                SaveNumberTarget::Equipment {
+                    unit: 0,
+                    slot,
+                    field,
+                },
+                value,
+            ));
+        }
+    }
+
+    for (index, field) in SaveRosterField::ALL.into_iter().enumerate() {
+        let Ok(index) = i64::try_from(index) else {
+            panic!("roster field index does not fit i64");
+        };
+        let value = if field == SaveRosterField::Value64 {
+            40_000
+        } else {
+            100 + index
+        };
+        cases.push((SaveNumberTarget::Roster { record: 0, field }, value));
+    }
+    for slot in 0..20 {
+        let Ok(slot_value) = i64::try_from(slot) else {
+            panic!("mission slot does not fit i64");
+        };
+        cases.push((
+            SaveNumberTarget::MissionCompletion { slot },
+            -100 - slot_value,
+        ));
+    }
+    cases.push((SaveNumberTarget::CurrentMissionIndex, -200));
+    cases.push((SaveNumberTarget::SecondArray { record: 0 }, 50_000));
+    cases
+}
+
+const fn number((minimum, maximum): (i64, i64)) -> SaveEditor {
+    SaveEditor::Number { minimum, maximum }
+}
+
+fn assert_number_metadata(
+    document: &SaveDocument,
+    target: SaveNumberTarget,
+    bounds: (i64, i64),
+    editor: SaveEditor,
+) {
+    let actual_bounds = match document.number_storage_bounds(target) {
+        Ok(actual) => actual,
+        Err(error) => panic!("failed to read bounds for {target:?}: {error}"),
+    };
+    assert_eq!(actual_bounds, bounds, "{target:?}");
+    let actual_editor = match document.number_editor(target) {
+        Ok(actual) => actual,
+        Err(error) => panic!("failed to read editor for {target:?}: {error}"),
+    };
+    assert_eq!(actual_editor, editor, "{target:?}");
+}
+
+fn unit_metadata(field: SaveUnitField) -> ((i64, i64), SaveEditor) {
+    let bounds = match field {
+        SaveUnitField::LeaderNameIndex
+        | SaveUnitField::TroopInfoIndex
+        | SaveUnitField::CharacterID
+        | SaveUnitField::TroopInfoIndex2 => I32_BOUNDS,
+        SaveUnitField::Byte58 | SaveUnitField::HeroFlag | SaveUnitField::Byte5A => U8_BOUNDS,
+        SaveUnitField::JobType
+        | SaveUnitField::ModelID
+        | SaveUnitField::STGField34
+        | SaveUnitField::STGField38
+        | SaveUnitField::STGField3C
+        | SaveUnitField::STGField40
+        | SaveUnitField::UCD
+        | SaveUnitField::FormationType
+        | SaveUnitField::GridConfig
+        | SaveUnitField::SkillLevel
+        | SaveUnitField::Field60
+        | SaveUnitField::Field64
+        | SaveUnitField::Field68
+        | SaveUnitField::Field504 => U32_BOUNDS,
+    };
+    let editor = match field {
+        SaveUnitField::UCD => SaveEditor::UCD,
+        SaveUnitField::HeroFlag => SaveEditor::HERO,
+        SaveUnitField::SkillLevel => number(U16_BOUNDS),
+        _ => number(bounds),
+    };
+    (bounds, editor)
+}
+
+fn equipment_metadata(field: SaveEquipmentField) -> ((i64, i64), SaveEditor) {
+    let bounds = match field {
+        SaveEquipmentField::AutoID => U32_BOUNDS,
+        SaveEquipmentField::Level
+        | SaveEquipmentField::VariantIndex
+        | SaveEquipmentField::EquippedFlag
+        | SaveEquipmentField::Reserved => U16_BOUNDS,
+        SaveEquipmentField::EnhancementTier | SaveEquipmentField::ItemPower => I16_BOUNDS,
+        SaveEquipmentField::ItemTypeID
+        | SaveEquipmentField::Attribute1Index
+        | SaveEquipmentField::Attribute2Index
+        | SaveEquipmentField::SkillType1
+        | SaveEquipmentField::SkillBonus1
+        | SaveEquipmentField::SkillType2
+        | SaveEquipmentField::SkillBonus2
+        | SaveEquipmentField::ResistType1
+        | SaveEquipmentField::ResistBonus1
+        | SaveEquipmentField::ResistType2
+        | SaveEquipmentField::ResistBonus2
+        | SaveEquipmentField::SlotCategory => I32_BOUNDS,
+    };
+    let editor = match field {
+        SaveEquipmentField::SkillType1 | SaveEquipmentField::SkillType2 => SaveEditor::SKILL,
+        SaveEquipmentField::ResistType1 | SaveEquipmentField::ResistType2 => SaveEditor::RESISTANCE,
+        _ => number(bounds),
+    };
+    (bounds, editor)
 }
 
 fn assert_complete<T>(all: &[T], labels: &[&str], label: impl Fn(T) -> &'static str)
