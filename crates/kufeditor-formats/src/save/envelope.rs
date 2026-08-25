@@ -16,6 +16,7 @@ pub(super) struct SaveEnvelope {
 pub(super) struct NormalizedSave {
     pub(super) bytes: Vec<u8>,
     pub(super) envelope: SaveEnvelope,
+    pub(super) source_growth: usize,
 }
 
 pub(super) fn normalize(source: &[u8]) -> Result<NormalizedSave, SaveParseError> {
@@ -39,10 +40,12 @@ where
     } else {
         CONTEXT_SIZE
     };
+    let source_growth = prefix_growth
+        .checked_add(context_growth)
+        .ok_or(SaveParseError::CanonicalLengthOverflow)?;
     let canonical_length = source
         .len()
-        .checked_add(prefix_growth)
-        .and_then(|length| length.checked_add(context_growth))
+        .checked_add(source_growth)
         .ok_or(SaveParseError::CanonicalLengthOverflow)?;
     let canonical_length_u32 =
         u32::try_from(canonical_length).map_err(|_| SaveParseError::CanonicalLengthOverflow)?;
@@ -92,7 +95,11 @@ where
     bytes.extend_from_slice(remaining);
     debug_assert_eq!(bytes.len(), canonical_length);
 
-    Ok(NormalizedSave { bytes, envelope })
+    Ok(NormalizedSave {
+        bytes,
+        envelope,
+        source_growth,
+    })
 }
 
 fn detect(source: &[u8]) -> Result<SaveEnvelope, SaveParseError> {

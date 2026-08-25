@@ -7,7 +7,10 @@ use kufeditor_formats::{
     SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveParseError,
     SaveRegion, SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup, TroopField,
 };
-use support::{SaveFixtureOptions, fixture_with_count, save_fixture};
+use support::{
+    SaveFixtureArrays, SaveFixtureOptions, fixture_with_count, patch_u32, save_fixture,
+    save_fixture_with_arrays, truncate_save,
+};
 
 #[test]
 fn all_observed_envelopes_parse_and_no_op_encode_exactly() {
@@ -106,10 +109,10 @@ fn truncated_mandatory_save_regions_are_typed() {
 
     let cases = [
         (vec![0x6e, 0, 0], SaveRegion::Envelope, 0, 4, 3),
-        (units, SaveRegion::Units, 1_432, 4, 2),
-        (roster, SaveRegion::Roster, 1_440, 4, 2),
-        (second_array, SaveRegion::SecondArray, 1_444, 4, 2),
-        (missions, SaveRegion::Missions, 1_448, 84, 8),
+        (units, SaveRegion::Units, 348, 4, 2),
+        (roster, SaveRegion::Roster, 356, 4, 2),
+        (second_array, SaveRegion::SecondArray, 360, 4, 2),
+        (missions, SaveRegion::Missions, 364, 84, 8),
     ];
 
     for (source, region, offset, needed, remaining) in cases {
@@ -124,6 +127,63 @@ fn truncated_mandatory_save_regions_are_typed() {
                 && actual_offset == offset
                 && actual_needed == needed
                 && actual_remaining == remaining
+        ));
+    }
+}
+
+#[test]
+fn preflight_truncation_offsets_use_source_coordinates_for_every_envelope() {
+    for (size_prefix, context, unit_count_offset) in [
+        (false, false, 348),
+        (true, false, 352),
+        (false, true, 1_428),
+        (true, true, 1_432),
+    ] {
+        let mut source = save_fixture(SaveFixtureOptions {
+            size_prefix,
+            context,
+            pad_to_32_kib: false,
+            tail: Vec::new(),
+        });
+        truncate_save(&mut source, unit_count_offset + 2, size_prefix);
+
+        assert!(matches!(
+            SaveDocument::parse(source),
+            Err(FormatError::SaveParse(SaveParseError::Truncated {
+                region: SaveRegion::Units,
+                offset,
+                needed: 4,
+                remaining: 2,
+            })) if offset == unit_count_offset
+        ));
+    }
+}
+
+#[test]
+fn preflight_count_offsets_use_source_coordinates_for_every_envelope() {
+    for (size_prefix, context, unit_count_offset) in [
+        (false, false, 348),
+        (true, false, 352),
+        (false, true, 1_428),
+        (true, true, 1_432),
+    ] {
+        let mut source = save_fixture(SaveFixtureOptions {
+            size_prefix,
+            context,
+            pad_to_32_kib: false,
+            tail: Vec::new(),
+        });
+        patch_u32(&mut source, unit_count_offset, u32::MAX);
+
+        assert!(matches!(
+            SaveDocument::parse(source),
+            Err(FormatError::SaveParse(SaveParseError::ImpossibleCount {
+                region: SaveRegion::Units,
+                offset,
+                count: u32::MAX,
+                item_size: 483,
+                remaining: 96,
+            })) if offset == unit_count_offset
         ));
     }
 }
@@ -170,6 +230,203 @@ fn impossible_dynamic_counts_fail_before_generated_parsing() {
 }
 
 #[test]
+fn exact_fit_dynamic_counts_parse() {
+    for (arrays, counts) in [
+        (
+            SaveFixtureArrays {
+                unit_count: 1,
+                unit_records: 1,
+                ..SaveFixtureArrays::default()
+            },
+            (1, 0, 0),
+        ),
+        (
+            SaveFixtureArrays {
+                roster_count: 1,
+                roster_records: 1,
+                ..SaveFixtureArrays::default()
+            },
+            (0, 1, 0),
+        ),
+        (
+            SaveFixtureArrays {
+                second_array_count: 1,
+                second_array_values: 1,
+                ..SaveFixtureArrays::default()
+            },
+            (0, 0, 1),
+        ),
+    ] {
+        let source = save_fixture_with_arrays(
+            SaveFixtureOptions {
+                pad_to_32_kib: false,
+                ..SaveFixtureOptions::default()
+            },
+            &arrays,
+        );
+
+        let document = SaveDocument::parse(source).unwrap();
+
+        assert_eq!(document.unit_count(), counts.0);
+        assert_eq!(document.roster_count(), counts.1);
+        assert_eq!(document.second_array_count(), counts.2);
+    }
+}
+
+#[test]
+fn one_over_dynamic_counts_are_impossible() {
+    for (arrays, region, offset, count, item_size, remaining) in [
+        (
+            SaveFixtureArrays {
+                unit_count: 2,
+                unit_records: 1,
+                ..SaveFixtureArrays::default()
+            },
+            SaveRegion::Units,
+            1_432,
+            2,
+            483,
+            579,
+        ),
+        (
+            SaveFixtureArrays {
+                roster_count: 2,
+                roster_records: 1,
+                ..SaveFixtureArrays::default()
+            },
+            SaveRegion::Roster,
+            1_440,
+            2,
+            8,
+            96,
+        ),
+        (
+            SaveFixtureArrays {
+                second_array_count: 2,
+                second_array_values: 1,
+                ..SaveFixtureArrays::default()
+            },
+            SaveRegion::SecondArray,
+            1_444,
+            2,
+            4,
+            88,
+        ),
+    ] {
+        let source = save_fixture_with_arrays(
+            SaveFixtureOptions {
+                pad_to_32_kib: false,
+                ..SaveFixtureOptions::default()
+            },
+            &arrays,
+        );
+
+        assert!(matches!(
+            SaveDocument::parse(source),
+            Err(FormatError::SaveParse(SaveParseError::ImpossibleCount {
+                region: actual_region,
+                offset: actual_offset,
+                count: actual_count,
+                item_size: actual_item_size,
+                remaining: actual_remaining,
+            })) if actual_region == region
+                && actual_offset == offset
+                && actual_count == count
+                && actual_item_size == item_size
+                && actual_remaining == remaining
+        ));
+    }
+}
+
+#[test]
+fn nonzero_counts_with_short_suffixes_are_impossible() {
+    for (arrays, region, offset, item_size, remaining) in [
+        (
+            SaveFixtureArrays {
+                unit_count: 1,
+                ..SaveFixtureArrays::default()
+            },
+            SaveRegion::Units,
+            1_432,
+            483,
+            95,
+        ),
+        (
+            SaveFixtureArrays {
+                roster_count: 1,
+                ..SaveFixtureArrays::default()
+            },
+            SaveRegion::Roster,
+            1_440,
+            8,
+            87,
+        ),
+        (
+            SaveFixtureArrays {
+                second_array_count: 1,
+                ..SaveFixtureArrays::default()
+            },
+            SaveRegion::SecondArray,
+            1_444,
+            4,
+            83,
+        ),
+    ] {
+        let mut source = save_fixture_with_arrays(
+            SaveFixtureOptions {
+                pad_to_32_kib: false,
+                ..SaveFixtureOptions::default()
+            },
+            &arrays,
+        );
+        let truncated_length = source.len() - 1;
+        truncate_save(&mut source, truncated_length, true);
+
+        assert!(matches!(
+            SaveDocument::parse(source),
+            Err(FormatError::SaveParse(SaveParseError::ImpossibleCount {
+                region: actual_region,
+                offset: actual_offset,
+                count: 1,
+                item_size: actual_item_size,
+                remaining: actual_remaining,
+            })) if actual_region == region
+                && actual_offset == offset
+                && actual_item_size == item_size
+                && actual_remaining == remaining
+        ));
+    }
+}
+
+#[test]
+fn zero_counts_with_short_suffixes_are_truncated_at_the_missing_region() {
+    for (length, region, offset, needed, remaining) in [
+        (1_439, SaveRegion::Units, 1_436, 4, 3),
+        (1_447, SaveRegion::SecondArray, 1_444, 4, 3),
+        (1_451, SaveRegion::Missions, 1_448, 84, 3),
+    ] {
+        let mut source = save_fixture(SaveFixtureOptions {
+            pad_to_32_kib: false,
+            ..SaveFixtureOptions::default()
+        });
+        truncate_save(&mut source, length, true);
+
+        assert!(matches!(
+            SaveDocument::parse(source),
+            Err(FormatError::SaveParse(SaveParseError::Truncated {
+                region: actual_region,
+                offset: actual_offset,
+                needed: actual_needed,
+                remaining: actual_remaining,
+            })) if actual_region == region
+                && actual_offset == offset
+                && actual_needed == needed
+                && actual_remaining == remaining
+        ));
+    }
+}
+
+#[test]
 fn nonzero_save_tail_survives_no_op_encode_exactly() {
     let source = save_fixture(SaveFixtureOptions {
         pad_to_32_kib: false,
@@ -197,6 +454,40 @@ fn context_text_strips_color_codes_filters_and_deduplicates() {
     let document = SaveDocument::parse(source).unwrap();
 
     assert_eq!(document.context_text(), ["Alpha", "Beta", "Delta", "Gamma"]);
+}
+
+#[test]
+fn context_text_discards_unterminated_color_fragments() {
+    let mut source = save_fixture(SaveFixtureOptions {
+        pad_to_32_kib: false,
+        ..SaveFixtureOptions::default()
+    });
+    let context = b"Alpha@(color=broken\0Beta(color=broken\0Omega\0";
+    source
+        .get_mut(12..12 + context.len())
+        .unwrap()
+        .copy_from_slice(context);
+
+    let document = SaveDocument::parse(source).unwrap();
+
+    assert_eq!(document.context_text(), ["Alpha", "Beta", "Omega"]);
+}
+
+#[test]
+fn context_text_removes_orphan_hex_fragment_before_deduplication() {
+    let mut source = save_fixture(SaveFixtureOptions {
+        pad_to_32_kib: false,
+        ..SaveFixtureOptions::default()
+    });
+    let context = b"FF00aa)Alpha\0Alpha\0";
+    source
+        .get_mut(12..12 + context.len())
+        .unwrap()
+        .copy_from_slice(context);
+
+    let document = SaveDocument::parse(source).unwrap();
+
+    assert_eq!(document.context_text(), ["Alpha"]);
 }
 
 #[test]

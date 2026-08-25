@@ -40,9 +40,11 @@ fn strip_color_codes(segment: &[u8]) -> String {
         let is_color_code = COLOR_MARKERS
             .iter()
             .any(|marker| remaining.starts_with(marker));
-        if is_color_code
-            && let Some(closing_offset) = remaining.iter().position(|candidate| *candidate == b')')
-        {
+        if is_color_code {
+            let Some(closing_offset) = remaining.iter().position(|candidate| *candidate == b')')
+            else {
+                break;
+            };
             let next_offset = closing_offset.saturating_add(1);
             remaining = remaining.get(next_offset..).unwrap_or_default();
             continue;
@@ -50,6 +52,13 @@ fn strip_color_codes(segment: &[u8]) -> String {
 
         cleaned.push(char::from(byte));
         remaining = rest;
+    }
+
+    if let Some((fragment, remainder)) = cleaned.split_once(')')
+        && !fragment.is_empty()
+        && fragment.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return remainder.to_owned();
     }
 
     cleaned

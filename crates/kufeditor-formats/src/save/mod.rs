@@ -38,7 +38,9 @@ pub struct SaveDocument {
 impl SaveDocument {
     pub fn parse(source: Vec<u8>) -> Result<Self, FormatError> {
         let normalized = normalize(&source).map_err(FormatError::SaveParse)?;
-        preflight(&normalized.bytes).map_err(FormatError::SaveParse)?;
+        preflight(&normalized.bytes).map_err(|error| {
+            FormatError::SaveParse(preflight_source_error(error, normalized.source_growth))
+        })?;
 
         let context_text = if normalized.envelope.has_context {
             let context_end = CANONICAL_CONTEXT_OFFSET.checked_add(CONTEXT_SIZE).ok_or(
@@ -158,6 +160,46 @@ fn preflight(bytes: &[u8]) -> Result<(), SaveParseError> {
     Ok(())
 }
 
+fn preflight_source_error(error: SaveParseError, source_growth: usize) -> SaveParseError {
+    match error {
+        SaveParseError::Truncated {
+            region,
+            offset,
+            needed,
+            remaining,
+        } => {
+            let Some(offset) = offset.checked_sub(source_growth) else {
+                return SaveParseError::CanonicalLengthOverflow;
+            };
+            SaveParseError::Truncated {
+                region,
+                offset,
+                needed,
+                remaining,
+            }
+        }
+        SaveParseError::ImpossibleCount {
+            region,
+            offset,
+            count,
+            item_size,
+            remaining,
+        } => {
+            let Some(offset) = offset.checked_sub(source_growth) else {
+                return SaveParseError::CanonicalLengthOverflow;
+            };
+            SaveParseError::ImpossibleCount {
+                region,
+                offset,
+                count,
+                item_size,
+                remaining,
+            }
+        }
+        error => error,
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "preflight keeps each wire-layout bound explicit at the call site"
@@ -175,18 +217,8 @@ fn preflight_items(
     let count_usize = usize::try_from(count)
         .map_err(|_| impossible_count(region, count_offset, count, item_size, remaining))?;
 
-    if remaining >= mandatory_after {
-        let available_for_items = remaining - mandatory_after;
-        if count_usize > available_for_items / item_size {
-            return Err(impossible_count(
-                region,
-                count_offset,
-                count,
-                item_size,
-                remaining,
-            ));
-        }
-    } else if count_usize > remaining / item_size {
+    let available_for_items = remaining.saturating_sub(mandatory_after);
+    if count_usize > available_for_items / item_size {
         return Err(impossible_count(
             region,
             count_offset,
