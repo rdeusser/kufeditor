@@ -1,4 +1,4 @@
-.PHONY: all build run test clean configure rebuild generate tidy
+.PHONY: all build run test clean configure rebuild generate tidy rust-build rust-test rust-run rust-lint
 
 BUILD_DIR := build
 BUILD_TYPE := Release
@@ -23,9 +23,22 @@ clean:
 
 rebuild: clean build
 
-# Generate C++ parsers from cleave (.clv) specs
+# Generate C++ and Rust parsers from the shared cleave schemas.
 generate:
-	@for f in src/parsers/*.clv; do cleave generate --lang cpp --out src/parsers "$$f"; done
+	@./scripts/generate.sh
+
+rust-build:
+	@cargo build --workspace
+
+rust-test:
+	@cargo test --workspace --all-features
+
+rust-run:
+	@cargo run -p kufeditor
+
+rust-lint:
+	@cargo fmt --all --check
+	@cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Debug build variants
 debug:
@@ -58,6 +71,10 @@ help:
 	@echo "  configure     - Run CMake configuration"
 	@echo "  build-verbose - Build with verbose output"
 	@echo "  test-only     - Run tests without rebuilding"
-	@echo "  generate      - Regenerate C++ from .clv specs"
+	@echo "  generate      - Regenerate C++ and Rust parsers"
+	@echo "  rust-build    - Build the Rust workspace"
+	@echo "  rust-test     - Run all Rust tests"
+	@echo "  rust-run      - Run the GPUI application"
+	@echo "  rust-lint     - Check Rust formatting and lints"
 	@echo "  tidy          - Format all .cpp and .h files with clang-format"
 	@echo "  help          - Show this help message"

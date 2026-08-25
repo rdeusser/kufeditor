@@ -3,204 +3,199 @@
 
 #include <cstdint>
 #include <cstring>
-#include <stdexcept>
 #include <string>
-#include <variant>
 #include <vector>
+#include <stdexcept>
+#include <variant>
 
 namespace kuf_stg {
 
 struct StgStringParam {
-	uint32_t length;
-	std::vector<uint8_t> value;
+    uint32_t length;
+    std::vector<uint8_t> value;
 
-	static StgStringParam parse(const uint8_t *buf, size_t len,
-				    size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static StgStringParam parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct StgHeader {
-	int32_t reserved_0;
-	uint32_t unknown_1;
-	uint32_t unknown_2;
-	uint32_t unknown_3;
-	uint8_t reserved_1[24];
-	uint32_t unknown_4;
-	uint8_t reserved_2[24];
-	std::string map_filename;
-	std::string bitmap_filename;
-	std::string default_camera;
-	std::string user_camera;
-	std::string settings_file;
-	std::string sky_effects;
-	std::string ai_script;
-	uint8_t padding_208[4];
-	std::string cubemap_texture;
-	uint8_t config_data[36];
+    int32_t reserved_0;
+    uint32_t unknown_1;
+    uint32_t unknown_2;
+    uint32_t unknown_3;
+    uint8_t reserved_1[24];
+    uint32_t unknown_4;
+    uint8_t reserved_2[24];
+    std::string map_filename;
+    std::string bitmap_filename;
+    std::string default_camera;
+    std::string user_camera;
+    std::string settings_file;
+    std::string sky_effects;
+    std::string ai_script;
+    uint8_t padding_208[4];
+    std::string cubemap_texture;
+    uint8_t config_data[36];
 
-	static StgHeader parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static StgHeader parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct UnitBlock {
-	std::string name;
-	uint32_t unique_id;
-	uint8_t ucd;
-	uint8_t is_hero;
-	uint8_t is_enabled;
-	uint8_t reserved_27;
-	float leader_hp_override;
-	float unit_hp_override;
-	float unknown_30;
-	uint8_t reserved_34[16];
-	float pos_x;
-	float pos_y;
-	uint8_t facing_direction;
-	uint8_t extra_flags_1;
-	uint8_t extra_flags_2;
-	uint8_t category;
-	int32_t reserved_50;
-	uint8_t leader_job_type;
-	uint8_t leader_model_id;
-	uint8_t leader_worldmap_id;
-	uint8_t leader_level;
-	uint8_t leader_skills[8];
-	std::vector<int32_t> leader_abilities;
-	uint32_t officer_count;
-	uint8_t officer1_job_type;
-	uint8_t officer1_model_id;
-	uint8_t officer1_worldmap_id;
-	uint8_t officer1_level;
-	uint8_t officer1_data[100];
-	uint8_t officer2_job_type;
-	uint8_t officer2_model_id;
-	uint8_t officer2_worldmap_id;
-	uint8_t officer2_level;
-	uint8_t officer2_data[84];
-	uint8_t padding_180[12];
-	uint32_t animation_config;
-	uint32_t grid_x;
-	uint32_t grid_y;
-	uint8_t reserved_198[40];
-	int32_t troop_info_index;
-	uint32_t formation_type;
-	std::vector<float> stat_overrides;
+    std::string name;
+    uint32_t unique_id;
+    uint8_t ucd;
+    uint8_t is_hero;
+    uint8_t is_enabled;
+    uint8_t reserved_27;
+    float leader_hp_override;
+    float unit_hp_override;
+    float unknown_30;
+    uint8_t reserved_34[16];
+    float pos_x;
+    float pos_y;
+    uint8_t facing_direction;
+    uint8_t extra_flags_1;
+    uint8_t extra_flags_2;
+    uint8_t category;
+    int32_t reserved_50;
+    uint8_t leader_job_type;
+    uint8_t leader_model_id;
+    uint8_t leader_worldmap_id;
+    uint8_t leader_level;
+    uint8_t leader_skills[8];
+    std::vector<int32_t> leader_abilities;
+    uint32_t officer_count;
+    uint8_t officer1_job_type;
+    uint8_t officer1_model_id;
+    uint8_t officer1_worldmap_id;
+    uint8_t officer1_level;
+    uint8_t officer1_data[100];
+    uint8_t officer2_job_type;
+    uint8_t officer2_model_id;
+    uint8_t officer2_worldmap_id;
+    uint8_t officer2_level;
+    uint8_t officer2_data[84];
+    uint8_t padding_180[12];
+    uint32_t animation_config;
+    uint32_t grid_x;
+    uint32_t grid_y;
+    uint8_t reserved_198[40];
+    int32_t troop_info_index;
+    uint32_t formation_type;
+    std::vector<float> stat_overrides;
 
-	static UnitBlock parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static UnitBlock parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct AreaEntry {
-	std::string description;
-	uint32_t unknown_20;
-	uint32_t unknown_24;
-	uint8_t unknown_28[24];
-	uint32_t area_id;
-	float bound_x1;
-	float bound_y1;
-	float bound_x2;
-	float bound_y2;
+    std::string description;
+    uint32_t unknown_20;
+    uint32_t unknown_24;
+    uint8_t unknown_28[24];
+    uint32_t area_id;
+    float bound_x1;
+    float bound_y1;
+    float bound_x2;
+    float bound_y2;
 
-	static AreaEntry parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static AreaEntry parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct StgParamValue {
-	uint32_t type_tag;
-	std::variant<int32_t, float, StgStringParam> value;
+    uint32_t type_tag;
+    std::variant<int32_t, float, StgStringParam> value;
 
-	static StgParamValue parse(const uint8_t *buf, size_t len,
-				   size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static StgParamValue parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct StgVariable {
-	std::string name;
-	uint32_t variable_id;
-	StgParamValue initial_value;
+    std::string name;
+    uint32_t variable_id;
+    StgParamValue initial_value;
 
-	static StgVariable parse(const uint8_t *buf, size_t len,
-				 size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static StgVariable parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct StgCondition {
-	uint32_t type_id;
-	uint32_t param_count;
-	std::vector<StgParamValue> params;
+    uint32_t type_id;
+    uint32_t param_count;
+    std::vector<StgParamValue> params;
 
-	static StgCondition parse(const uint8_t *buf, size_t len,
-				  size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static StgCondition parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct StgAction {
-	uint32_t type_id;
-	uint32_t param_count;
-	std::vector<StgParamValue> params;
+    uint32_t type_id;
+    uint32_t param_count;
+    std::vector<StgParamValue> params;
 
-	static StgAction parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static StgAction parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct StgEvent {
-	std::string description;
-	uint32_t event_id;
-	uint32_t condition_count;
-	std::vector<StgCondition> conditions;
-	uint32_t action_count;
-	std::vector<StgAction> actions;
+    std::string description;
+    uint32_t event_id;
+    uint32_t condition_count;
+    std::vector<StgCondition> conditions;
+    uint32_t action_count;
+    std::vector<StgAction> actions;
 
-	static StgEvent parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static StgEvent parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct EventBlock {
-	uint32_t block_header;
-	uint32_t event_count;
-	std::vector<StgEvent> events;
+    uint32_t block_header;
+    uint32_t event_count;
+    std::vector<StgEvent> events;
 
-	static EventBlock parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static EventBlock parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct FooterEntry {
-	uint32_t slot_data_1;
-	uint32_t slot_data_2;
+    uint32_t slot_data_1;
+    uint32_t slot_data_2;
 
-	static FooterEntry parse(const uint8_t *buf, size_t len,
-				 size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static FooterEntry parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-	uint32_t magic;
-	StgHeader header;
-	uint32_t unit_count;
-	std::vector<UnitBlock> units;
-	uint32_t area_count;
-	std::vector<AreaEntry> areas;
-	uint32_t variable_count;
-	std::vector<StgVariable> variables;
-	uint32_t event_block_count;
-	std::vector<EventBlock> event_blocks;
-	uint32_t footer_count;
-	std::vector<FooterEntry> footer_entries;
+    uint32_t magic;
+    StgHeader header;
+    uint32_t unit_count;
+    std::vector<UnitBlock> units;
+    uint32_t area_count;
+    std::vector<AreaEntry> areas;
+    uint32_t variable_count;
+    std::vector<StgVariable> variables;
+    uint32_t event_block_count;
+    std::vector<EventBlock> event_blocks;
+    uint32_t footer_count;
+    std::vector<FooterEntry> footer_entries;
 
-	static File parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static File parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace kuf_stg

@@ -3,48 +3,47 @@
 
 #include <cstdint>
 #include <cstring>
-#include <stdexcept>
 #include <string>
 #include <vector>
+#include <stdexcept>
 
 namespace sox_special_names {
 
 struct SoxHeader {
-	uint32_t marker;
-	uint32_t record_count;
+    uint32_t marker;
+    uint32_t record_count;
 
-	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct LpsBytes {
-	uint16_t length;
-	std::vector<uint8_t> value;
+    uint16_t length;
+    std::vector<uint8_t> value;
 
-	static LpsBytes parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static LpsBytes parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct SpecialNamesRecord {
-	LpsBytes key;
-	LpsBytes value;
+    LpsBytes key;
+    LpsBytes value;
 
-	static SpecialNamesRecord parse(const uint8_t *buf, size_t len,
-					size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static SpecialNamesRecord parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-	SoxHeader header;
-	std::vector<SpecialNamesRecord> records;
-	uint8_t footer[64];
+    SoxHeader header;
+    std::vector<SpecialNamesRecord> records;
+    uint8_t footer[64];
 
-	static File parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static File parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_special_names

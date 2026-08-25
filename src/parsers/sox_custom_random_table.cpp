@@ -3,340 +3,337 @@
 
 namespace sox_custom_random_table {
 
-SoxHeader SoxHeader::parse(const uint8_t *buf, size_t len, size_t &offset) {
-	SoxHeader result;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.marker, buf + offset, 4);
-	offset += 4;
-	if (!((result.marker == 100))) {
-		throw std::runtime_error("SOX marker must be 100");
-	}
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.record_count, buf + offset, 4);
-	offset += 4;
-	return result;
+SoxHeader SoxHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    SoxHeader result;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.marker, buf + offset, 4);
+    offset += 4;
+    if (!((result.marker == 100))) {
+        throw std::runtime_error("SOX marker must be 100");
+    }
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.record_count, buf + offset, 4);
+    offset += 4;
+    return result;
 }
 
 std::string SoxHeader::to_json() const {
-	std::string s = "{";
-	s += "\"marker\":";
-	s += std::to_string(marker);
-	s += ",";
-	s += "\"record_count\":";
-	s += std::to_string(record_count);
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"marker\":";
+    s += std::to_string(marker);
+    s += ",";
+    s += "\"record_count\":";
+    s += std::to_string(record_count);
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> SoxHeader::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		uint32_t _tmp = marker;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = record_count;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        uint32_t _tmp = marker;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = record_count;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    return _buf;
 }
 
-Lps Lps::parse(const uint8_t *buf, size_t len, size_t &offset) {
-	Lps result;
-	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.length, buf + offset, 2);
-	offset += 2;
-	if (offset + result.length > len)
-		throw std::runtime_error("buffer overflow");
-	result.value.assign(buf + offset, buf + offset + result.length);
-	offset += result.length;
-	return result;
+Lps Lps::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    Lps result;
+    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.length, buf + offset, 2);
+    offset += 2;
+    if (offset + result.length > len) throw std::runtime_error("buffer overflow");
+    result.value.assign(buf + offset, buf + offset + result.length);
+    offset += result.length;
+    return result;
 }
 
 std::string Lps::to_json() const {
-	std::string s = "{";
-	s += "\"length\":";
-	s += std::to_string(length);
-	s += ",";
-	s += "\"value\":";
-	s += "[";
-	for (size_t i = 0; i < value.size(); ++i) {
-		if (i > 0) s += ",";
-		s += std::to_string(value[i]);
-	}
-	s += "]";
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"length\":";
+    s += std::to_string(length);
+    s += ",";
+    s += "\"value\":";
+    s += "[";
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(value[i]);
+    }
+    s += "]";
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> Lps::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		uint16_t _tmp = static_cast<uint16_t>(value.size());
-		uint8_t _raw[2];
-		std::memcpy(_raw, &_tmp, 2);
-		_buf.insert(_buf.end(), _raw, _raw + 2);
-	}
-	_buf.insert(_buf.end(), value.begin(), value.end());
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        uint16_t _tmp = static_cast<uint16_t>(value.size());
+        uint8_t _raw[2];
+        std::memcpy(_raw, &_tmp, 2);
+        _buf.insert(_buf.end(), _raw, _raw + 2);
+    }
+    _buf.insert(_buf.end(), value.begin(), value.end());
+    return _buf;
 }
 
-LookupEntry LookupEntry::parse(const uint8_t *buf, size_t len, size_t &offset) {
-	LookupEntry result;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_0, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_1, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_2, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_3, buf + offset, 4);
-	offset += 4;
-	return result;
+LookupEntry LookupEntry::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    LookupEntry result;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_0, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_1, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_2, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_3, buf + offset, 4);
+    offset += 4;
+    return result;
 }
 
 std::string LookupEntry::to_json() const {
-	std::string s = "{";
-	s += "\"field_0\":";
-	s += std::to_string(field_0);
-	s += ",";
-	s += "\"field_1\":";
-	s += std::to_string(field_1);
-	s += ",";
-	s += "\"field_2\":";
-	s += std::to_string(field_2);
-	s += ",";
-	s += "\"field_3\":";
-	s += std::to_string(field_3);
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"field_0\":";
+    s += std::to_string(field_0);
+    s += ",";
+    s += "\"field_1\":";
+    s += std::to_string(field_1);
+    s += ",";
+    s += "\"field_2\":";
+    s += std::to_string(field_2);
+    s += ",";
+    s += "\"field_3\":";
+    s += std::to_string(field_3);
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> LookupEntry::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		uint32_t _tmp = field_0;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_1;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_2;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_3;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        uint32_t _tmp = field_0;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_1;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_2;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_3;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    return _buf;
 }
 
-RandomTableRecord RandomTableRecord::parse(const uint8_t *buf, size_t len,
-					   size_t &offset) {
-	RandomTableRecord result;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_0, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_1, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_2, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_3, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_4, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.field_5, buf + offset, 4);
-	offset += 4;
-	for (int i = 0; i < 24; ++i) {
-		uint32_t val;
-		if (offset + 4 > len)
-			throw std::runtime_error("buffer overflow");
-		std::memcpy(&val, buf + offset, 4);
-		offset += 4;
-		result.table_slots.push_back(val);
-	}
-	return result;
+RandomTableRecord RandomTableRecord::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    RandomTableRecord result;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_0, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_1, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_2, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_3, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_4, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.field_5, buf + offset, 4);
+    offset += 4;
+    for (int i = 0; i < 24; ++i) {
+        uint32_t val;
+        if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+        std::memcpy(&val, buf + offset, 4);
+        offset += 4;
+        result.table_slots.push_back(val);
+    }
+    return result;
 }
 
 std::string RandomTableRecord::to_json() const {
-	std::string s = "{";
-	s += "\"field_0\":";
-	s += std::to_string(field_0);
-	s += ",";
-	s += "\"field_1\":";
-	s += std::to_string(field_1);
-	s += ",";
-	s += "\"field_2\":";
-	s += std::to_string(field_2);
-	s += ",";
-	s += "\"field_3\":";
-	s += std::to_string(field_3);
-	s += ",";
-	s += "\"field_4\":";
-	s += std::to_string(field_4);
-	s += ",";
-	s += "\"field_5\":";
-	s += std::to_string(field_5);
-	s += ",";
-	s += "\"table_slots\":";
-	s += "[";
-	for (size_t i = 0; i < table_slots.size(); ++i) {
-		if (i > 0) s += ",";
-		s += std::to_string(table_slots[i]);
-	}
-	s += "]";
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"field_0\":";
+    s += std::to_string(field_0);
+    s += ",";
+    s += "\"field_1\":";
+    s += std::to_string(field_1);
+    s += ",";
+    s += "\"field_2\":";
+    s += std::to_string(field_2);
+    s += ",";
+    s += "\"field_3\":";
+    s += std::to_string(field_3);
+    s += ",";
+    s += "\"field_4\":";
+    s += std::to_string(field_4);
+    s += ",";
+    s += "\"field_5\":";
+    s += std::to_string(field_5);
+    s += ",";
+    s += "\"table_slots\":";
+    s += "[";
+    for (size_t i = 0; i < table_slots.size(); ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(table_slots[i]);
+    }
+    s += "]";
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> RandomTableRecord::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		uint32_t _tmp = field_0;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_1;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_2;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_3;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_4;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = field_5;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	for (const auto &_v : table_slots) {
-		{
-			uint32_t _tmp = _v;
-			uint8_t _raw[4];
-			std::memcpy(_raw, &_tmp, 4);
-			_buf.insert(_buf.end(), _raw, _raw + 4);
-		}
-	}
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        uint32_t _tmp = field_0;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_1;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_2;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_3;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_4;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = field_5;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    for (const auto& _v : table_slots) {
+        {
+            uint32_t _tmp = _v;
+            uint8_t _raw[4];
+            std::memcpy(_raw, &_tmp, 4);
+            _buf.insert(_buf.end(), _raw, _raw + 4);
+        }
+    }
+    return _buf;
 }
 
-File File::parse(const uint8_t *buf, size_t len, size_t &offset) {
-	File result;
-	result.header = SoxHeader::parse(buf, len, offset);
-	result.header_string_0 = Lps::parse(buf, len, offset);
-	result.header_string_1 = Lps::parse(buf, len, offset);
-	result.lookup_entries = LookupEntry::parse(buf, len, offset);
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.separator, buf + offset, 4);
-	offset += 4;
-	result.records = RandomTableRecord::parse(buf, len, offset);
-	if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(result.footer, buf + offset, 64);
-	offset += 64;
-	return result;
+File File::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    File result;
+    result.header = SoxHeader::parse(buf, len, offset);
+    result.header_string_0 = Lps::parse(buf, len, offset);
+    result.header_string_1 = Lps::parse(buf, len, offset);
+    result.lookup_entries = LookupEntry::parse(buf, len, offset);
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.separator, buf + offset, 4);
+    offset += 4;
+    result.records = RandomTableRecord::parse(buf, len, offset);
+    if (offset + 64 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(result.footer, buf + offset, 64);
+    offset += 64;
+    return result;
 }
 
 std::string File::to_json() const {
-	std::string s = "{";
-	s += "\"header\":";
-	s += header.to_json();
-	s += ",";
-	s += "\"header_string_0\":";
-	s += header_string_0.to_json();
-	s += ",";
-	s += "\"header_string_1\":";
-	s += header_string_1.to_json();
-	s += ",";
-	s += "\"lookup_entries\":";
-	s += lookup_entries.to_json();
-	s += ",";
-	s += "\"separator\":";
-	s += std::to_string(separator);
-	s += ",";
-	s += "\"records\":";
-	s += records.to_json();
-	s += ",";
-	s += "\"footer\":";
-	s += "[";
-	for (size_t i = 0; i < 64; ++i) {
-		if (i > 0) s += ",";
-		s += std::to_string(footer[i]);
-	}
-	s += "]";
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"header\":";
+    s += header.to_json();
+    s += ",";
+    s += "\"header_string_0\":";
+    s += header_string_0.to_json();
+    s += ",";
+    s += "\"header_string_1\":";
+    s += header_string_1.to_json();
+    s += ",";
+    s += "\"lookup_entries\":";
+    s += lookup_entries.to_json();
+    s += ",";
+    s += "\"separator\":";
+    s += std::to_string(separator);
+    s += ",";
+    s += "\"records\":";
+    s += records.to_json();
+    s += ",";
+    s += "\"footer\":";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(footer[i]);
+    }
+    s += "]";
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> File::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		auto _tmp = header.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	{
-		auto _tmp = header_string_0.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	{
-		auto _tmp = header_string_1.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	{
-		auto _tmp = lookup_entries.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	{
-		uint32_t _tmp = separator;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		auto _tmp = records.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	_buf.insert(_buf.end(), footer, footer + 64);
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        auto _tmp = header.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    {
+        auto _tmp = header_string_0.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    {
+        auto _tmp = header_string_1.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    {
+        auto _tmp = lookup_entries.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    {
+        uint32_t _tmp = separator;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        auto _tmp = records.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    _buf.insert(_buf.end(), footer, footer + 64);
+    return _buf;
 }
 
 } // namespace sox_custom_random_table

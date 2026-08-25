@@ -3,39 +3,38 @@
 
 #include <cstdint>
 #include <cstring>
-#include <stdexcept>
 #include <string>
 #include <vector>
+#include <stdexcept>
 
 namespace sox_ability_by_job {
 
 struct SoxHeader {
-	uint32_t marker;
-	uint32_t record_count;
+    uint32_t marker;
+    uint32_t record_count;
 
-	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct AbilityByJobRecord {
-	uint32_t job_id;
-	std::vector<int32_t> ability_slots;
+    uint32_t job_id;
+    std::vector<int32_t> ability_slots;
 
-	static AbilityByJobRecord parse(const uint8_t *buf, size_t len,
-					size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static AbilityByJobRecord parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-	SoxHeader header;
-	std::vector<AbilityByJobRecord> records;
-	uint8_t footer[64];
+    SoxHeader header;
+    std::vector<AbilityByJobRecord> records;
+    uint8_t footer[64];
 
-	static File parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static File parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_ability_by_job

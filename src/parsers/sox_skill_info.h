@@ -3,70 +3,69 @@
 
 #include <cstdint>
 #include <cstring>
-#include <stdexcept>
 #include <string>
 #include <vector>
+#include <stdexcept>
 
 namespace sox_skill_info {
 
 enum class SkillType : int32_t {
-	NONE = -1,
-	Melee = 0,
-	Range = 1,
-	Frontal = 2,
-	Riding = 3,
-	Teamwork = 4,
-	Scout = 5,
-	Gunpowder = 6,
-	Taming = 7,
-	Fire = 8,
-	Lightning = 9,
-	Ice = 10,
-	Holy = 11,
-	Earth = 12,
-	Curse = 13,
-	Elemental = 14,
+    NONE = -1,
+    Melee = 0,
+    Range = 1,
+    Frontal = 2,
+    Riding = 3,
+    Teamwork = 4,
+    Scout = 5,
+    Gunpowder = 6,
+    Taming = 7,
+    Fire = 8,
+    Lightning = 9,
+    Ice = 10,
+    Holy = 11,
+    Earth = 12,
+    Curse = 13,
+    Elemental = 14,
 };
 
 struct Lps {
-	uint16_t length;
-	std::vector<uint8_t> value;
+    uint16_t length;
+    std::vector<uint8_t> value;
 
-	static Lps parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static Lps parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct SoxHeader {
-	uint32_t marker;
-	uint32_t record_count;
+    uint32_t marker;
+    uint32_t record_count;
 
-	static SoxHeader parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static SoxHeader parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct SkillInfoRecord {
-	int32_t skill_id;
-	Lps loc_key;
-	Lps icon;
-	uint32_t skill_type;
-	uint32_t max_level;
+    int32_t skill_id;
+    Lps loc_key;
+    Lps icon;
+    uint32_t skill_type;
+    uint32_t max_level;
 
-	static SkillInfoRecord parse(const uint8_t *buf, size_t len,
-				     size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static SkillInfoRecord parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 struct File {
-	SoxHeader header;
-	std::vector<SkillInfoRecord> records;
-	uint8_t footer[64];
+    SoxHeader header;
+    std::vector<SkillInfoRecord> records;
+    uint8_t footer[64];
 
-	static File parse(const uint8_t *buf, size_t len, size_t &offset);
-	std::string to_json() const;
-	std::vector<uint8_t> to_bytes() const;
+    static File parse(const uint8_t* buf, size_t len, size_t& offset);
+    std::string to_json() const;
+    std::vector<uint8_t> to_bytes() const;
 };
 
 } // namespace sox_skill_info

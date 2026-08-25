@@ -3,193 +3,190 @@
 
 namespace sox_resist_info {
 
-Lps Lps::parse(const uint8_t *buf, size_t len, size_t &offset) {
-	Lps result;
-	if (offset + 2 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.length, buf + offset, 2);
-	offset += 2;
-	if (offset + result.length > len)
-		throw std::runtime_error("buffer overflow");
-	result.value.assign(buf + offset, buf + offset + result.length);
-	offset += result.length;
-	return result;
+Lps Lps::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    Lps result;
+    if (offset + 2 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.length, buf + offset, 2);
+    offset += 2;
+    if (offset + result.length > len) throw std::runtime_error("buffer overflow");
+    result.value.assign(buf + offset, buf + offset + result.length);
+    offset += result.length;
+    return result;
 }
 
 std::string Lps::to_json() const {
-	std::string s = "{";
-	s += "\"length\":";
-	s += std::to_string(length);
-	s += ",";
-	s += "\"value\":";
-	s += "[";
-	for (size_t i = 0; i < value.size(); ++i) {
-		if (i > 0) s += ",";
-		s += std::to_string(value[i]);
-	}
-	s += "]";
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"length\":";
+    s += std::to_string(length);
+    s += ",";
+    s += "\"value\":";
+    s += "[";
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(value[i]);
+    }
+    s += "]";
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> Lps::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		uint16_t _tmp = static_cast<uint16_t>(value.size());
-		uint8_t _raw[2];
-		std::memcpy(_raw, &_tmp, 2);
-		_buf.insert(_buf.end(), _raw, _raw + 2);
-	}
-	_buf.insert(_buf.end(), value.begin(), value.end());
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        uint16_t _tmp = static_cast<uint16_t>(value.size());
+        uint8_t _raw[2];
+        std::memcpy(_raw, &_tmp, 2);
+        _buf.insert(_buf.end(), _raw, _raw + 2);
+    }
+    _buf.insert(_buf.end(), value.begin(), value.end());
+    return _buf;
 }
 
-SoxHeader SoxHeader::parse(const uint8_t *buf, size_t len, size_t &offset) {
-	SoxHeader result;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.marker, buf + offset, 4);
-	offset += 4;
-	if (!((result.marker == 100))) {
-		throw std::runtime_error("SOX marker must be 100");
-	}
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.record_count, buf + offset, 4);
-	offset += 4;
-	return result;
+SoxHeader SoxHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    SoxHeader result;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.marker, buf + offset, 4);
+    offset += 4;
+    if (!((result.marker == 100))) {
+        throw std::runtime_error("SOX marker must be 100");
+    }
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.record_count, buf + offset, 4);
+    offset += 4;
+    return result;
 }
 
 std::string SoxHeader::to_json() const {
-	std::string s = "{";
-	s += "\"marker\":";
-	s += std::to_string(marker);
-	s += ",";
-	s += "\"record_count\":";
-	s += std::to_string(record_count);
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"marker\":";
+    s += std::to_string(marker);
+    s += ",";
+    s += "\"record_count\":";
+    s += std::to_string(record_count);
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> SoxHeader::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		uint32_t _tmp = marker;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = record_count;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        uint32_t _tmp = marker;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = record_count;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    return _buf;
 }
 
-ResistInfoRecord ResistInfoRecord::parse(const uint8_t *buf, size_t len,
-					 size_t &offset) {
-	ResistInfoRecord result;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.resist_id, buf + offset, 4);
-	offset += 4;
-	if (offset + 4 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(&result.unknown, buf + offset, 4);
-	offset += 4;
-	result.loc_key = Lps::parse(buf, len, offset);
-	result.icon = Lps::parse(buf, len, offset);
-	return result;
+ResistInfoRecord ResistInfoRecord::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    ResistInfoRecord result;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.resist_id, buf + offset, 4);
+    offset += 4;
+    if (offset + 4 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(&result.unknown, buf + offset, 4);
+    offset += 4;
+    result.loc_key = Lps::parse(buf, len, offset);
+    result.icon = Lps::parse(buf, len, offset);
+    return result;
 }
 
 std::string ResistInfoRecord::to_json() const {
-	std::string s = "{";
-	s += "\"resist_id\":";
-	s += std::to_string(resist_id);
-	s += ",";
-	s += "\"unknown\":";
-	s += std::to_string(unknown);
-	s += ",";
-	s += "\"loc_key\":";
-	s += loc_key.to_json();
-	s += ",";
-	s += "\"icon\":";
-	s += icon.to_json();
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"resist_id\":";
+    s += std::to_string(resist_id);
+    s += ",";
+    s += "\"unknown\":";
+    s += std::to_string(unknown);
+    s += ",";
+    s += "\"loc_key\":";
+    s += loc_key.to_json();
+    s += ",";
+    s += "\"icon\":";
+    s += icon.to_json();
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> ResistInfoRecord::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		uint32_t _tmp = resist_id;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		uint32_t _tmp = unknown;
-		uint8_t _raw[4];
-		std::memcpy(_raw, &_tmp, 4);
-		_buf.insert(_buf.end(), _raw, _raw + 4);
-	}
-	{
-		auto _tmp = loc_key.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	{
-		auto _tmp = icon.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        uint32_t _tmp = resist_id;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        uint32_t _tmp = unknown;
+        uint8_t _raw[4];
+        std::memcpy(_raw, &_tmp, 4);
+        _buf.insert(_buf.end(), _raw, _raw + 4);
+    }
+    {
+        auto _tmp = loc_key.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    {
+        auto _tmp = icon.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    return _buf;
 }
 
-File File::parse(const uint8_t *buf, size_t len, size_t &offset) {
-	File result;
-	result.header = SoxHeader::parse(buf, len, offset);
-	for (size_t i = 0; i < result.header.record_count; ++i) {
-		result.records.push_back(
-		    ResistInfoRecord::parse(buf, len, offset));
-	}
-	if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-	std::memcpy(result.footer, buf + offset, 64);
-	offset += 64;
-	return result;
+File File::parse(const uint8_t* buf, size_t len, size_t& offset) {
+    File result;
+    result.header = SoxHeader::parse(buf, len, offset);
+    for (size_t i = 0; i < result.header.record_count; ++i) {
+        result.records.push_back(ResistInfoRecord::parse(buf, len, offset));
+    }
+    if (offset + 64 > len) throw std::runtime_error("buffer overflow");
+    std::memcpy(result.footer, buf + offset, 64);
+    offset += 64;
+    return result;
 }
 
 std::string File::to_json() const {
-	std::string s = "{";
-	s += "\"header\":";
-	s += header.to_json();
-	s += ",";
-	s += "\"records\":";
-	s += "[";
-	for (size_t i = 0; i < records.size(); ++i) {
-		if (i > 0) s += ",";
-		s += records[i].to_json();
-	}
-	s += "]";
-	s += ",";
-	s += "\"footer\":";
-	s += "[";
-	for (size_t i = 0; i < 64; ++i) {
-		if (i > 0) s += ",";
-		s += std::to_string(footer[i]);
-	}
-	s += "]";
-	s += "}";
-	return s;
+    std::string s = "{";
+    s += "\"header\":";
+    s += header.to_json();
+    s += ",";
+    s += "\"records\":";
+    s += "[";
+    for (size_t i = 0; i < records.size(); ++i) {
+        if (i > 0) s += ",";
+        s += records[i].to_json();
+    }
+    s += "]";
+    s += ",";
+    s += "\"footer\":";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(footer[i]);
+    }
+    s += "]";
+    s += "}";
+    return s;
 }
 
 std::vector<uint8_t> File::to_bytes() const {
-	std::vector<uint8_t> _buf;
-	{
-		auto _tmp = header.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	for (const auto &_item : records) {
-		auto _tmp = _item.to_bytes();
-		_buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-	}
-	_buf.insert(_buf.end(), footer, footer + 64);
-	return _buf;
+    std::vector<uint8_t> _buf;
+    {
+        auto _tmp = header.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    for (const auto& _item : records) {
+        auto _tmp = _item.to_bytes();
+        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
+    }
+    _buf.insert(_buf.end(), footer, footer + 64);
+    return _buf;
 }
 
 } // namespace sox_resist_info
