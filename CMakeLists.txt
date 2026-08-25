@@ -46,7 +46,8 @@ FetchContent_MakeAvailable(glfw)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG docking
+    # Keep the legacy coexistence build compatible with imgui-node-editor.
+    GIT_TAG aeaaee8090a7f9751ee9684de979a0ea673c935f
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -113,7 +114,7 @@ target_link_libraries(imgui PUBLIC glfw)
 FetchContent_Declare(
     imgui_node_editor
     GIT_REPOSITORY https://github.com/thedmd/imgui-node-editor.git
-    GIT_TAG develop
+    GIT_TAG b302971455b3719ec9b5fb94b2f92d27c62b9ff0
     PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/patch_node_editor.cmake
 )
 FetchContent_MakeAvailable(imgui_node_editor)
