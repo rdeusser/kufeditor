@@ -26,6 +26,7 @@ pub(crate) enum CatalogProjection {
     NotConfigured,
     Loading,
     Ready,
+    ReadyWithIssues { issue_count: usize },
     Failed(String),
 }
 
@@ -88,7 +89,10 @@ where
         catalog: match catalog {
             CatalogStatus::NotConfigured => CatalogProjection::NotConfigured,
             CatalogStatus::Loading { .. } => CatalogProjection::Loading,
-            CatalogStatus::Ready { .. } => CatalogProjection::Ready,
+            CatalogStatus::Ready { issue_count: 0, .. } => CatalogProjection::Ready,
+            CatalogStatus::Ready { issue_count, .. } => CatalogProjection::ReadyWithIssues {
+                issue_count: *issue_count,
+            },
             CatalogStatus::Failed { error, .. } => CatalogProjection::Failed(error.to_string()),
         },
         discovery: discovery_projection(discovery, discovery_available),
@@ -218,6 +222,10 @@ pub(crate) fn render(
 }
 
 fn settings_layout(surfaces: [Div; 3]) -> Stateful<Div> {
+    settings_scroll_root().child(settings_bounded_content().children(surfaces))
+}
+
+fn settings_scroll_root() -> Stateful<Div> {
     div()
         .id("settings-content")
         .size_full()
@@ -225,15 +233,15 @@ fn settings_layout(surfaces: [Div; 3]) -> Stateful<Div> {
         .p(px(28.0))
         .flex()
         .justify_center()
-        .child(
-            div()
-                .w_full()
-                .max_w(px(860.0))
-                .flex()
-                .flex_col()
-                .gap(px(18.0))
-                .children(surfaces),
-        )
+}
+
+fn settings_bounded_content() -> Div {
+    div()
+        .w_full()
+        .max_w(px(860.0))
+        .flex()
+        .flex_col()
+        .gap(px(18.0))
 }
 
 fn installations_surface(
@@ -364,6 +372,10 @@ fn catalog_text(catalog: &CatalogProjection) -> String {
         CatalogProjection::NotConfigured => "Not configured".to_owned(),
         CatalogProjection::Loading => "Loading game catalogs".to_owned(),
         CatalogProjection::Ready => "Ready".to_owned(),
+        CatalogProjection::ReadyWithIssues { issue_count } => {
+            let issue = if *issue_count == 1 { "issue" } else { "issues" };
+            format!("Ready with {issue_count} {issue}")
+        }
         CatalogProjection::Failed(error) => format!("Failed: {error}"),
     }
 }
@@ -386,11 +398,13 @@ fn discovery_text(discovery: &DiscoveryProjection) -> String {
 mod tests {
     use std::path::PathBuf;
 
+    use gpui::{Overflow, Styled, px};
     use kufeditor_game::{DiscoveryError, Game, GamePaths, scan_steam_common_directories};
     use kufeditor_workspace::{RECENT_FILE_LIMITS, RecentFiles};
 
     use super::{
-        CatalogProjection, DiscoveryProjection, SettingsLayoutProjection, project_settings,
+        CatalogProjection, DiscoveryProjection, SettingsLayoutProjection, catalog_text,
+        project_settings, settings_bounded_content, settings_scroll_root,
     };
     use crate::{
         catalog_status::{CatalogKey, CatalogStatus},
@@ -449,6 +463,7 @@ mod tests {
                 CatalogStatus::Ready {
                     key: key.clone(),
                     value: (),
+                    issue_count: 0,
                 },
                 CatalogProjection::Ready,
             ),
@@ -467,6 +482,27 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn settings_view_catalog_ready_with_issues_keeps_and_renders_the_exact_count() {
+        let projection = project_settings(
+            &GamePaths::default(),
+            &CatalogStatus::<(), &'static str>::Ready {
+                key: catalog_key(),
+                value: (),
+                issue_count: 3,
+            },
+            &DiscoveryStatus::Idle,
+            &RecentFiles::default(),
+            true,
+        );
+
+        assert_eq!(
+            projection.catalog,
+            CatalogProjection::ReadyWithIssues { issue_count: 3 }
+        );
+        assert_eq!(catalog_text(&projection.catalog), "Ready with 3 issues");
     }
 
     #[test]
@@ -595,5 +631,11 @@ mod tests {
             projection.layout,
             SettingsLayoutProjection::BoundedVerticalScroll
         );
+
+        let mut root = settings_scroll_root();
+        assert_eq!(root.style().overflow.y, Some(Overflow::Scroll));
+
+        let mut content = settings_bounded_content();
+        assert_eq!(content.style().max_size.width, Some(px(860.0).into()));
     }
 }

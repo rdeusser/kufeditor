@@ -21,9 +21,18 @@ pub(crate) struct CatalogKey {
 )]
 pub(crate) enum CatalogStatus<T, E> {
     NotConfigured,
-    Loading { key: CatalogKey },
-    Ready { key: CatalogKey, value: T },
-    Failed { key: CatalogKey, error: E },
+    Loading {
+        key: CatalogKey,
+    },
+    Ready {
+        key: CatalogKey,
+        value: T,
+        issue_count: usize,
+    },
+    Failed {
+        key: CatalogKey,
+        error: E,
+    },
 }
 
 pub(crate) struct CatalogSession<T, E> {
@@ -97,11 +106,15 @@ impl<T, E> CatalogSession<T, E> {
         self.status = CatalogStatus::NotConfigured;
     }
 
-    pub(crate) fn finish_ready(&mut self, key: CatalogKey, value: T) -> bool {
+    pub(crate) fn finish_ready(&mut self, key: CatalogKey, value: T, issue_count: usize) -> bool {
         if !matches!(&self.status, CatalogStatus::Loading { key: current } if current == &key) {
             return false;
         }
-        self.status = CatalogStatus::Ready { key, value };
+        self.status = CatalogStatus::Ready {
+            key,
+            value,
+            issue_count,
+        };
         true
     }
 
@@ -160,12 +173,35 @@ mod tests {
         session.begin(first.clone());
         session.begin(second.clone());
 
-        assert!(!session.finish_ready(first, "stale"));
-        assert!(session.finish_ready(second.clone(), "current"));
+        assert!(!session.finish_ready(first, "stale", 0));
+        assert!(session.finish_ready(second.clone(), "current", 0));
         assert_eq!(session.ready_value(), Some(&"current"));
         assert!(matches!(
             session.status(),
-            CatalogStatus::Ready { key, value: "current" } if key == &second
+            CatalogStatus::Ready {
+                key,
+                value: "current",
+                issue_count: 0,
+            } if key == &second
+        ));
+    }
+
+    #[test]
+    fn ready_status_retains_catalog_issue_count_without_hiding_the_value() {
+        let mut shell = ShellState::default();
+        let key = CatalogKey::new(shell.begin_catalog(), Game::Crusaders, "/game");
+        let mut session = CatalogSession::<&'static str, &'static str>::default();
+        session.begin(key.clone());
+
+        assert!(session.finish_ready(key.clone(), "dictionary", 3));
+        assert_eq!(session.ready_value(), Some(&"dictionary"));
+        assert!(matches!(
+            session.status(),
+            CatalogStatus::Ready {
+                key: current,
+                value: "dictionary",
+                issue_count: 3,
+            } if current == &key
         ));
     }
 
@@ -177,17 +213,17 @@ mod tests {
         let mut session = CatalogSession::<&'static str, &'static str>::default();
 
         session.begin(first.clone());
-        assert!(session.finish_ready(first, "ready"));
+        assert!(session.finish_ready(first, "ready", 0));
         session.begin(second.clone());
         assert_eq!(session.ready_value(), None);
 
-        assert!(session.finish_ready(second.clone(), "ready again"));
+        assert!(session.finish_ready(second.clone(), "ready again", 0));
         session.not_configured();
         assert_eq!(session.ready_value(), None);
         assert!(matches!(session.status(), CatalogStatus::NotConfigured));
 
         session.begin(second.clone());
-        assert!(session.finish_ready(second.clone(), "one last value"));
+        assert!(session.finish_ready(second.clone(), "one last value", 0));
         session.begin(second.clone());
         assert!(session.finish_failed(second.clone(), "load failed"));
         assert_eq!(session.ready_value(), None);
@@ -208,8 +244,8 @@ mod tests {
 
         session.begin(current.clone());
 
-        assert!(!session.finish_ready(wrong_game, "wrong game"));
-        assert!(!session.finish_ready(wrong_root, "wrong root"));
+        assert!(!session.finish_ready(wrong_game, "wrong game", 1));
+        assert!(!session.finish_ready(wrong_root, "wrong root", 1));
         assert!(matches!(
             session.status(),
             CatalogStatus::Loading { key } if key == &current

@@ -57,7 +57,7 @@ impl AppFrame {
         match result {
             Ok(CatalogLoad { dictionary, issues }) => {
                 let issue_count = issues.len();
-                if !self.catalog.finish_ready(key, dictionary) {
+                if !self.catalog.finish_ready(key, dictionary, issue_count) {
                     return;
                 }
                 let notice = (issue_count > 0).then(|| {
@@ -485,7 +485,11 @@ mod tests {
             .update(cx, |frame, _, _| {
                 assert!(matches!(
                     frame.catalog.status(),
-                    CatalogStatus::Ready { key, value }
+                    CatalogStatus::Ready {
+                        key,
+                        value,
+                        issue_count: 0,
+                    }
                         if key.game() == Game::Crusaders
                             && key.root() == root
                             && value.troop_name(2) == Some("Footman")
@@ -523,6 +527,10 @@ mod tests {
                         .and_then(|dictionary| dictionary.troop_name(2)),
                     Some("Footman")
                 );
+                assert!(matches!(
+                    frame.catalog.status(),
+                    CatalogStatus::Ready { issue_count: 1, .. }
+                ));
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Warning);
                 assert_eq!(notice.summary(), "Loaded game catalogs with 1 issue");
