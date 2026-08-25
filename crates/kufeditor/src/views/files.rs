@@ -2,6 +2,8 @@ use gpui::{AnyElement, Div, div, prelude::*, px};
 
 use crate::{components, theme::Theme};
 
+const EMPTY_COPY: &str = "Open a .sox data file or a Crusaders .sav file to begin editing.";
+
 pub fn render(theme: &Theme, tabs: Vec<AnyElement>, editor: Option<Div>) -> Div {
     let body = editor.unwrap_or_else(|| {
         div().size_full().p(px(28.0)).child(
@@ -17,11 +19,7 @@ pub fn render(theme: &Theme, tabs: Vec<AnyElement>, editor: Option<Div>) -> Div 
                         .text_color(theme.text)
                         .child("No file is open"),
                 )
-                .child(
-                    div()
-                        .text_color(theme.text_dim)
-                        .child("Open a TroopInfo.sox or SkillInfo.sox file to begin editing."),
-                ),
+                .child(div().text_color(theme.text_dim).child(EMPTY_COPY)),
         )
     });
 
@@ -40,4 +38,15 @@ pub fn render(theme: &Theme, tabs: Vec<AnyElement>, editor: Option<Div>) -> Div 
                 .children(tabs),
         )
         .child(div().flex_1().min_h_0().child(body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EMPTY_COPY;
+
+    #[test]
+    fn save_view_empty_copy_names_both_supported_file_extensions() {
+        assert!(EMPTY_COPY.contains(".sox"));
+        assert!(EMPTY_COPY.contains(".sav"));
+    }
 }

@@ -23,7 +23,10 @@ use crate::{
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     save_catalog_status::SaveCatalogSession,
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
-    state::{Area, ClosePolicy, RecordSelections, RequestID, ShellState, navigation_projection},
+    state::{
+        Area, ClosePolicy, RecordSelections, RequestID, SavePresentationStates, ShellState,
+        navigation_projection,
+    },
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
     views,
@@ -33,6 +36,7 @@ mod catalog;
 mod discovery;
 #[path = "discovery_status.rs"]
 pub(crate) mod discovery_status;
+mod save;
 mod save_catalog;
 mod settings;
 use self::discovery::{BrowsePromptLauncher, PlatformBrowsePromptLauncher};
@@ -423,6 +427,7 @@ pub struct AppFrame {
     focus: FocusHandle,
     active_document: Option<DocumentID>,
     selections: RecordSelections,
+    save_presentations: SavePresentationStates,
     number_edit: Option<ActiveNumberEdit>,
     text_edit: Option<ActiveTextEdit>,
     game_paths: kufeditor_game::GamePaths,
@@ -477,6 +482,7 @@ impl AppFrame {
             focus: cx.focus_handle(),
             active_document: None,
             selections: RecordSelections::default(),
+            save_presentations: SavePresentationStates::default(),
             number_edit: None,
             text_edit: None,
             game_paths,
@@ -517,7 +523,11 @@ impl AppFrame {
     }
 
     fn activate_document(&mut self, document: DocumentID, cx: &mut Context<Self>) {
-        self.cancel_property_edit();
+        if self.workspace.document_kind(document).ok() == Some(DocumentKind::CrusadersSave) {
+            self.activate_save_presentation(document, cx);
+        } else {
+            self.cancel_property_edit();
+        }
         self.active_document = Some(document);
         self.reconcile_save_catalog(cx);
     }
@@ -944,7 +954,7 @@ impl AppFrame {
         self.notices.begin(
             NoticeSource::Open,
             request.get(),
-            Notice::info("Choose one or more .sox files"),
+            Notice::info("Choose one or more .sox or .sav files"),
         );
         cx.notify();
         request
@@ -1602,11 +1612,7 @@ impl AppFrame {
             Ok(EditorRoute::Troop) => self.troop_editor(document_id, cx),
             Ok(EditorRoute::Skill) => self.skill_editor(document_id, cx),
             Ok(EditorRoute::TextSOX) => self.text_sox_editor(document_id, cx),
-            Ok(EditorRoute::Save) => div()
-                .size_full()
-                .p(px(28.0))
-                .text_color(self.theme.text_dim)
-                .child("Crusaders save editor is not available yet"),
+            Ok(EditorRoute::Save) => self.save_editor(document_id, cx),
             Err(error) => div()
                 .size_full()
                 .p(px(28.0))
@@ -2334,8 +2340,8 @@ mod tests {
     use kufeditor_game::Game;
     use kufeditor_workspace::{
         DiagnosticLocation, Document, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
-        SaveNumberTarget, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument,
-        TroopField, Workspace, WorkspaceError, load_path,
+        SaveDocument, SaveNumberTarget, SkillDocument, SkillTextField, TextSOXDocument,
+        TroopDocument, TroopField, Workspace, WorkspaceError, load_path,
     };
 
     use super::{
@@ -2381,6 +2387,29 @@ mod tests {
         fs::write(path, b"not a valid SOX document").unwrap();
     }
 
+    fn save_fixture(unit_count: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0x6e_u32.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.resize(bytes.len() + 0x438 - size_of::<u32>(), 0);
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.resize(bytes.len() + 0x154, 0);
+        bytes.extend_from_slice(&u32::try_from(unit_count).unwrap().to_le_bytes());
+        bytes.resize(bytes.len() + unit_count * 483, 0);
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.resize(bytes.len() + 84, 0);
+        bytes.resize(0x8000, 0);
+        let length = u32::try_from(bytes.len()).unwrap();
+        bytes
+            .get_mut(..size_of::<u32>())
+            .unwrap()
+            .copy_from_slice(&length.to_le_bytes());
+        bytes
+    }
+
     fn begin_open_paths(
         frame: &mut AppFrame,
         paths: Vec<PathBuf>,
@@ -2422,7 +2451,7 @@ mod tests {
             self.request_ready.set(frame.shell.accepts_open(request));
             self.notice_ready.set(
                 frame.notices.current().map(Notice::summary)
-                    == Some("Choose one or more .sox files"),
+                    == Some("Choose one or more .sox or .sav files"),
             );
             Task::ready(OpenPromptResult::Canceled)
         }
@@ -2674,6 +2703,84 @@ mod tests {
     }
 
     #[gpui::test]
+    fn save_view_open_prompt_names_sox_and_save_files(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.begin_open_prompt(cx);
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.summary(), "Choose one or more .sox or .sav files");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn save_view_route_builds_the_save_editor_and_document_state(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                let save = SaveDocument::parse(save_fixture(0)).unwrap();
+                let document = frame
+                    .workspace
+                    .open_loaded(PathBuf::from("campaign.sav"), Document::Save(save));
+                frame.activate_document(document, cx);
+
+                assert_eq!(editor_route(DocumentKind::CrusadersSave), EditorRoute::Save);
+                drop(frame.save_editor(document, cx));
+                assert!(frame.save_presentations.get(document).is_some());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn save_view_activation_cancels_a_non_save_draft_when_returning_to_cached_state(
+        cx: &mut TestAppContext,
+    ) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                let save = SaveDocument::parse(save_fixture(1)).unwrap();
+                let save = frame
+                    .workspace
+                    .open_loaded(PathBuf::from("campaign.sav"), Document::Save(save));
+                frame.activate_document(save, cx);
+
+                let troop = open_troop(frame, "TroopInfo.sox", 100);
+                frame.activate_document(troop, cx);
+                frame.begin_number_edit(ActiveNumberEdit::troop_field(
+                    troop,
+                    0,
+                    TroopField::MoveSpeed,
+                    100,
+                ));
+                assert!(frame.number_edit.is_some());
+
+                frame.activate_document(save, cx);
+
+                assert!(frame.number_edit.is_none());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn open_batch_keeps_successes_and_reports_each_load_failure(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("A.sox");
@@ -2854,7 +2961,7 @@ mod tests {
                 frame.notices.begin(
                     NoticeSource::Open,
                     picker_request.get(),
-                    Notice::info("Choose one or more .sox files"),
+                    Notice::info("Choose one or more .sox or .sav files"),
                 );
                 frame.open_recent_path(recent_path.clone(), cx);
 

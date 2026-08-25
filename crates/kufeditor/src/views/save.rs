@@ -5,14 +5,21 @@
 
 use std::ops::Range;
 
-use gpui::{App, ElementId, IntoElement, UniformList, Window, uniform_list};
+use gpui::{
+    AnyElement, App, Div, ElementId, IntoElement, SharedString, Stateful, UniformList, Window, div,
+    prelude::*, px, uniform_list,
+};
 use kufeditor_game::NameDictionary;
 use kufeditor_workspace::{
     DocumentID, SaveEditor, SaveEquipmentField, SaveEquipmentSlot, SaveMainField, SaveNumberTarget,
     SaveRosterField, SaveTextField, SaveUnitField, Workspace, WorkspaceError,
 };
 
-use crate::state::{SaveSection, SaveUnitVisibility};
+use crate::{
+    components,
+    state::{SavePresentationState, SaveSection, SaveUnitVisibility},
+    theme::Theme,
+};
 
 pub type SaveProjectionResult<T> = Result<T, Box<WorkspaceError>>;
 
@@ -139,9 +146,32 @@ pub struct SaveMissionProjection {
     pub second_array_count: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SaveSectionModel {
+    Summary(SaveSummaryProjection),
+    Units {
+        rows: SaveRows,
+        inspected: Option<SaveUnitProjection>,
+    },
+    Equipment {
+        slots: [SaveEquipmentSlot; 6],
+        inspected_unit: Option<SaveUnitRowProjection>,
+        selected: Option<SaveEquipmentProjection>,
+    },
+    Roster {
+        player_leaders: SaveRows,
+        world_map_rows: SaveRows,
+    },
+    Missions {
+        mission: SaveMissionProjection,
+        second_array_rows: SaveRows,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SaveRowKind {
     Units,
+    PlayerLeaders,
     Roster,
     SecondArray,
 }
@@ -150,14 +180,14 @@ impl SaveRowKind {
     pub const fn section(self) -> SaveSection {
         match self {
             Self::Units => SaveSection::Units,
-            Self::Roster => SaveSection::Roster,
+            Self::PlayerLeaders | Self::Roster => SaveSection::Roster,
             Self::SecondArray => SaveSection::Missions,
         }
     }
 
     const fn projection_field(self) -> SaveProjectionField {
         match self {
-            Self::Units | Self::Roster => SaveProjectionField::Row,
+            Self::Units | Self::PlayerLeaders | Self::Roster => SaveProjectionField::Row,
             Self::SecondArray => SaveProjectionField::SecondArray,
         }
     }
@@ -236,6 +266,31 @@ impl SaveRows {
         })
     }
 
+    pub fn player_leaders(
+        workspace: &Workspace,
+        document: DocumentID,
+    ) -> SaveProjectionResult<Self> {
+        let unit_count = workspace.save_unit_count(document)?;
+        let mut indices = Vec::new();
+        for unit in 0..unit_count {
+            if workspace.save_number(
+                document,
+                SaveNumberTarget::Unit {
+                    unit,
+                    field: SaveUnitField::UCD,
+                },
+            )? == 0
+            {
+                indices.push(unit);
+            }
+        }
+        Ok(Self {
+            document,
+            kind: SaveRowKind::PlayerLeaders,
+            indices: SaveRowIndices::Filtered(indices),
+        })
+    }
+
     pub fn second_array(workspace: &Workspace, document: DocumentID) -> SaveProjectionResult<Self> {
         Ok(Self {
             document,
@@ -308,30 +363,43 @@ impl SaveRows {
         observe(self.kind, requested.clone());
         let mut projections = Vec::with_capacity(requested.len());
         for location in self.locations(requested) {
-            let projection = match location.kind {
-                SaveRowKind::Units => SaveRowProjection::Unit(unit_row_projection(
-                    workspace,
-                    self.document,
-                    location.source_index,
-                    dictionary,
-                )?),
-                SaveRowKind::Roster => SaveRowProjection::Roster(roster_row_projection(
-                    workspace,
-                    self.document,
-                    location.source_index,
-                )?),
-                SaveRowKind::SecondArray => SaveRowProjection::SecondArray(number_projection(
-                    workspace,
-                    self.document,
-                    SaveNumberTarget::SecondArray {
-                        record: location.source_index,
-                    },
-                )?),
-            };
-            projections.push(projection);
+            projections.push(row_projection(
+                workspace,
+                self.document,
+                dictionary,
+                location,
+            )?);
         }
         Ok(projections)
     }
+}
+
+pub fn row_projection(
+    workspace: &Workspace,
+    document: DocumentID,
+    dictionary: Option<&NameDictionary>,
+    location: SaveRowLocation,
+) -> SaveProjectionResult<SaveRowProjection> {
+    Ok(match location.kind {
+        SaveRowKind::Units | SaveRowKind::PlayerLeaders => {
+            let mut row =
+                unit_row_projection(workspace, document, location.source_index, dictionary)?;
+            row.id = location.id;
+            SaveRowProjection::Unit(row)
+        }
+        SaveRowKind::Roster => SaveRowProjection::Roster(roster_row_projection(
+            workspace,
+            document,
+            location.source_index,
+        )?),
+        SaveRowKind::SecondArray => SaveRowProjection::SecondArray(number_projection(
+            workspace,
+            document,
+            SaveNumberTarget::SecondArray {
+                record: location.source_index,
+            },
+        )?),
+    })
 }
 
 pub fn uniform_save_rows<R>(
@@ -522,6 +590,64 @@ pub fn mission_projection(
         completions,
         second_array_count: workspace.save_second_array_count(document)?,
     })
+}
+
+pub fn save_section_model(
+    workspace: &Workspace,
+    document: DocumentID,
+    state: &SavePresentationState,
+    dictionary: Option<&NameDictionary>,
+) -> SaveProjectionResult<SaveSectionModel> {
+    match state.section() {
+        SaveSection::Summary => Ok(SaveSectionModel::Summary(summary_projection(
+            workspace, document,
+        )?)),
+        SaveSection::Units => {
+            let rows = SaveRows::units(workspace, document, dictionary, state.unit_filter())?;
+            let inspected = if rows.is_empty() {
+                None
+            } else {
+                Some(unit_projection(
+                    workspace,
+                    document,
+                    state.inspected_unit(),
+                    dictionary,
+                )?)
+            };
+            Ok(SaveSectionModel::Units { rows, inspected })
+        }
+        SaveSection::Equipment => {
+            let unit_count = workspace.save_unit_count(document)?;
+            let (inspected_unit, selected) = if unit_count == 0 {
+                (None, None)
+            } else {
+                let unit = state.inspected_unit().min(unit_count - 1);
+                (
+                    Some(unit_row_projection(workspace, document, unit, dictionary)?),
+                    Some(equipment_projection(
+                        workspace,
+                        document,
+                        unit,
+                        state.equipment_slot(),
+                        dictionary,
+                    )?),
+                )
+            };
+            Ok(SaveSectionModel::Equipment {
+                slots: SaveEquipmentSlot::ALL,
+                inspected_unit,
+                selected,
+            })
+        }
+        SaveSection::Roster => Ok(SaveSectionModel::Roster {
+            player_leaders: SaveRows::player_leaders(workspace, document)?,
+            world_map_rows: SaveRows::roster(workspace, document)?,
+        }),
+        SaveSection::Missions => Ok(SaveSectionModel::Missions {
+            mission: mission_projection(workspace, document)?,
+            second_array_rows: SaveRows::second_array(workspace, document)?,
+        }),
+    }
 }
 
 fn unit_row_projection(
@@ -772,6 +898,573 @@ fn bounded_range(requested: Range<usize>, len: usize) -> Range<usize> {
     start..end
 }
 
+pub fn render_editor(
+    theme: &Theme,
+    rail: Vec<AnyElement>,
+    catalog_status: Option<AnyElement>,
+    content: AnyElement,
+) -> Div {
+    div().size_full().flex().min_h_0().child(
+        div()
+            .id("save-editor")
+            .debug_selector(|| "save-editor".to_owned())
+            .size_full()
+            .flex()
+            .min_h_0()
+            .child(
+                div()
+                    .id("save-section-rail")
+                    .debug_selector(|| "save-section-rail".to_owned())
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .w(px(184.0))
+                    .min_h_0()
+                    .p(px(10.0))
+                    .gap(px(7.0))
+                    .bg(theme.surface)
+                    .border_r_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .px(px(8.0))
+                            .pb(px(5.0))
+                            .text_size(px(11.0))
+                            .text_color(theme.text_dim)
+                            .child("SAVE FILE"),
+                    )
+                    .children(rail)
+                    .child(div().flex_1())
+                    .child(read_only_badge(theme)),
+            )
+            .child(
+                div()
+                    .id("save-editor-content")
+                    .debug_selector(|| "save-editor-content".to_owned())
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .children(catalog_status)
+                    .child(div().flex_1().min_h_0().overflow_hidden().child(content)),
+            ),
+    )
+}
+
+pub fn section_rail_item(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: &'static str,
+    selected: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    let accent = theme.accent;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .h(px(38.0))
+        .px(px(10.0))
+        .rounded_md()
+        .border_1()
+        .border_color(if selected {
+            theme.accent
+        } else {
+            theme.surface
+        })
+        .bg(if selected {
+            theme.accent_dim
+        } else {
+            theme.surface
+        })
+        .text_color(if selected { theme.text } else { theme.text_dim })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover).text_color(accent))
+        .active(move |style| style.border_color(accent))
+        .child(
+            div()
+                .w(px(12.0))
+                .text_color(if selected {
+                    theme.accent
+                } else {
+                    theme.text_dim
+                })
+                .child(if selected { "◆" } else { "·" }),
+        )
+        .child(label)
+        .children(selected.then(|| {
+            div()
+                .ml_auto()
+                .text_size(px(9.0))
+                .text_color(theme.accent)
+                .child("ACTIVE")
+        }))
+}
+
+pub fn catalog_status(
+    theme: &Theme,
+    title: impl Into<String>,
+    detail: impl Into<Option<String>>,
+) -> Stateful<Div> {
+    div()
+        .id("save-catalog-status")
+        .debug_selector(|| "save-catalog-status".to_owned())
+        .flex_none()
+        .px(px(18.0))
+        .py(px(9.0))
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .bg(theme.accent_dim)
+        .border_b_1()
+        .border_color(theme.accent)
+        .child(
+            div()
+                .text_size(px(10.0))
+                .text_color(theme.accent)
+                .child("NAMES"),
+        )
+        .child(div().text_color(theme.text).child(title.into()))
+        .children(detail.into().map(|detail| {
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(12.0))
+                .text_color(theme.text_dim)
+                .child(detail)
+        }))
+}
+
+pub fn section_header(theme: &Theme, title: &'static str, subtitle: String) -> Div {
+    div()
+        .flex_none()
+        .px(px(20.0))
+        .py(px(13.0))
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .bg(theme.surface)
+        .border_b_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .text_size(px(18.0))
+                .text_color(theme.text)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(theme.text_dim)
+                .child(subtitle),
+        )
+}
+
+pub fn scrolling_section(
+    theme: &Theme,
+    id: &'static str,
+    title: &'static str,
+    subtitle: String,
+    children: Vec<AnyElement>,
+) -> Div {
+    div().size_full().child(
+        div()
+            .id(id)
+            .debug_selector(move || id.to_owned())
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .child(section_header(theme, title, subtitle))
+            .child(
+                div()
+                    .id(SharedString::from(format!("save-scroll:{id}")))
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p(px(18.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(14.0))
+                    .children(children),
+            ),
+    )
+}
+
+pub fn split_section(
+    theme: &Theme,
+    id: &'static str,
+    title: &'static str,
+    subtitle: String,
+    list: AnyElement,
+    details: Vec<AnyElement>,
+) -> Div {
+    div().size_full().child(
+        div()
+            .id(id)
+            .debug_selector(move || id.to_owned())
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .child(section_header(theme, title, subtitle))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_none()
+                            .w(px(290.0))
+                            .min_h_0()
+                            .bg(theme.surface)
+                            .border_r_1()
+                            .border_color(theme.border)
+                            .child(list),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("save-detail-scroll:{id}")))
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .p(px(18.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(14.0))
+                            .children(details),
+                    ),
+            ),
+    )
+}
+
+pub fn group(theme: &Theme, label: &'static str, fields: Vec<AnyElement>) -> Div {
+    components::surface(theme)
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .h(px(38.0))
+                .px(px(13.0))
+                .flex()
+                .items_center()
+                .border_b_1()
+                .border_color(theme.border)
+                .text_size(px(11.0))
+                .text_color(theme.accent)
+                .child(label),
+        )
+        .child(
+            div()
+                .p(px(9.0))
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .children(fields),
+        )
+}
+
+pub fn value_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    value: impl Into<String>,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .min_h(px(36.0))
+        .px(px(10.0))
+        .py(px(7.0))
+        .flex()
+        .items_center()
+        .gap(px(14.0))
+        .rounded_md()
+        .bg(theme.background)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_color(theme.text_dim)
+                .child(label.into()),
+        )
+        .child(div().flex_none().text_color(theme.text).child(value.into()))
+}
+
+pub fn text_value_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    value: impl Into<String>,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .min_h(px(48.0))
+        .px(px(10.0))
+        .py(px(7.0))
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .rounded_md()
+        .bg(theme.background)
+        .child(
+            div()
+                .text_size(px(11.0))
+                .text_color(theme.text_dim)
+                .child(label.into()),
+        )
+        .child(div().text_color(theme.text).child(value.into()))
+}
+
+pub fn empty_state(theme: &Theme, message: impl Into<String>) -> Div {
+    components::surface(theme)
+        .p(px(18.0))
+        .text_color(theme.text_dim)
+        .child(message.into())
+}
+
+pub fn unit_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    row: &SaveUnitRowProjection,
+    selected: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    div()
+        .id(id)
+        .h(px(54.0))
+        .px(px(10.0))
+        .flex()
+        .items_center()
+        .gap(px(9.0))
+        .border_b_1()
+        .border_color(theme.border)
+        .bg(if selected {
+            theme.accent_dim
+        } else {
+            theme.surface
+        })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .child(
+            div()
+                .w(px(30.0))
+                .text_size(px(11.0))
+                .text_color(if selected {
+                    theme.accent
+                } else {
+                    theme.text_dim
+                })
+                .child(format!("{:03}", row.source_index + 1)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .truncate()
+                        .text_color(theme.text)
+                        .child(row.label.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(theme.text_dim)
+                        .child(format!("{} · Skill {}", row.role, row.skill_level)),
+                ),
+        )
+        .children(selected.then(|| {
+            div()
+                .text_color(theme.accent)
+                .text_size(px(11.0))
+                .child("INSPECTING")
+        }))
+}
+
+pub fn player_leader_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    row: &SaveUnitRowProjection,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .h(px(54.0))
+        .px(px(12.0))
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .border_b_1()
+        .border_color(theme.border)
+        .bg(theme.surface)
+        .child(
+            div()
+                .w(px(42.0))
+                .text_size(px(11.0))
+                .text_color(theme.accent)
+                .child(format!("U{:03}", row.source_index + 1)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .truncate()
+                        .text_color(theme.text)
+                        .child(row.label.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(theme.text_dim)
+                        .child(format!("{} · Character {}", row.role, row.character_id)),
+                ),
+        )
+}
+
+pub fn roster_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    row: &SaveRosterRowProjection,
+) -> Stateful<Div> {
+    let values = row
+        .fields
+        .iter()
+        .map(|field| field.raw_value.to_string())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    div()
+        .id(id)
+        .h(px(48.0))
+        .px(px(12.0))
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .border_b_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(theme.text)
+                .child(row.label.clone()),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(11.0))
+                .text_color(theme.text_dim)
+                .child(values),
+        )
+}
+
+pub fn second_array_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    index: usize,
+    value: i64,
+) -> Stateful<Div> {
+    value_row(
+        theme,
+        id,
+        format!("Second Array {}", index + 1),
+        value.to_string(),
+    )
+    .h(px(42.0))
+    .rounded_none()
+    .border_b_1()
+    .border_color(theme.border)
+}
+
+pub fn equipment_slot_button(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: &'static str,
+    selected: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    div()
+        .id(id)
+        .h(px(36.0))
+        .px(px(11.0))
+        .flex()
+        .items_center()
+        .gap(px(7.0))
+        .rounded_md()
+        .border_1()
+        .border_color(if selected { theme.accent } else { theme.border })
+        .bg(if selected {
+            theme.accent_dim
+        } else {
+            theme.surface
+        })
+        .text_color(if selected { theme.text } else { theme.text_dim })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .child(if selected { "✓" } else { "" })
+        .child(label)
+}
+
+pub fn skill_bytes(theme: &Theme, values: &[u8; 24]) -> Div {
+    group(
+        theme,
+        "SKILL DATA · 24 BYTES",
+        values
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, value)| {
+                value_row(
+                    theme,
+                    ("save-skill-byte", index),
+                    format!("Byte {index:02}"),
+                    format!("0x{value:02X} · {value}"),
+                )
+                .into_any_element()
+            })
+            .collect(),
+    )
+}
+
+pub fn inline_name_unavailable(theme: &Theme, subject: &'static str) -> Div {
+    div()
+        .px(px(12.0))
+        .py(px(8.0))
+        .rounded_md()
+        .bg(theme.accent_dim)
+        .border_1()
+        .border_color(theme.accent)
+        .text_size(px(12.0))
+        .text_color(theme.text_dim)
+        .child(format!("{subject} name is unavailable; showing raw IDs."))
+}
+
+fn read_only_badge(theme: &Theme) -> Div {
+    div()
+        .px(px(8.0))
+        .py(px(6.0))
+        .rounded_md()
+        .border_1()
+        .border_color(theme.border)
+        .text_size(px(10.0))
+        .text_color(theme.text_dim)
+        .child("READ ONLY")
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(
@@ -788,18 +1481,23 @@ mod tests {
         path::{Path, PathBuf},
     };
 
+    use gpui::{TestAppContext, div, point, prelude::*, px, size};
     use kufeditor_game::{CatalogRole, NameDictionary, load_name_dictionary};
     use kufeditor_workspace::{
-        Document, DocumentID, SaveDocument, SaveEquipmentField, SaveEquipmentSlot,
-        SaveNumberTarget, SaveUnitField, Workspace,
+        Document, DocumentID, SaveDocument, SaveEquipmentField, SaveEquipmentGroup,
+        SaveEquipmentSlot, SaveNumberTarget, SaveUnitField, SaveUnitGroup, Workspace,
     };
     use tempfile::TempDir;
 
     use super::{
-        SaveProjectionField, SaveRowKind, SaveRows, equipment_projection, mission_projection,
+        SaveProjectionField, SaveRowKind, SaveRowProjection, SaveRows, SaveSectionModel,
+        equipment_projection, mission_projection, render_editor, save_section_model,
         summary_projection, unit_projection, visible_unit_indices,
     };
-    use crate::state::{SaveSection, SaveUnitVisibility};
+    use crate::{
+        state::{SavePresentationState, SavePresentationStates, SaveSection, SaveUnitVisibility},
+        theme::Theme,
+    };
 
     const CONTEXT_SIZE: usize = 0x438;
     const MAIN_SIZE: usize = 0x154;
@@ -891,6 +1589,25 @@ mod tests {
         let document =
             SaveDocument::parse(save_fixture(unit_count, roster_count, second_array_count))
                 .unwrap();
+        let mut workspace = Workspace::new();
+        let document =
+            workspace.open_loaded(PathBuf::from("campaign.sav"), Document::Save(document));
+        (workspace, document)
+    }
+
+    fn workspace_with_leader_save(
+        roster_count: usize,
+        second_array_count: usize,
+    ) -> (Workspace, DocumentID) {
+        let mut bytes = save_fixture(1, roster_count, second_array_count);
+        let unit_offset =
+            2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>() + MAIN_SIZE + size_of::<u32>();
+        let ucd_offset = unit_offset + 10 * size_of::<u32>();
+        bytes
+            .get_mut(ucd_offset..ucd_offset + size_of::<u32>())
+            .unwrap()
+            .copy_from_slice(&0_u32.to_le_bytes());
+        let document = SaveDocument::parse(bytes).unwrap();
         let mut workspace = Workspace::new();
         let document =
             workspace.open_loaded(PathBuf::from("campaign.sav"), Document::Save(document));
@@ -997,6 +1714,271 @@ mod tests {
 
     fn append_i16(bytes: &mut Vec<u8>, value: i16) {
         bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn presentation(document: DocumentID, section: SaveSection) -> SavePresentationState {
+        let mut presentations = SavePresentationStates::default();
+        presentations.select_section(document, section, false);
+        presentations.get(document).unwrap().clone()
+    }
+
+    #[gpui::test]
+    fn save_view_rail_and_content_share_the_editor_row(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(800.0), px(600.0)),
+            |_, _| {
+                render_editor(
+                    &Theme::default(),
+                    Vec::new(),
+                    None,
+                    div().size_full().into_any_element(),
+                )
+            },
+        );
+
+        let editor = cx.debug_bounds("save-editor").unwrap();
+        let rail = cx.debug_bounds("save-section-rail").unwrap();
+        let content = cx.debug_bounds("save-editor-content").unwrap();
+        assert_eq!(rail.origin, editor.origin);
+        assert_eq!(content.origin.y, editor.origin.y);
+        assert_eq!(content.origin.x, rail.origin.x + rail.size.width);
+        assert_eq!(rail.size.width + content.size.width, editor.size.width);
+    }
+
+    #[test]
+    fn save_view_empty_summary_exposes_every_fixed_surface() {
+        let (workspace, document) = workspace_with_save(0, 0, 0);
+        let state = presentation(document, SaveSection::Summary);
+
+        let SaveSectionModel::Summary(summary) =
+            save_section_model(&workspace, document, &state, None).unwrap()
+        else {
+            panic!("summary state must produce the summary view");
+        };
+
+        assert_eq!(summary.campaign.label, "Campaign");
+        assert_eq!(summary.main_fields.len(), 7);
+        assert_eq!(summary.text_fields.len(), 3);
+        assert_eq!(
+            summary.saved_unit_reference.label,
+            "Selected Unit Reference"
+        );
+        assert_eq!(
+            (
+                summary.unit_count,
+                summary.roster_count,
+                summary.second_array_count,
+            ),
+            (0, 0, 0),
+        );
+        assert!(summary.has_size_prefix);
+        assert!(summary.has_context);
+        assert!(summary.context_text.is_empty());
+    }
+
+    #[test]
+    fn save_view_units_keep_virtual_rows_groups_raw_identity_and_skill_bytes() {
+        let (workspace, document) = workspace_with_leader_save(0, 0);
+        let units = save_section_model(
+            &workspace,
+            document,
+            &presentation(document, SaveSection::Units),
+            None,
+        )
+        .unwrap();
+        let SaveSectionModel::Units { rows, inspected } = units else {
+            panic!("units state must produce the units view");
+        };
+        let inspected = inspected.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(inspected.row.label, "Job 2");
+        assert_eq!(inspected.fields.len(), 21);
+        assert_eq!(
+            inspected.skill_data,
+            std::array::from_fn(|index| 0xa0 + u8::try_from(index).unwrap())
+        );
+        let unit_group_count = |group| {
+            inspected
+                .fields
+                .iter()
+                .filter(|field| {
+                    matches!(
+                        field.target,
+                        SaveNumberTarget::Unit { field, .. } if field.group() == group
+                    )
+                })
+                .count()
+        };
+        assert_eq!(unit_group_count(SaveUnitGroup::Core), 10);
+        assert_eq!(unit_group_count(SaveUnitGroup::Formation), 2);
+        assert_eq!(unit_group_count(SaveUnitGroup::Advanced), 9);
+    }
+
+    #[test]
+    fn save_view_equipment_keeps_six_slots_and_all_field_groups() {
+        let (workspace, document) = workspace_with_leader_save(0, 0);
+        let equipment = save_section_model(
+            &workspace,
+            document,
+            &presentation(document, SaveSection::Equipment),
+            None,
+        )
+        .unwrap();
+        let SaveSectionModel::Equipment {
+            slots,
+            inspected_unit,
+            selected,
+        } = equipment
+        else {
+            panic!("equipment state must produce the equipment view");
+        };
+        assert_eq!(slots, SaveEquipmentSlot::ALL);
+        assert_eq!(
+            slots.map(SaveEquipmentSlot::label),
+            [
+                "Leader Weapon",
+                "Leader Accessory",
+                "Leader Armor",
+                "Troop Weapon",
+                "Troop Accessory",
+                "Troop Armor",
+            ],
+        );
+        assert_eq!(inspected_unit.unwrap().label, "Job 2");
+        let selected = selected.unwrap();
+        assert_eq!(selected.item_name, "Item Type 0 · Variant 0");
+        assert_eq!(selected.fields.len(), 19);
+        assert_eq!(selected.attributes.len(), 2);
+        let equipment_group_count = |group| {
+            selected
+                .fields
+                .iter()
+                .filter(|field| {
+                    matches!(
+                        field.target,
+                        SaveNumberTarget::Equipment { field, .. } if field.group() == group
+                    )
+                })
+                .count()
+        };
+        assert_eq!(equipment_group_count(SaveEquipmentGroup::Core), 6);
+        assert_eq!(equipment_group_count(SaveEquipmentGroup::Skills), 4);
+        assert_eq!(equipment_group_count(SaveEquipmentGroup::Resistances), 4);
+        assert_eq!(equipment_group_count(SaveEquipmentGroup::Advanced), 5);
+    }
+
+    #[test]
+    fn save_view_roster_summarizes_player_leaders_and_keeps_world_rows_lazy() {
+        let (workspace, document) = workspace_with_leader_save(2, 0);
+        let roster = save_section_model(
+            &workspace,
+            document,
+            &presentation(document, SaveSection::Roster),
+            None,
+        )
+        .unwrap();
+        let SaveSectionModel::Roster {
+            player_leaders,
+            world_map_rows,
+        } = roster
+        else {
+            panic!("roster state must produce the roster view");
+        };
+        assert_eq!(player_leaders.kind(), SaveRowKind::PlayerLeaders);
+        assert_eq!(player_leaders.len(), 1);
+        let leader = player_leaders
+            .project_range(&workspace, None, 0..1)
+            .unwrap();
+        let Some(SaveRowProjection::Unit(leader)) = leader.first() else {
+            panic!("player-leader rows must project units lazily");
+        };
+        assert_eq!(leader.role, "Leader (0)");
+        assert_eq!(leader.id.section, SaveSection::Roster);
+        assert_eq!(world_map_rows.len(), 2);
+    }
+
+    #[test]
+    fn save_view_missions_keep_twenty_fixed_rows_and_lazy_second_array() {
+        let (workspace, document) = workspace_with_leader_save(0, 3);
+        let missions = save_section_model(
+            &workspace,
+            document,
+            &presentation(document, SaveSection::Missions),
+            None,
+        )
+        .unwrap();
+        let SaveSectionModel::Missions {
+            mission,
+            second_array_rows,
+        } = missions
+        else {
+            panic!("missions state must produce the missions view");
+        };
+        assert_eq!(mission.current_mission.raw_value, -2);
+        assert_eq!(mission.completions.len(), 20);
+        assert_eq!(second_array_rows.len(), 3);
+    }
+
+    #[test]
+    fn save_view_unknown_choices_and_missing_names_keep_raw_fallbacks() {
+        let (workspace, document) = workspace_with_save(1, 0, 0);
+
+        let SaveSectionModel::Units { inspected, .. } = save_section_model(
+            &workspace,
+            document,
+            &presentation(document, SaveSection::Units),
+            None,
+        )
+        .unwrap() else {
+            panic!("units state must produce the units view");
+        };
+        let inspected = inspected.unwrap();
+        assert_eq!(inspected.row.label, "Job 2");
+        assert!(
+            inspected
+                .fields
+                .iter()
+                .any(|field| field.display_value == "Unknown (99)")
+        );
+    }
+
+    #[test]
+    fn save_view_ready_catalog_enriches_names_and_effects() {
+        let (workspace, document) = workspace_with_save(1, 0, 0);
+        let dictionary = CatalogTree::names().load();
+
+        let SaveSectionModel::Units { inspected, .. } = save_section_model(
+            &workspace,
+            document,
+            &presentation(document, SaveSection::Units),
+            Some(&dictionary),
+        )
+        .unwrap() else {
+            panic!("units state must produce the units view");
+        };
+        assert_eq!(inspected.unwrap().row.label, "Footman");
+
+        let SaveSectionModel::Equipment { selected, .. } = save_section_model(
+            &workspace,
+            document,
+            &presentation(document, SaveSection::Equipment),
+            Some(&dictionary),
+        )
+        .unwrap() else {
+            panic!("equipment state must produce the equipment view");
+        };
+        let equipment = selected.unwrap();
+        assert_eq!(equipment.item_name, "Long Sword");
+        assert_eq!(equipment.attributes.first().unwrap().name, "Flame");
+        assert_eq!(
+            equipment.attributes.first().unwrap().effect.as_deref(),
+            Some("Adds fire"),
+        );
+        let missing_attribute = equipment.attributes.get(1).unwrap();
+        assert_eq!(missing_attribute.name, "Attribute -1");
+        assert_eq!(missing_attribute.effect, None);
     }
 
     #[test]
