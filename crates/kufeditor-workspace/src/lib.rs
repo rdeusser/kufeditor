@@ -2,6 +2,7 @@
 
 mod document;
 mod history;
+mod storage;
 
 use std::{
     collections::HashMap,
@@ -10,6 +11,7 @@ use std::{
 
 pub use document::{Document, DocumentEdit, DocumentId, StateId};
 pub use kufeditor_formats::{Diagnostic, Severity, TroopDocument, TroopField, TroopGroup};
+pub use storage::{LoadedDocument, SaveRequest, SaveToken, SavedDocument, load_path};
 use thiserror::Error;
 
 use crate::history::HistoryEntry;
@@ -24,6 +26,46 @@ pub enum WorkspaceError {
 
     #[error(transparent)]
     Format(#[from] kufeditor_formats::FormatError),
+
+    #[error("unsupported Stage 1 file {path}: expected a .sox file")]
+    UnsupportedFile { path: PathBuf },
+
+    #[error("failed to read {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: kufeditor_formats::FormatError,
+    },
+
+    #[error("failed to encode {path}: {source}")]
+    Encode {
+        path: PathBuf,
+        #[source]
+        source: kufeditor_formats::FormatError,
+    },
+
+    #[error("failed to write {path}: {source}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("document {0:?} already has a save in progress")]
+    SaveInProgress(DocumentId),
+
+    #[error("save completion {token:?} does not match document {document:?}")]
+    StaleSave {
+        document: DocumentId,
+        token: SaveToken,
+    },
 }
 
 #[derive(Debug)]
@@ -34,6 +76,7 @@ struct Session {
     saved_state: StateId,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
+    save_in_flight: Option<SaveToken>,
 }
 
 #[derive(Debug)]
@@ -41,6 +84,7 @@ pub struct Workspace {
     sessions: HashMap<DocumentId, Session>,
     next_document: u64,
     next_state: u64,
+    next_save: u64,
 }
 
 impl Workspace {
@@ -49,6 +93,7 @@ impl Workspace {
             sessions: HashMap::new(),
             next_document: 1,
             next_state: 1,
+            next_save: 1,
         }
     }
 
@@ -64,9 +109,74 @@ impl Workspace {
                 saved_state: state,
                 undo: Vec::new(),
                 redo: Vec::new(),
+                save_in_flight: None,
             },
         );
         id
+    }
+
+    pub fn insert_loaded(&mut self, loaded: LoadedDocument) -> DocumentId {
+        let (path, document) = loaded.into_parts();
+        self.open_loaded(path, document)
+    }
+
+    pub fn prepare_save(
+        &mut self,
+        id: DocumentId,
+        target: Option<PathBuf>,
+    ) -> Result<SaveRequest, WorkspaceError> {
+        let (path, state, snapshot) = {
+            let session = self.session(id)?;
+            if session.save_in_flight.is_some() {
+                return Err(WorkspaceError::SaveInProgress(id));
+            }
+            (
+                target.unwrap_or_else(|| session.path.clone()),
+                session.current_state,
+                session.document.clone(),
+            )
+        };
+        let token = self.allocate_save();
+        self.session_mut(id)?.save_in_flight = Some(token);
+        Ok(SaveRequest {
+            document_id: id,
+            token,
+            path,
+            state,
+            snapshot,
+        })
+    }
+
+    pub fn finish_save(&mut self, saved: SavedDocument) -> Result<(), WorkspaceError> {
+        let session = self.session_mut(saved.document_id)?;
+        if session.save_in_flight != Some(saved.token) {
+            return Err(WorkspaceError::StaleSave {
+                document: saved.document_id,
+                token: saved.token,
+            });
+        }
+
+        session.document.rebase_source(&saved.snapshot, saved.bytes);
+        session.path = saved.path;
+        session.saved_state = saved.state;
+        session.save_in_flight = None;
+        Ok(())
+    }
+
+    pub fn finish_save_failure(
+        &mut self,
+        id: DocumentId,
+        token: SaveToken,
+    ) -> Result<(), WorkspaceError> {
+        let session = self.session_mut(id)?;
+        if session.save_in_flight != Some(token) {
+            return Err(WorkspaceError::StaleSave {
+                document: id,
+                token,
+            });
+        }
+        session.save_in_flight = None;
+        Ok(())
     }
 
     pub fn apply(&mut self, id: DocumentId, edit: DocumentEdit) -> Result<(), WorkspaceError> {
@@ -201,6 +311,12 @@ impl Workspace {
         let id = StateId(self.next_state);
         self.next_state += 1;
         id
+    }
+
+    fn allocate_save(&mut self) -> SaveToken {
+        let token = SaveToken(self.next_save);
+        self.next_save += 1;
+        token
     }
 }
 

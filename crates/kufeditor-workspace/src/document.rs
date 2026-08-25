@@ -40,4 +40,18 @@ impl Document {
             }
         }
     }
+
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, FormatError> {
+        match self {
+            Self::Troop(document) => document.encode(),
+        }
+    }
+
+    pub(crate) fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) {
+        match (self, saved) {
+            (Self::Troop(document), Self::Troop(saved)) => {
+                document.rebase_source(saved, bytes);
+            }
+        }
+    }
 }
