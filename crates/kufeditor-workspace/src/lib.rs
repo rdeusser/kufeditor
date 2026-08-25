@@ -3,6 +3,7 @@
 mod document;
 mod history;
 mod recent;
+mod save;
 mod storage;
 
 use std::{
@@ -12,7 +13,9 @@ use std::{
 
 pub use document::{Document, DocumentEdit, DocumentID, DocumentKind, StateID};
 pub use kufeditor_formats::{
-    Diagnostic, DiagnosticLocation, SaveNumberTarget, Severity, SkillDocument, SkillTextField,
+    Diagnostic, DiagnosticLocation, SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField,
+    SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField,
+    SaveTextField, SaveUnitField, SaveUnitGroup, Severity, SkillDocument, SkillTextField,
     TextSOXDocument, TextSOXField, TroopDocument, TroopField, TroopGroup,
 };
 pub use recent::{
@@ -21,7 +24,13 @@ pub use recent::{
 pub use storage::{LoadedDocument, SaveRequest, SaveToken, SavedDocument, load_path};
 use thiserror::Error;
 
-use crate::history::HistoryEntry;
+use crate::history::{DocumentMutation, HistoryAction, HistoryEntry};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ApplyOutcome {
+    Changed,
+    Unchanged,
+}
 
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
@@ -36,6 +45,9 @@ pub enum WorkspaceError {
 
     #[error("document {0:?} is not a text SOX document")]
     NotTextSOX(DocumentID),
+
+    #[error("document {0:?} is not a Crusaders save document")]
+    NotSave(DocumentID),
 
     #[error(transparent)]
     Format(#[from] kufeditor_formats::FormatError),
@@ -201,37 +213,52 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn apply(&mut self, id: DocumentID, edit: DocumentEdit) -> Result<(), WorkspaceError> {
+    pub fn apply(
+        &mut self,
+        id: DocumentID,
+        edit: DocumentEdit,
+    ) -> Result<ApplyOutcome, WorkspaceError> {
+        let action = HistoryAction::Edit(edit);
         let (before, inverse) = {
             let session = self.session_mut(id)?;
             let before = session.current_state;
-            let inverse = session.document.apply(id, edit.clone())?;
-            (before, inverse)
+            match session.document.apply(id, action.clone())? {
+                DocumentMutation::Unchanged => return Ok(ApplyOutcome::Unchanged),
+                DocumentMutation::Changed { inverse } => (before, inverse),
+            }
         };
         let after = self.allocate_state();
         let session = self.session_mut(id)?;
         session.undo.push(HistoryEntry {
-            forward: edit,
+            forward: action,
             inverse,
             before,
             after,
         });
         session.redo.clear();
         session.current_state = after;
-        Ok(())
+        Ok(ApplyOutcome::Changed)
     }
 
     pub fn undo(&mut self, id: DocumentID) -> Result<bool, WorkspaceError> {
         let session = self.session_mut(id)?;
-        let Some(entry) = session.undo.pop() else {
+        let Some(mut entry) = session.undo.pop() else {
             return Ok(false);
         };
 
-        if let Err(error) = session.document.apply(id, entry.inverse.clone()) {
-            session.undo.push(entry);
-            return Err(error);
-        }
+        let inverse = match session.document.apply(id, entry.inverse.clone()) {
+            Ok(DocumentMutation::Changed { inverse }) => inverse,
+            Ok(DocumentMutation::Unchanged) => {
+                session.undo.push(entry);
+                return Ok(false);
+            }
+            Err(error) => {
+                session.undo.push(entry);
+                return Err(error);
+            }
+        };
 
+        entry.forward = inverse;
         session.current_state = entry.before;
         session.redo.push(entry);
         Ok(true)
@@ -239,15 +266,23 @@ impl Workspace {
 
     pub fn redo(&mut self, id: DocumentID) -> Result<bool, WorkspaceError> {
         let session = self.session_mut(id)?;
-        let Some(entry) = session.redo.pop() else {
+        let Some(mut entry) = session.redo.pop() else {
             return Ok(false);
         };
 
-        if let Err(error) = session.document.apply(id, entry.forward.clone()) {
-            session.redo.push(entry);
-            return Err(error);
-        }
+        let inverse = match session.document.apply(id, entry.forward.clone()) {
+            Ok(DocumentMutation::Changed { inverse }) => inverse,
+            Ok(DocumentMutation::Unchanged) => {
+                session.redo.push(entry);
+                return Ok(false);
+            }
+            Err(error) => {
+                session.redo.push(entry);
+                return Err(error);
+            }
+        };
 
+        entry.inverse = inverse;
         session.current_state = entry.after;
         session.undo.push(entry);
         Ok(true)
@@ -300,6 +335,7 @@ impl Workspace {
             Document::Troop(document) => Ok(document.record_count()),
             Document::Skill(document) => Ok(document.record_count()),
             Document::TextSOX(document) => Ok(document.record_count()),
+            Document::Save(document) => Ok(document.unit_count()),
         }
     }
 
@@ -312,7 +348,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => document.value(record, field).map_err(Into::into),
-            Document::Skill(_) | Document::TextSOX(_) => Err(WorkspaceError::NotTroop(id)),
+            _ => Err(WorkspaceError::NotTroop(id)),
         }
     }
 
@@ -320,7 +356,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.skill_id(record).map_err(Into::into),
-            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
+            _ => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -328,7 +364,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.skill_type(record).map_err(Into::into),
-            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
+            _ => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -336,7 +372,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.max_level(record).map_err(Into::into),
-            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
+            _ => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -349,7 +385,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.text(record, field).map_err(Into::into),
-            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
+            _ => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -357,7 +393,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::TextSOX(document) => document.record_index(record).map_err(Into::into),
-            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSOX(id)),
+            _ => Err(WorkspaceError::NotTextSOX(id)),
         }
     }
 
@@ -369,7 +405,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::TextSOX(document) => document.max_length(record).map_err(Into::into),
-            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSOX(id)),
+            _ => Err(WorkspaceError::NotTextSOX(id)),
         }
     }
 
@@ -377,7 +413,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::TextSOX(document) => document.text(record).map_err(Into::into),
-            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSOX(id)),
+            _ => Err(WorkspaceError::NotTextSOX(id)),
         }
     }
 
@@ -387,6 +423,7 @@ impl Workspace {
             Document::Troop(document) => Ok(document.diagnostics()),
             Document::Skill(document) => Ok(document.diagnostics()),
             Document::TextSOX(document) => Ok(document.diagnostics()),
+            Document::Save(document) => Ok(document.diagnostics()),
         }
     }
 

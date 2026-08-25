@@ -11,8 +11,8 @@ use gpui::{
 };
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
-    DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument, SaveToken,
-    SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError, load_path,
+    ApplyOutcome, DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
+    SaveToken, SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError, load_path,
 };
 
 use crate::{
@@ -284,6 +284,7 @@ enum EditorRoute {
     Troop,
     Skill,
     TextSOX,
+    Save,
 }
 
 const fn editor_route(kind: DocumentKind) -> EditorRoute {
@@ -291,6 +292,7 @@ const fn editor_route(kind: DocumentKind) -> EditorRoute {
         DocumentKind::TroopInfo => EditorRoute::Troop,
         DocumentKind::SkillInfo => EditorRoute::Skill,
         DocumentKind::TextSOX => EditorRoute::TextSOX,
+        DocumentKind::CrusadersSave => EditorRoute::Save,
     }
 }
 
@@ -579,8 +581,10 @@ impl AppFrame {
             TextInputEvent::Commit(value) => {
                 let (document, edit) = target.document_edit(value.clone());
                 match self.workspace.apply(document, edit) {
-                    Ok(()) => {
-                        self.document_did_mutate();
+                    Ok(outcome) => {
+                        if outcome == ApplyOutcome::Changed {
+                            self.document_did_mutate();
+                        }
                         self.cancel_property_edit();
                         self.notices.clear(NoticeSource::Editor);
                     }
@@ -621,8 +625,10 @@ impl AppFrame {
             return;
         }
         match self.workspace.apply(document, choice.document_edit(record)) {
-            Ok(()) => {
-                self.document_did_mutate();
+            Ok(outcome) => {
+                if outcome == ApplyOutcome::Changed {
+                    self.document_did_mutate();
+                }
                 self.notices.clear(NoticeSource::Editor);
             }
             Err(error) => {
@@ -873,8 +879,10 @@ impl AppFrame {
             }
         };
         match self.workspace.apply(document, document_edit) {
-            Ok(()) => {
-                self.document_did_mutate();
+            Ok(outcome) => {
+                if outcome == ApplyOutcome::Changed {
+                    self.document_did_mutate();
+                }
                 self.cancel_property_edit();
                 self.notices.clear(NoticeSource::Editor);
             }
@@ -1587,6 +1595,11 @@ impl AppFrame {
             Ok(EditorRoute::Troop) => self.troop_editor(document_id, cx),
             Ok(EditorRoute::Skill) => self.skill_editor(document_id, cx),
             Ok(EditorRoute::TextSOX) => self.text_sox_editor(document_id, cx),
+            Ok(EditorRoute::Save) => div()
+                .size_full()
+                .p(px(28.0))
+                .text_color(self.theme.text_dim)
+                .child("Crusaders save editor is not available yet"),
             Err(error) => div()
                 .size_full()
                 .p(px(28.0))
@@ -4931,6 +4944,148 @@ mod tests {
                 assert_eq!(frame.settings.latest_revision_for_test(), settings_revision);
                 assert_eq!(frame.settings.is_settled(), settings_settled);
                 assert_eq!(frame.task_launches, task_launches);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn unchanged_apply_closes_number_draft_without_revoking_discard(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, _| {
+                let document = open_troop(frame, "TroopInfo.sox", 100);
+                frame.activate_document(document);
+                frame.begin_number_edit(ActiveNumberEdit::troop_field(
+                    document,
+                    0,
+                    TroopField::MoveSpeed,
+                    100,
+                ));
+                frame.close_documents = CloseDocuments::Discard;
+                frame.close_pending = true;
+                frame.close_armed = true;
+                frame.notices.replace(
+                    NoticeSource::Editor,
+                    Notice::editor_info("stale number feedback"),
+                );
+                let before = frame.workspace.state_id(document).unwrap();
+
+                frame.commit_number_edit(100);
+
+                assert!(frame.number_edit.is_none());
+                assert_eq!(frame.workspace.state_id(document).unwrap(), before);
+                assert!(!frame.workspace.can_undo(document).unwrap());
+                assert_eq!(frame.close_documents, CloseDocuments::Discard);
+                assert!(frame.close_pending);
+                assert!(frame.close_armed);
+                assert!(
+                    !frame
+                        .notices
+                        .current()
+                        .is_some_and(Notice::is_editor_feedback)
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn unchanged_apply_commits_text_draft_without_revoking_discard(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            bind_text_input(cx);
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+        let (document, input, before) = window
+            .update(cx, |frame, window, cx| {
+                let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
+                frame.activate_document(document);
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+                frame.close_documents = CloseDocuments::Discard;
+                frame.close_pending = true;
+                frame.close_armed = true;
+                frame.notices.replace(
+                    NoticeSource::Editor,
+                    Notice::editor_info("stale text feedback"),
+                );
+                (
+                    document,
+                    frame.text_edit.as_ref().unwrap().input.clone(),
+                    frame.workspace.state_id(document).unwrap(),
+                )
+            })
+            .unwrap();
+
+        input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("Alpha".to_owned()));
+        });
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert!(frame.text_edit.is_none());
+                assert_eq!(frame.workspace.state_id(document).unwrap(), before);
+                assert!(!frame.workspace.can_undo(document).unwrap());
+                assert_eq!(frame.close_documents, CloseDocuments::Discard);
+                assert!(frame.close_pending);
+                assert!(frame.close_armed);
+                assert!(
+                    !frame
+                        .notices
+                        .current()
+                        .is_some_and(Notice::is_editor_feedback)
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn unchanged_apply_clears_choice_notice_without_revoking_discard(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, _| {
+                let document = open_skill(frame, "SkillInfo.sox", 1);
+                frame.activate_document(document);
+                frame.close_documents = CloseDocuments::Discard;
+                frame.close_pending = true;
+                frame.close_armed = true;
+                frame.notices.replace(
+                    NoticeSource::Editor,
+                    Notice::editor_info("stale choice feedback"),
+                );
+                let before = frame.workspace.state_id(document).unwrap();
+
+                frame.set_skill_type(document, 0, SkillTypeChoice::Combat);
+
+                assert_eq!(frame.workspace.state_id(document).unwrap(), before);
+                assert!(!frame.workspace.can_undo(document).unwrap());
+                assert_eq!(frame.close_documents, CloseDocuments::Discard);
+                assert!(frame.close_pending);
+                assert!(frame.close_armed);
+                assert!(
+                    !frame
+                        .notices
+                        .current()
+                        .is_some_and(Notice::is_editor_feedback)
+                );
             })
             .unwrap();
     }

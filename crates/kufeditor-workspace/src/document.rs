@@ -1,8 +1,12 @@
 use kufeditor_formats::{
-    FormatError, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument, TroopField,
+    FormatError, SaveDocument, SaveMutation, SaveNumberTarget, SaveTextField, SkillDocument,
+    SkillTextField, TextSOXDocument, TroopDocument, TroopField,
 };
 
-use crate::WorkspaceError;
+use crate::{
+    WorkspaceError,
+    history::{DocumentMutation, HistoryAction},
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct DocumentID(pub(crate) u64);
@@ -10,11 +14,16 @@ pub struct DocumentID(pub(crate) u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct StateID(pub(crate) u64);
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the public document model keeps each owned format document inline"
+)]
 #[derive(Clone, Debug)]
 pub enum Document {
     Troop(TroopDocument),
     Skill(SkillDocument),
     TextSOX(TextSOXDocument),
+    Save(SaveDocument),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,6 +31,7 @@ pub enum DocumentKind {
     TroopInfo,
     SkillInfo,
     TextSOX,
+    CrusadersSave,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -52,6 +62,14 @@ pub enum DocumentEdit {
         record: usize,
         value: String,
     },
+    SetSaveNumber {
+        target: SaveNumberTarget,
+        value: i64,
+    },
+    SetSaveText {
+        field: SaveTextField,
+        value: String,
+    },
 }
 
 impl Document {
@@ -60,83 +78,219 @@ impl Document {
             Self::Troop(_) => DocumentKind::TroopInfo,
             Self::Skill(_) => DocumentKind::SkillInfo,
             Self::TextSOX(_) => DocumentKind::TextSOX,
+            Self::Save(_) => DocumentKind::CrusadersSave,
         }
     }
 
     pub(crate) fn apply(
         &mut self,
         id: DocumentID,
-        edit: DocumentEdit,
-    ) -> Result<DocumentEdit, WorkspaceError> {
-        match (self, edit) {
-            (
-                Self::Troop(document),
-                DocumentEdit::SetTroopField {
-                    record,
-                    field,
-                    value,
-                },
-            ) => {
-                let previous = document.set_value(record, field, value)?;
-                Ok(DocumentEdit::SetTroopField {
-                    record,
-                    field,
-                    value: previous,
-                })
-            }
-            (Self::Skill(document), DocumentEdit::SetSkillID { record, value }) => {
-                let previous = document.set_skill_id(record, value)?;
-                Ok(DocumentEdit::SetSkillID {
-                    record,
-                    value: previous,
-                })
-            }
-            (Self::Skill(document), DocumentEdit::SetSkillType { record, value }) => {
-                let previous = document.set_skill_type(record, value)?;
-                Ok(DocumentEdit::SetSkillType {
-                    record,
-                    value: previous,
-                })
-            }
-            (Self::Skill(document), DocumentEdit::SetSkillMaxLevel { record, value }) => {
-                let previous = document.set_max_level(record, value)?;
-                Ok(DocumentEdit::SetSkillMaxLevel {
-                    record,
-                    value: previous,
-                })
-            }
-            (
-                Self::Skill(document),
-                DocumentEdit::SetSkillText {
-                    record,
-                    field,
-                    value,
-                },
-            ) => {
-                let previous = document.set_text(record, field, value)?;
-                Ok(DocumentEdit::SetSkillText {
-                    record,
-                    field,
-                    value: previous,
-                })
-            }
-            (Self::TextSOX(document), DocumentEdit::SetTextSOXText { record, value }) => {
-                let previous = document.set_text(record, value)?;
-                Ok(DocumentEdit::SetTextSOXText {
-                    record,
-                    value: previous,
-                })
-            }
-            (_, DocumentEdit::SetTroopField { .. }) => Err(WorkspaceError::NotTroop(id)),
-            (
-                _,
-                DocumentEdit::SetSkillID { .. }
-                | DocumentEdit::SetSkillType { .. }
-                | DocumentEdit::SetSkillMaxLevel { .. }
-                | DocumentEdit::SetSkillText { .. },
-            ) => Err(WorkspaceError::NotSkill(id)),
-            (_, DocumentEdit::SetTextSOXText { .. }) => Err(WorkspaceError::NotTextSOX(id)),
+        action: HistoryAction,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        match action {
+            HistoryAction::Edit(edit) => self.apply_edit(id, edit),
+            HistoryAction::RestoreSaveText { field, image } => match self {
+                Self::Save(document) => Ok(match document.restore_text(field, image) {
+                    SaveMutation::Unchanged => DocumentMutation::Unchanged,
+                    SaveMutation::Changed { previous } => DocumentMutation::Changed {
+                        inverse: HistoryAction::RestoreSaveText {
+                            field,
+                            image: previous,
+                        },
+                    },
+                }),
+                _ => Err(WorkspaceError::NotSave(id)),
+            },
         }
+    }
+
+    fn apply_edit(
+        &mut self,
+        id: DocumentID,
+        edit: DocumentEdit,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        match edit {
+            DocumentEdit::SetTroopField {
+                record,
+                field,
+                value,
+            } => self.apply_troop_field(id, record, field, value),
+            DocumentEdit::SetSkillID { record, value } => self.apply_skill_id(id, record, value),
+            DocumentEdit::SetSkillType { record, value } => {
+                self.apply_skill_type(id, record, value)
+            }
+            DocumentEdit::SetSkillMaxLevel { record, value } => {
+                self.apply_skill_max_level(id, record, value)
+            }
+            DocumentEdit::SetSkillText {
+                record,
+                field,
+                value,
+            } => self.apply_skill_text(id, record, field, value),
+            DocumentEdit::SetTextSOXText { record, value } => {
+                self.apply_text_sox_text(id, record, value)
+            }
+            DocumentEdit::SetSaveNumber { target, value } => {
+                self.apply_save_number(id, target, value)
+            }
+            DocumentEdit::SetSaveText { field, value } => self.apply_save_text(id, field, value),
+        }
+    }
+
+    fn apply_troop_field(
+        &mut self,
+        id: DocumentID,
+        record: usize,
+        field: TroopField,
+        value: i32,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::Troop(document) = self else {
+            return Err(WorkspaceError::NotTroop(id));
+        };
+        if document.value(record, field)? == value {
+            return Ok(DocumentMutation::Unchanged);
+        }
+        let previous = document.set_value(record, field, value)?;
+        Ok(inverse_edit(DocumentEdit::SetTroopField {
+            record,
+            field,
+            value: previous,
+        }))
+    }
+
+    fn apply_skill_id(
+        &mut self,
+        id: DocumentID,
+        record: usize,
+        value: i32,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::Skill(document) = self else {
+            return Err(WorkspaceError::NotSkill(id));
+        };
+        if document.skill_id(record)? == value {
+            return Ok(DocumentMutation::Unchanged);
+        }
+        let previous = document.set_skill_id(record, value)?;
+        Ok(inverse_edit(DocumentEdit::SetSkillID {
+            record,
+            value: previous,
+        }))
+    }
+
+    fn apply_skill_type(
+        &mut self,
+        id: DocumentID,
+        record: usize,
+        value: u32,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::Skill(document) = self else {
+            return Err(WorkspaceError::NotSkill(id));
+        };
+        if document.skill_type(record)? == value {
+            return Ok(DocumentMutation::Unchanged);
+        }
+        let previous = document.set_skill_type(record, value)?;
+        Ok(inverse_edit(DocumentEdit::SetSkillType {
+            record,
+            value: previous,
+        }))
+    }
+
+    fn apply_skill_max_level(
+        &mut self,
+        id: DocumentID,
+        record: usize,
+        value: u32,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::Skill(document) = self else {
+            return Err(WorkspaceError::NotSkill(id));
+        };
+        if document.max_level(record)? == value {
+            return Ok(DocumentMutation::Unchanged);
+        }
+        let previous = document.set_max_level(record, value)?;
+        Ok(inverse_edit(DocumentEdit::SetSkillMaxLevel {
+            record,
+            value: previous,
+        }))
+    }
+
+    fn apply_skill_text(
+        &mut self,
+        id: DocumentID,
+        record: usize,
+        field: SkillTextField,
+        value: String,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::Skill(document) = self else {
+            return Err(WorkspaceError::NotSkill(id));
+        };
+        if document.text(record, field)? == value {
+            return Ok(DocumentMutation::Unchanged);
+        }
+        let previous = document.set_text(record, field, value)?;
+        Ok(inverse_edit(DocumentEdit::SetSkillText {
+            record,
+            field,
+            value: previous,
+        }))
+    }
+
+    fn apply_text_sox_text(
+        &mut self,
+        id: DocumentID,
+        record: usize,
+        value: String,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::TextSOX(document) = self else {
+            return Err(WorkspaceError::NotTextSOX(id));
+        };
+        if document.text(record)? == value {
+            return Ok(DocumentMutation::Unchanged);
+        }
+        let previous = document.set_text(record, value)?;
+        Ok(inverse_edit(DocumentEdit::SetTextSOXText {
+            record,
+            value: previous,
+        }))
+    }
+
+    fn apply_save_number(
+        &mut self,
+        id: DocumentID,
+        target: SaveNumberTarget,
+        value: i64,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::Save(document) = self else {
+            return Err(WorkspaceError::NotSave(id));
+        };
+        Ok(match document.set_number(target, value)? {
+            SaveMutation::Unchanged => DocumentMutation::Unchanged,
+            SaveMutation::Changed { previous } => inverse_edit(DocumentEdit::SetSaveNumber {
+                target,
+                value: previous,
+            }),
+        })
+    }
+
+    fn apply_save_text(
+        &mut self,
+        id: DocumentID,
+        field: SaveTextField,
+        value: String,
+    ) -> Result<DocumentMutation, WorkspaceError> {
+        let Self::Save(document) = self else {
+            return Err(WorkspaceError::NotSave(id));
+        };
+        Ok(match document.set_text(field, value)? {
+            SaveMutation::Unchanged => DocumentMutation::Unchanged,
+            SaveMutation::Changed { previous } => DocumentMutation::Changed {
+                inverse: HistoryAction::RestoreSaveText {
+                    field,
+                    image: previous,
+                },
+            },
+        })
     }
 
     pub(crate) fn encode(&self) -> Result<Vec<u8>, FormatError> {
@@ -144,6 +298,7 @@ impl Document {
             Self::Troop(document) => document.encode(),
             Self::Skill(document) => document.encode(),
             Self::TextSOX(document) => document.encode(),
+            Self::Save(document) => document.encode(),
         }
     }
 
@@ -156,7 +311,15 @@ impl Document {
             (Self::Troop(document), Self::Troop(saved)) => document.rebase_source(saved, bytes),
             (Self::Skill(document), Self::Skill(saved)) => document.rebase_source(saved, bytes),
             (Self::TextSOX(document), Self::TextSOX(saved)) => document.rebase_source(saved, bytes),
+            (Self::Save(document), Self::Save(saved)) => document.rebase_source(saved, bytes),
+            (Self::Save(_), _) | (_, Self::Save(_)) => Err(FormatError::InconsistentSaveRebase),
             _ => Err(FormatError::InconsistentSOXRebase),
         }
+    }
+}
+
+fn inverse_edit(edit: DocumentEdit) -> DocumentMutation {
+    DocumentMutation::Changed {
+        inverse: HistoryAction::Edit(edit),
     }
 }

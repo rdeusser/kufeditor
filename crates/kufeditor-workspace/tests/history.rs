@@ -3,13 +3,75 @@
     reason = "synthetic fixtures use known fixed-size byte ranges"
 )]
 
-use std::path::PathBuf;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use kufeditor_formats::{DiagnosticField, FormatError};
 use kufeditor_workspace::{
-    DiagnosticLocation, Document, DocumentEdit, DocumentKind, SkillDocument, SkillTextField,
-    TextSOXDocument, TextSOXField, TroopDocument, TroopField, Workspace, WorkspaceError,
+    ApplyOutcome, DiagnosticLocation, Document, DocumentEdit, DocumentID, DocumentKind,
+    SaveDocument, SaveEditor, SaveNumberTarget, SaveTextField, SaveUnitField, SkillDocument,
+    SkillTextField, StateID, TextSOXDocument, TextSOXField, TroopDocument, TroopField, Workspace,
+    WorkspaceError,
 };
+
+const SAVE_CONTEXT_SIZE: usize = 0x438;
+const SAVE_MAIN_SIZE: usize = 0x154;
+const SAVE_UNIT_SIZE: usize = 483;
+const SAVE_MAP_NAME_OFFSET: usize = 0x20;
+const SAVE_SKILL_DATA_OFFSET: usize = 71;
+const SAVE_UCD_OFFSET: usize = 40;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HistoryState {
+    state: StateID,
+    dirty: bool,
+    can_undo: bool,
+    can_redo: bool,
+}
+
+fn history_state(workspace: &Workspace, id: DocumentID) -> HistoryState {
+    HistoryState {
+        state: workspace.state_id(id).unwrap(),
+        dirty: workspace.is_dirty(id).unwrap(),
+        can_undo: workspace.can_undo(id).unwrap(),
+        can_redo: workspace.can_redo(id).unwrap(),
+    }
+}
+
+fn encoded_bytes(workspace: &mut Workspace, id: DocumentID, path: &Path) -> Vec<u8> {
+    let request = workspace
+        .prepare_save(id, Some(path.to_path_buf()))
+        .unwrap();
+    let token = request.token();
+    request.run().unwrap();
+    workspace.finish_save_failure(id, token).unwrap();
+    fs::read(path).unwrap()
+}
+
+fn assert_unchanged_edit(
+    workspace: &mut Workspace,
+    id: DocumentID,
+    edit: DocumentEdit,
+    path: &Path,
+) {
+    let before_state = history_state(workspace, id);
+    let before_bytes = encoded_bytes(workspace, id, path);
+
+    assert_eq!(workspace.apply(id, edit).unwrap(), ApplyOutcome::Unchanged);
+
+    assert_eq!(history_state(workspace, id), before_state);
+    assert_eq!(encoded_bytes(workspace, id, path), before_bytes);
+}
+
+fn assert_not_save<T>(result: Result<T, WorkspaceError>, id: DocumentID) {
+    match result {
+        Err(WorkspaceError::NotSave(actual)) => assert_eq!(actual, id),
+        Err(error) => panic!("expected NotSave, got {error}"),
+        Ok(_) => panic!("expected NotSave, got success"),
+    }
+}
 
 fn troop_fixture() -> Vec<u8> {
     let mut bytes = vec![0_u8; 8 + 148 + 64];
@@ -92,6 +154,83 @@ fn workspace_with_text_sox() -> (Workspace, kufeditor_workspace::DocumentID) {
         Document::TextSOX(document),
     );
     (workspace, id)
+}
+
+fn save_fixture() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    append_u32(&mut bytes, 0);
+    append_u32(&mut bytes, 0x6e);
+
+    let context = bytes.len();
+    append_u32(&mut bytes, u32::MAX);
+    bytes.resize(context + SAVE_CONTEXT_SIZE, 0);
+    bytes
+        .get_mut(context + 4..context + 9)
+        .unwrap()
+        .copy_from_slice(b"Alpha");
+
+    append_u32(&mut bytes, 2);
+    let main = bytes.len();
+    bytes.resize(main + SAVE_MAIN_SIZE, 0);
+    let map_name = bytes
+        .get_mut(main + SAVE_MAP_NAME_OFFSET..main + SAVE_MAP_NAME_OFFSET + 32)
+        .unwrap();
+    map_name.get_mut(..5).unwrap().copy_from_slice(b"MapA\0");
+    map_name
+        .get_mut(5..31)
+        .unwrap()
+        .copy_from_slice(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+
+    append_u32(&mut bytes, 1);
+    let unit = bytes.len();
+    bytes.resize(unit + SAVE_UNIT_SIZE, 0);
+    patch_u32(&mut bytes, unit + SAVE_UCD_OFFSET, 99);
+    bytes
+        .get_mut(unit + SAVE_SKILL_DATA_OFFSET..unit + SAVE_SKILL_DATA_OFFSET + 24)
+        .unwrap()
+        .copy_from_slice(&[
+            0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad,
+            0xae, 0xaf, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
+        ]);
+
+    append_i32(&mut bytes, -1);
+    append_u32(&mut bytes, 1);
+    bytes.extend_from_slice(&[61, 60, 62, 63]);
+    append_u32(&mut bytes, 6_400);
+    append_u32(&mut bytes, 1);
+    append_u32(&mut bytes, 0x0203_0405);
+    for slot in 0_i32..20 {
+        append_i32(&mut bytes, slot - 1);
+    }
+    append_i32(&mut bytes, -2);
+
+    bytes.resize(0x8000, 0);
+    let length = u32::try_from(bytes.len()).unwrap();
+    patch_u32(&mut bytes, 0, length);
+    bytes
+}
+
+fn append_u32(bytes: &mut Vec<u8>, value: u32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn append_i32(bytes: &mut Vec<u8>, value: i32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn patch_u32(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes
+        .get_mut(offset..offset + size_of::<u32>())
+        .unwrap()
+        .copy_from_slice(&value.to_le_bytes());
+}
+
+fn workspace_with_save() -> (Workspace, DocumentID, Vec<u8>) {
+    let source = save_fixture();
+    let document = SaveDocument::parse(source.clone()).unwrap();
+    let mut workspace = Workspace::new();
+    let id = workspace.open_loaded(PathBuf::from("campaign.sav"), Document::Save(document));
+    (workspace, id, source)
 }
 
 fn move_speed(value: i32) -> DocumentEdit {
@@ -617,4 +756,294 @@ fn text_sox_duplicate_index_diagnostics_retain_the_typed_field() {
                 field: DiagnosticField::TextSOX(TextSOXField::Index),
             }
     }));
+}
+
+#[test]
+fn save_numeric_edit_has_one_exact_undo_and_redo() {
+    let (mut workspace, id, _) = workspace_with_save();
+    let target = SaveNumberTarget::Unit {
+        unit: 0,
+        field: SaveUnitField::UCD,
+    };
+    let saved_state = workspace.state_id(id).unwrap();
+
+    assert_eq!(
+        workspace
+            .apply(id, DocumentEdit::SetSaveNumber { target, value: 2 })
+            .unwrap(),
+        ApplyOutcome::Changed
+    );
+    assert_eq!(
+        workspace.document_kind(id).unwrap(),
+        DocumentKind::CrusadersSave
+    );
+    assert_eq!(workspace.save_number(id, target).unwrap(), 2);
+    assert_ne!(workspace.state_id(id).unwrap(), saved_state);
+    assert!(workspace.is_dirty(id).unwrap());
+    assert!(workspace.can_undo(id).unwrap());
+    assert!(!workspace.can_redo(id).unwrap());
+
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(workspace.save_number(id, target).unwrap(), 99);
+    assert_eq!(workspace.state_id(id).unwrap(), saved_state);
+    assert!(!workspace.is_dirty(id).unwrap());
+    assert!(!workspace.can_undo(id).unwrap());
+    assert!(workspace.can_redo(id).unwrap());
+
+    assert!(workspace.redo(id).unwrap());
+    assert_eq!(workspace.save_number(id, target).unwrap(), 2);
+    assert!(workspace.is_dirty(id).unwrap());
+    assert!(workspace.can_undo(id).unwrap());
+    assert!(!workspace.can_redo(id).unwrap());
+}
+
+#[test]
+fn save_text_undo_and_redo_restore_complete_images() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut workspace, id, source) = workspace_with_save();
+    let main = size_of::<u32>() + size_of::<u32>() + SAVE_CONTEXT_SIZE + size_of::<u32>();
+    let text_range = main + SAVE_MAP_NAME_OFFSET..main + SAVE_MAP_NAME_OFFSET + 32;
+
+    assert_eq!(
+        workspace
+            .apply(
+                id,
+                DocumentEdit::SetSaveText {
+                    field: SaveTextField::MapName,
+                    value: "MapB".to_owned(),
+                },
+            )
+            .unwrap(),
+        ApplyOutcome::Changed
+    );
+    let edited = encoded_bytes(&mut workspace, id, &directory.path().join("edited.sav"));
+    let mut edited_image = [0_u8; 32];
+    edited_image.get_mut(..4).unwrap().copy_from_slice(b"MapB");
+    assert_eq!(
+        edited.get(text_range.clone()),
+        Some(edited_image.as_slice())
+    );
+
+    assert!(workspace.undo(id).unwrap());
+    let undone = encoded_bytes(&mut workspace, id, &directory.path().join("undone.sav"));
+    assert_eq!(undone, source);
+
+    assert!(workspace.redo(id).unwrap());
+    let redone = encoded_bytes(&mut workspace, id, &directory.path().join("redone.sav"));
+    assert_eq!(redone, edited);
+}
+
+#[test]
+fn equal_save_edits_preserve_state_history_and_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut workspace, id, _) = workspace_with_save();
+    let target = SaveNumberTarget::Unit {
+        unit: 0,
+        field: SaveUnitField::UCD,
+    };
+
+    assert_unchanged_edit(
+        &mut workspace,
+        id,
+        DocumentEdit::SetSaveNumber { target, value: 99 },
+        &directory.path().join("equal-number.sav"),
+    );
+    assert_unchanged_edit(
+        &mut workspace,
+        id,
+        DocumentEdit::SetSaveText {
+            field: SaveTextField::MapName,
+            value: "MapA".to_owned(),
+        },
+        &directory.path().join("equal-text.sav"),
+    );
+}
+
+#[test]
+fn equal_save_edit_preserves_an_existing_redo_branch() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut workspace, id, _) = workspace_with_save();
+    let target = SaveNumberTarget::Unit {
+        unit: 0,
+        field: SaveUnitField::UCD,
+    };
+
+    assert_eq!(
+        workspace
+            .apply(id, DocumentEdit::SetSaveNumber { target, value: 2 })
+            .unwrap(),
+        ApplyOutcome::Changed
+    );
+    assert!(workspace.undo(id).unwrap());
+    assert!(workspace.can_redo(id).unwrap());
+
+    assert_unchanged_edit(
+        &mut workspace,
+        id,
+        DocumentEdit::SetSaveNumber { target, value: 99 },
+        &directory.path().join("redo-branch.sav"),
+    );
+
+    assert!(workspace.redo(id).unwrap());
+    assert_eq!(workspace.save_number(id, target).unwrap(), 2);
+}
+
+#[test]
+fn save_edits_on_a_non_save_document_are_state_neutral() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut workspace, id) = workspace_with_troop();
+    let before_state = history_state(&workspace, id);
+    let path = directory.path().join("TroopInfo.sox");
+    let before_bytes = encoded_bytes(&mut workspace, id, &path);
+
+    assert_not_save(
+        workspace.apply(
+            id,
+            DocumentEdit::SetSaveNumber {
+                target: SaveNumberTarget::CampaignIndex,
+                value: 1,
+            },
+        ),
+        id,
+    );
+    assert_not_save(
+        workspace.apply(
+            id,
+            DocumentEdit::SetSaveText {
+                field: SaveTextField::MapName,
+                value: "MapB".to_owned(),
+            },
+        ),
+        id,
+    );
+
+    assert_eq!(history_state(&workspace, id), before_state);
+    assert_eq!(encoded_bytes(&mut workspace, id, &path), before_bytes);
+}
+
+#[test]
+fn save_projections_are_checked_and_complete() {
+    let (workspace, id, _) = workspace_with_save();
+    let target = SaveNumberTarget::Unit {
+        unit: 0,
+        field: SaveUnitField::UCD,
+    };
+
+    assert!(workspace.save_has_size_prefix(id).unwrap());
+    assert!(workspace.save_has_context(id).unwrap());
+    assert_eq!(workspace.save_context_text(id).unwrap(), ["Alpha"]);
+    assert_eq!(workspace.save_unit_count(id).unwrap(), 1);
+    assert_eq!(workspace.save_roster_count(id).unwrap(), 1);
+    assert_eq!(workspace.save_second_array_count(id).unwrap(), 1);
+    assert_eq!(workspace.record_count(id).unwrap(), 1);
+    assert_eq!(workspace.save_number(id, target).unwrap(), 99);
+    assert_eq!(
+        workspace.save_number_storage_bounds(id, target).unwrap(),
+        (0, i64::from(u32::MAX))
+    );
+    assert_eq!(
+        workspace.save_number_editor(id, target).unwrap(),
+        SaveEditor::UCD
+    );
+    assert_eq!(
+        workspace.save_text(id, SaveTextField::MapName).unwrap(),
+        "MapA"
+    );
+    assert_eq!(
+        workspace.save_unit_skill_data(id, 0).unwrap(),
+        [
+            0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad,
+            0xae, 0xaf, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
+        ]
+    );
+    let diagnostics = workspace.save_diagnostics(id).unwrap();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.location == DiagnosticLocation::Save(target) })
+    );
+    assert_eq!(workspace.diagnostics(id).unwrap().len(), diagnostics.len());
+
+    let (troop_workspace, troop_id) = workspace_with_troop();
+    assert_not_save(troop_workspace.save_has_size_prefix(troop_id), troop_id);
+    assert_not_save(troop_workspace.save_has_context(troop_id), troop_id);
+    assert_not_save(troop_workspace.save_context_text(troop_id), troop_id);
+    assert_not_save(troop_workspace.save_unit_count(troop_id), troop_id);
+    assert_not_save(troop_workspace.save_roster_count(troop_id), troop_id);
+    assert_not_save(troop_workspace.save_second_array_count(troop_id), troop_id);
+    assert_not_save(troop_workspace.save_number(troop_id, target), troop_id);
+    assert_not_save(
+        troop_workspace.save_number_storage_bounds(troop_id, target),
+        troop_id,
+    );
+    assert_not_save(
+        troop_workspace.save_number_editor(troop_id, target),
+        troop_id,
+    );
+    assert_not_save(
+        troop_workspace.save_text(troop_id, SaveTextField::MapName),
+        troop_id,
+    );
+    assert_not_save(troop_workspace.save_unit_skill_data(troop_id, 0), troop_id);
+    assert_not_save(troop_workspace.save_diagnostics(troop_id), troop_id);
+}
+
+#[test]
+fn every_existing_sox_edit_variant_treats_equal_values_as_no_ops() {
+    let directory = tempfile::tempdir().unwrap();
+
+    let (mut troop_workspace, troop_id) = workspace_with_troop();
+    assert_unchanged_edit(
+        &mut troop_workspace,
+        troop_id,
+        move_speed(130),
+        &directory.path().join("troop.sox"),
+    );
+
+    let (mut skill_workspace, skill_id) = workspace_with_skill();
+    for (index, edit) in [
+        DocumentEdit::SetSkillID {
+            record: 0,
+            value: -2,
+        },
+        DocumentEdit::SetSkillType {
+            record: 0,
+            value: 2,
+        },
+        DocumentEdit::SetSkillMaxLevel {
+            record: 0,
+            value: 25,
+        },
+        DocumentEdit::SetSkillText {
+            record: 0,
+            field: SkillTextField::LocalizationKey,
+            value: "@(S_Elemental)".to_owned(),
+        },
+        DocumentEdit::SetSkillText {
+            record: 0,
+            field: SkillTextField::IconPath,
+            value: "IL_SKL_Elem.tga".to_owned(),
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_unchanged_edit(
+            &mut skill_workspace,
+            skill_id,
+            edit,
+            &directory.path().join(format!("skill-{index}.sox")),
+        );
+    }
+
+    let (mut text_workspace, text_id) = workspace_with_text_sox();
+    assert_unchanged_edit(
+        &mut text_workspace,
+        text_id,
+        DocumentEdit::SetTextSOXText {
+            record: 0,
+            value: "Alpha".to_owned(),
+        },
+        &directory.path().join("text.sox"),
+    );
 }
