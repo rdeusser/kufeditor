@@ -64,7 +64,7 @@ pub struct SaveTextProjection {
     pub id: SaveProjectionID,
     pub field: SaveTextField,
     pub label: String,
-    pub value: String,
+    pub value: Result<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -323,6 +323,21 @@ impl SaveRows {
         })
     }
 
+    fn reconciled_unit(&self, requested_unit: usize) -> Option<usize> {
+        if self.kind != SaveRowKind::Units {
+            return None;
+        }
+        match &self.indices {
+            SaveRowIndices::Contiguous(unit_count) => {
+                (*unit_count > 0).then(|| requested_unit.min(unit_count - 1))
+            }
+            SaveRowIndices::Filtered(indices) => indices
+                .contains(&requested_unit)
+                .then_some(requested_unit)
+                .or_else(|| indices.first().copied()),
+        }
+    }
+
     pub fn locations(&self, requested: Range<usize>) -> Vec<SaveRowLocation> {
         let requested = bounded_range(requested, self.len());
         requested
@@ -444,7 +459,7 @@ pub fn summary_projection(
     let text_fields = SaveTextField::ALL
         .into_iter()
         .map(|field| text_projection(workspace, document, field))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
     let main_fields = SaveMainField::ALL
         .into_iter()
         .map(|field| number_projection(workspace, document, SaveNumberTarget::Main(field)))
@@ -617,22 +632,22 @@ pub fn save_section_model(
             Ok(SaveSectionModel::Units { rows, inspected })
         }
         SaveSection::Equipment => {
-            let unit_count = workspace.save_unit_count(document)?;
-            let (inspected_unit, selected) = if unit_count == 0 {
-                (None, None)
-            } else {
-                let unit = state.inspected_unit().min(unit_count - 1);
-                (
-                    Some(unit_row_projection(workspace, document, unit, dictionary)?),
-                    Some(equipment_projection(
-                        workspace,
-                        document,
-                        unit,
-                        state.equipment_slot(),
-                        dictionary,
-                    )?),
-                )
-            };
+            let rows = SaveRows::units(workspace, document, dictionary, state.unit_filter())?;
+            let (inspected_unit, selected) =
+                if let Some(unit) = rows.reconciled_unit(state.inspected_unit()) {
+                    (
+                        Some(unit_row_projection(workspace, document, unit, dictionary)?),
+                        Some(equipment_projection(
+                            workspace,
+                            document,
+                            unit,
+                            state.equipment_slot(),
+                            dictionary,
+                        )?),
+                    )
+                } else {
+                    (None, None)
+                };
             Ok(SaveSectionModel::Equipment {
                 slots: SaveEquipmentSlot::ALL,
                 inspected_unit,
@@ -777,8 +792,8 @@ fn text_projection(
     workspace: &Workspace,
     document: DocumentID,
     field: SaveTextField,
-) -> SaveProjectionResult<SaveTextProjection> {
-    Ok(SaveTextProjection {
+) -> SaveTextProjection {
+    SaveTextProjection {
         id: projection_id(
             document,
             SaveSection::Summary,
@@ -788,8 +803,10 @@ fn text_projection(
         ),
         field,
         label: field.label().to_owned(),
-        value: workspace.save_text(document, field)?,
-    })
+        value: workspace
+            .save_text(document, field)
+            .map_err(|error| error.to_string()),
+    }
 }
 
 fn display_editor_value(editor: SaveEditor, raw_value: i64) -> String {
@@ -955,7 +972,7 @@ pub fn render_editor(
 pub fn section_rail_item(
     theme: &Theme,
     id: impl Into<ElementId>,
-    label: &'static str,
+    label: impl Into<String>,
     selected: bool,
 ) -> Stateful<Div> {
     let hover = theme.raised;
@@ -993,7 +1010,7 @@ pub fn section_rail_item(
                 })
                 .child(if selected { "◆" } else { "·" }),
         )
-        .child(label)
+        .child(label.into())
         .children(selected.then(|| {
             div()
                 .ml_auto()
@@ -1005,12 +1022,13 @@ pub fn section_rail_item(
 
 pub fn catalog_status(
     theme: &Theme,
+    id: &'static str,
     title: impl Into<String>,
     detail: impl Into<Option<String>>,
 ) -> Stateful<Div> {
     div()
-        .id("save-catalog-status")
-        .debug_selector(|| "save-catalog-status".to_owned())
+        .id(id)
+        .debug_selector(move || id.to_owned())
         .flex_none()
         .px(px(18.0))
         .py(px(9.0))
@@ -1102,6 +1120,7 @@ pub fn split_section(
     list: AnyElement,
     details: Vec<AnyElement>,
 ) -> Div {
+    let detail_selector = format!("save-detail-panel:{id}");
     div().size_full().child(
         div()
             .id(id)
@@ -1131,6 +1150,7 @@ pub fn split_section(
                     .child(
                         div()
                             .id(SharedString::from(format!("save-detail-scroll:{id}")))
+                            .debug_selector(move || detail_selector.clone())
                             .flex_1()
                             .min_w_0()
                             .min_h_0()
@@ -1166,6 +1186,32 @@ pub fn group(theme: &Theme, label: &'static str, fields: Vec<AnyElement>) -> Div
                 .p(px(9.0))
                 .flex()
                 .flex_col()
+                .gap(px(6.0))
+                .children(fields),
+        )
+}
+
+pub fn mission_completion_group(theme: &Theme, fields: Vec<AnyElement>) -> Div {
+    components::surface(theme)
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .h(px(38.0))
+                .px(px(13.0))
+                .flex()
+                .items_center()
+                .border_b_1()
+                .border_color(theme.border)
+                .text_size(px(11.0))
+                .text_color(theme.accent)
+                .child("MISSION COMPLETION · 20 ROWS"),
+        )
+        .child(
+            div()
+                .p(px(9.0))
+                .grid()
+                .grid_cols(2)
                 .gap(px(6.0))
                 .children(fields),
         )
@@ -1280,7 +1326,7 @@ pub fn unit_row(
                     div()
                         .text_size(px(11.0))
                         .text_color(theme.text_dim)
-                        .child(format!("{} · Skill {}", row.role, row.skill_level)),
+                        .child(unit_row_metadata(row)),
                 ),
         )
         .children(selected.then(|| {
@@ -1289,6 +1335,13 @@ pub fn unit_row(
                 .text_size(px(11.0))
                 .child("INSPECTING")
         }))
+}
+
+pub fn unit_row_metadata(row: &SaveUnitRowProjection) -> String {
+    format!(
+        "{} · Skill {} · Character {}",
+        row.role, row.skill_level, row.character_id
+    )
 }
 
 pub fn player_leader_row(
@@ -1340,15 +1393,38 @@ pub fn roster_row(
     id: impl Into<ElementId>,
     row: &SaveRosterRowProjection,
 ) -> Stateful<Div> {
-    let values = row
+    let fields = row
         .fields
         .iter()
-        .map(|field| field.raw_value.to_string())
-        .collect::<Vec<_>>()
-        .join(" · ");
+        .map(|field| {
+            let selector = match field.target {
+                SaveNumberTarget::Roster { field, .. } => roster_field_selector(field),
+                _ => "save-roster-field-unexpected",
+            };
+            div()
+                .id(roster_field_element_id(field.id))
+                .debug_selector(move || selector.to_owned())
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(theme.text_dim)
+                        .child(field.label.clone()),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_color(theme.text)
+                        .child(field.display_value.clone()),
+                )
+        })
+        .collect::<Vec<_>>();
     div()
         .id(id)
-        .h(px(48.0))
+        .h(px(64.0))
         .px(px(12.0))
         .flex()
         .items_center()
@@ -1357,19 +1433,35 @@ pub fn roster_row(
         .border_color(theme.border)
         .child(
             div()
-                .flex_1()
-                .min_w_0()
+                .flex_none()
+                .w(px(150.0))
                 .truncate()
                 .text_color(theme.text)
                 .child(row.label.clone()),
         )
         .child(
             div()
-                .flex_none()
-                .text_size(px(11.0))
-                .text_color(theme.text_dim)
-                .child(values),
+                .grid()
+                .grid_cols(5)
+                .flex_1()
+                .min_w_0()
+                .gap(px(10.0))
+                .children(fields),
         )
+}
+
+pub fn roster_field_element_id(id: SaveProjectionID) -> SharedString {
+    format!("save-roster-field:{id:?}").into()
+}
+
+const fn roster_field_selector(field: SaveRosterField) -> &'static str {
+    match field {
+        SaveRosterField::Byte60 => "save-roster-field-byte-60",
+        SaveRosterField::Byte61 => "save-roster-field-byte-61",
+        SaveRosterField::Byte62 => "save-roster-field-byte-62",
+        SaveRosterField::Byte63 => "save-roster-field-byte-63",
+        SaveRosterField::Value64 => "save-roster-field-value-64",
+    }
 }
 
 pub fn second_array_row(
@@ -1395,6 +1487,7 @@ pub fn equipment_slot_button(
     id: impl Into<ElementId>,
     label: &'static str,
     selected: bool,
+    enabled: bool,
 ) -> Stateful<Div> {
     let hover = theme.raised;
     div()
@@ -1413,8 +1506,10 @@ pub fn equipment_slot_button(
             theme.surface
         })
         .text_color(if selected { theme.text } else { theme.text_dim })
-        .cursor_pointer()
-        .hover(move |style| style.bg(hover))
+        .when(enabled, |button| {
+            button.cursor_pointer().hover(move |style| style.bg(hover))
+        })
+        .when(!enabled, |button| button.opacity(0.45))
         .child(if selected { "✓" } else { "" })
         .child(label)
 }
@@ -1440,8 +1535,10 @@ pub fn skill_bytes(theme: &Theme, values: &[u8; 24]) -> Div {
     )
 }
 
-pub fn inline_name_unavailable(theme: &Theme, subject: &'static str) -> Div {
+pub fn inline_name_unavailable(theme: &Theme, subject: &'static str) -> Stateful<Div> {
     div()
+        .id("save-name-unavailable")
+        .debug_selector(|| "save-name-unavailable".to_owned())
         .px(px(12.0))
         .py(px(8.0))
         .rounded_md()
@@ -1491,8 +1588,9 @@ mod tests {
 
     use super::{
         SaveProjectionField, SaveRowKind, SaveRowProjection, SaveRows, SaveSectionModel,
-        equipment_projection, mission_projection, render_editor, save_section_model,
-        summary_projection, unit_projection, visible_unit_indices,
+        equipment_projection, mission_projection, render_editor, roster_field_element_id,
+        roster_row, save_section_model, summary_projection, unit_projection, unit_row_metadata,
+        visible_unit_indices,
     };
     use crate::{
         state::{SavePresentationState, SavePresentationStates, SaveSection, SaveUnitVisibility},
@@ -1599,14 +1697,47 @@ mod tests {
         roster_count: usize,
         second_array_count: usize,
     ) -> (Workspace, DocumentID) {
-        let mut bytes = save_fixture(1, roster_count, second_array_count);
+        workspace_with_role_save(0, roster_count, second_array_count)
+    }
+
+    fn workspace_with_role_save(
+        role: u32,
+        roster_count: usize,
+        second_array_count: usize,
+    ) -> (Workspace, DocumentID) {
+        workspace_with_roles_save(&[role], roster_count, second_array_count)
+    }
+
+    fn workspace_with_roles_save(
+        roles: &[u32],
+        roster_count: usize,
+        second_array_count: usize,
+    ) -> (Workspace, DocumentID) {
+        let mut bytes = save_fixture(roles.len(), roster_count, second_array_count);
         let unit_offset =
             2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>() + MAIN_SIZE + size_of::<u32>();
-        let ucd_offset = unit_offset + 10 * size_of::<u32>();
+        for (unit, role) in roles.iter().copied().enumerate() {
+            let ucd_offset = unit_offset + unit * UNIT_SIZE + 10 * size_of::<u32>();
+            bytes
+                .get_mut(ucd_offset..ucd_offset + size_of::<u32>())
+                .unwrap()
+                .copy_from_slice(&role.to_le_bytes());
+        }
+        let document = SaveDocument::parse(bytes).unwrap();
+        let mut workspace = Workspace::new();
+        let document =
+            workspace.open_loaded(PathBuf::from("campaign.sav"), Document::Save(document));
+        (workspace, document)
+    }
+
+    fn workspace_with_invalid_text_save() -> (Workspace, DocumentID) {
+        let mut bytes = save_fixture(0, 0, 0);
+        let main_offset = 2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>();
+        *bytes.get_mut(main_offset + 0x20).unwrap() = 0x80;
         bytes
-            .get_mut(ucd_offset..ucd_offset + size_of::<u32>())
+            .get_mut(main_offset + 0x60..main_offset + 0x68)
             .unwrap()
-            .copy_from_slice(&0_u32.to_le_bytes());
+            .copy_from_slice(b"GOOD.SOX");
         let document = SaveDocument::parse(bytes).unwrap();
         let mut workspace = Workspace::new();
         let document =
@@ -1779,6 +1910,31 @@ mod tests {
     }
 
     #[test]
+    fn save_view_summary_isolates_one_invalid_fixed_text_field() {
+        let (workspace, document) = workspace_with_invalid_text_save();
+
+        let summary = summary_projection(&workspace, document).unwrap();
+
+        assert_eq!(summary.campaign.raw_value, 0);
+        assert_eq!(summary.main_fields.len(), 7);
+        assert_eq!(summary.text_fields.len(), 3);
+        assert_eq!(
+            summary.text_fields.first().unwrap().value,
+            Err(
+                "save text field MapName contains non-ASCII stored byte 0x80 at index 0".to_owned()
+            )
+        );
+        assert_eq!(
+            summary.text_fields.get(1).unwrap().value,
+            Ok("GOOD.SOX".to_owned())
+        );
+        assert_eq!(summary.text_fields.get(2).unwrap().value, Ok(String::new()));
+        assert_eq!(summary.unit_count, 0);
+        assert!(summary.has_size_prefix);
+        assert!(summary.has_context);
+    }
+
+    #[test]
     fn save_view_units_keep_virtual_rows_groups_raw_identity_and_skill_bytes() {
         let (workspace, document) = workspace_with_leader_save(0, 0);
         let units = save_section_model(
@@ -1814,6 +1970,10 @@ mod tests {
         assert_eq!(unit_group_count(SaveUnitGroup::Core), 10);
         assert_eq!(unit_group_count(SaveUnitGroup::Formation), 2);
         assert_eq!(unit_group_count(SaveUnitGroup::Advanced), 9);
+        assert_eq!(
+            unit_row_metadata(&inspected.row),
+            "Leader (0) · Skill 8 · Character -1",
+        );
     }
 
     #[test]
@@ -1870,6 +2030,79 @@ mod tests {
     }
 
     #[test]
+    fn save_view_equipment_does_not_resurrect_a_unit_hidden_by_the_filter() {
+        let (workspace, document) = workspace_with_role_save(3, 0, 0);
+        let filtered = SaveRows::units(&workspace, document, None, "leader").unwrap();
+        assert!(filtered.is_empty());
+        let mut presentations = SavePresentationStates::default();
+        presentations.set_unit_filter(
+            document,
+            "leader".to_owned(),
+            filtered.unit_visibility().unwrap(),
+            false,
+        );
+        presentations.select_section(document, SaveSection::Equipment, false);
+
+        let SaveSectionModel::Equipment {
+            inspected_unit,
+            selected,
+            ..
+        } = save_section_model(
+            &workspace,
+            document,
+            presentations.get(document).unwrap(),
+            None,
+        )
+        .unwrap()
+        else {
+            panic!("equipment state must produce the equipment view");
+        };
+
+        assert_eq!(inspected_unit, None);
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn save_view_equipment_uses_the_first_visible_unit_when_unit_zero_is_hidden() {
+        let (workspace, document) = workspace_with_roles_save(&[3, 0], 0, 0);
+        let filtered = SaveRows::units(&workspace, document, None, "leader").unwrap();
+        assert_eq!(
+            filtered
+                .locations(0..filtered.len())
+                .into_iter()
+                .map(|location| location.source_index)
+                .collect::<Vec<_>>(),
+            [1],
+        );
+        let mut presentations = SavePresentationStates::default();
+        presentations.set_unit_filter(
+            document,
+            "leader".to_owned(),
+            filtered.unit_visibility().unwrap(),
+            false,
+        );
+        presentations.select_section(document, SaveSection::Equipment, false);
+
+        let SaveSectionModel::Equipment {
+            inspected_unit,
+            selected,
+            ..
+        } = save_section_model(
+            &workspace,
+            document,
+            presentations.get(document).unwrap(),
+            None,
+        )
+        .unwrap()
+        else {
+            panic!("equipment state must produce the equipment view");
+        };
+
+        assert_eq!(inspected_unit.unwrap().source_index, 1);
+        assert_eq!(selected.unwrap().unit, 1);
+    }
+
+    #[test]
     fn save_view_roster_summarizes_player_leaders_and_keeps_world_rows_lazy() {
         let (workspace, document) = workspace_with_leader_save(2, 0);
         let roster = save_section_model(
@@ -1897,6 +2130,56 @@ mod tests {
         assert_eq!(leader.role, "Leader (0)");
         assert_eq!(leader.id.section, SaveSection::Roster);
         assert_eq!(world_map_rows.len(), 2);
+    }
+
+    #[gpui::test]
+    fn save_view_world_map_row_renders_five_labeled_stable_fields(cx: &mut TestAppContext) {
+        let (workspace, document) = workspace_with_save(0, 1, 0);
+        let rows = SaveRows::roster(&workspace, document).unwrap();
+        let projected = rows.project_range(&workspace, None, 0..1).unwrap();
+        let Some(SaveRowProjection::Roster(row)) = projected.first() else {
+            panic!("world-map rows must project roster fields");
+        };
+        assert_eq!(
+            row.fields
+                .iter()
+                .map(|field| field.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Byte 60", "Byte 61", "Byte 62", "Byte 63", "Value 64"],
+        );
+        assert_eq!(
+            row.fields
+                .iter()
+                .map(|field| field.id)
+                .collect::<HashSet<_>>()
+                .len(),
+            5,
+        );
+        assert_eq!(
+            row.fields
+                .iter()
+                .map(|field| roster_field_element_id(field.id))
+                .collect::<HashSet<_>>()
+                .len(),
+            5,
+        );
+
+        let row = row.clone();
+        let cx = cx.add_empty_window();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(900.0), px(120.0)),
+            |_, _| roster_row(&Theme::default(), "roster-row-test", &row),
+        );
+        for selector in [
+            "save-roster-field-byte-60",
+            "save-roster-field-byte-61",
+            "save-roster-field-byte-62",
+            "save-roster-field-byte-63",
+            "save-roster-field-value-64",
+        ] {
+            assert!(cx.debug_bounds(selector).is_some(), "missing {selector}");
+        }
     }
 
     #[test]

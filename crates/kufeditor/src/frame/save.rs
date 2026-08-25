@@ -175,7 +175,10 @@ impl AppFrame {
             )
             .into_any_element(),
         ];
-        save::group(&self.theme, "ENVELOPE", envelope).into_any_element()
+        save::group(&self.theme, "ENVELOPE", envelope)
+            .id("save-summary-envelope")
+            .debug_selector(|| "save-summary-envelope".to_owned())
+            .into_any_element()
     }
 
     fn save_summary_values(&self, summary: &save::SaveSummaryProjection) -> AnyElement {
@@ -187,7 +190,10 @@ impl AppFrame {
                 .map(|field| self.save_number_row(field)),
         );
         values.push(self.save_number_row(&summary.saved_unit_reference));
-        save::group(&self.theme, "SAVE VALUES", values).into_any_element()
+        save::group(&self.theme, "SAVE VALUES", values)
+            .id("save-summary-values")
+            .debug_selector(|| "save-summary-values".to_owned())
+            .into_any_element()
     }
 
     fn save_summary_text(&self, summary: &save::SaveSummaryProjection) -> AnyElement {
@@ -195,13 +201,21 @@ impl AppFrame {
             .text_fields
             .iter()
             .map(|field| {
-                save::text_value_row(
+                let row = save::text_value_row(
                     &self.theme,
                     projection_element_id("save-text", field.id),
                     field.label.clone(),
-                    empty_label(&field.value),
-                )
-                .into_any_element()
+                    match &field.value {
+                        Ok(value) => empty_label(value),
+                        Err(error) => error.clone(),
+                    },
+                );
+                if field.value.is_ok() {
+                    row.into_any_element()
+                } else {
+                    row.debug_selector(|| "save-fixed-text-error".to_owned())
+                        .into_any_element()
+                }
             })
             .collect();
         save::group(&self.theme, "FIXED STRINGS", text).into_any_element()
@@ -270,7 +284,10 @@ impl AppFrame {
             )
             .into_any_element(),
         ];
-        save::group(&self.theme, "COUNTS AND ROLES", counts).into_any_element()
+        save::group(&self.theme, "COUNTS AND ROLES", counts)
+            .id("save-summary-counts")
+            .debug_selector(|| "save-summary-counts".to_owned())
+            .into_any_element()
     }
 
     fn save_summary_context(
@@ -311,22 +328,8 @@ impl AppFrame {
         cx: &mut Context<Self>,
     ) -> Div {
         let list = self.save_unit_list(document, state, rows.clone(), cx);
-        let details = inspected.map_or_else(
-            || {
-                vec![
-                    save::empty_state(
-                        &self.theme,
-                        if rows.is_empty() && state.unit_filter().is_empty() {
-                            "This save has no unit records."
-                        } else {
-                            "No units match the current filter."
-                        },
-                    )
-                    .into_any_element(),
-                ]
-            },
-            |unit| self.save_unit_details(document, &unit),
-        );
+        let details =
+            inspected.map_or_else(Vec::new, |unit| self.save_unit_details(document, &unit));
         save::split_section(
             &self.theme,
             "save-units",
@@ -360,9 +363,18 @@ impl AppFrame {
             })
             .collect::<Vec<_>>();
         let list = if rows.is_empty() {
-            save::empty_state(&self.theme, "No unit rows to display.")
-                .size_full()
-                .into_any_element()
+            save::empty_state(
+                &self.theme,
+                if state.unit_filter().is_empty() {
+                    "This save has no unit records."
+                } else {
+                    "No units match the current filter."
+                },
+            )
+            .id("save-unit-empty")
+            .debug_selector(|| "save-unit-empty".to_owned())
+            .size_full()
+            .into_any_element()
         } else {
             save::uniform_save_rows(
                 save_local_id("save-unit-list", document, 0),
@@ -414,6 +426,7 @@ impl AppFrame {
                     &row,
                     selected,
                 )
+                .debug_selector(|| "save-unit-master-row".to_owned())
                 .tab_stop(true)
                 .on_click(cx.listener(move |frame, _, window, cx| {
                     frame.inspect_save_unit(document, location.source_index, cx);
@@ -492,18 +505,29 @@ impl AppFrame {
         selected: Option<&save::SaveEquipmentProjection>,
         cx: &mut Context<Self>,
     ) -> Div {
-        let mut content = vec![self.save_equipment_slot_bar(document, state, slots, cx)];
-        match (inspected_unit, selected) {
-            (Some(unit), Some(equipment)) => {
-                content.extend(self.save_equipment_details(document, unit, equipment));
-            }
-            _ => content.push(
-                save::empty_state(
-                    &self.theme,
+        let slots_enabled = inspected_unit.is_some();
+        let mut content =
+            vec![self.save_equipment_slot_bar(document, state, slots, slots_enabled, cx)];
+        if let (Some(unit), Some(equipment)) = (inspected_unit, selected) {
+            content.extend(self.save_equipment_details(document, unit, equipment));
+        } else {
+            let (selector, message) = if state.unit_filter().is_empty() {
+                (
+                    "save-equipment-save-empty",
                     "This save has no units, so there is no equipment to inspect.",
                 )
-                .into_any_element(),
-            ),
+            } else {
+                (
+                    "save-equipment-filter-empty",
+                    "No units match the current filter, so there is no equipment to inspect.",
+                )
+            };
+            content.push(
+                save::empty_state(&self.theme, message)
+                    .id(selector)
+                    .debug_selector(move || selector.to_owned())
+                    .into_any_element(),
+            );
         }
 
         save::scrolling_section(
@@ -520,24 +544,33 @@ impl AppFrame {
         document: DocumentID,
         state: &SavePresentationState,
         slots: [SaveEquipmentSlot; 6],
+        enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let slot_buttons = slots
             .into_iter()
             .enumerate()
             .map(|(index, slot)| {
-                save::equipment_slot_button(
+                let selector = equipment_slot_selector(slot, enabled);
+                let button = save::equipment_slot_button(
                     &self.theme,
                     ("save-equipment-slot", index),
                     slot.label(),
                     state.equipment_slot() == slot,
+                    enabled,
                 )
-                .tab_stop(true)
-                .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.select_save_equipment_slot(document, slot, cx);
-                    window.focus(&frame.focus);
-                }))
-                .into_any_element()
+                .debug_selector(move || selector.to_owned());
+                if enabled {
+                    button
+                        .tab_stop(true)
+                        .on_click(cx.listener(move |frame, _, window, cx| {
+                            frame.select_save_equipment_slot(document, slot, cx);
+                            window.focus(&frame.focus);
+                        }))
+                        .into_any_element()
+                } else {
+                    button.into_any_element()
+                }
             })
             .collect::<Vec<_>>();
         components::surface(&self.theme)
@@ -630,7 +663,10 @@ impl AppFrame {
     ) -> Div {
         let leader_count = player_leaders.len();
         let leader_summary = if player_leaders.is_empty() {
-            save::empty_state(&self.theme, "No player leaders were found.").into_any_element()
+            save::empty_state(&self.theme, "No player leaders were found.")
+                .id("save-player-leaders-empty")
+                .debug_selector(|| "save-player-leaders-empty".to_owned())
+                .into_any_element()
         } else {
             save::uniform_save_rows(
                 save_local_id("save-player-leader-list", document, 0),
@@ -645,6 +681,8 @@ impl AppFrame {
         let row_count = world_map_rows.len();
         let list = if world_map_rows.is_empty() {
             save::empty_state(&self.theme, "This save has no world-map rows.")
+                .id("save-roster-empty")
+                .debug_selector(|| "save-roster-empty".to_owned())
                 .size_full()
                 .into_any_element()
         } else {
@@ -710,6 +748,7 @@ impl AppFrame {
                 projection_element_id("save-player-leader", row.id),
                 &row,
             )
+            .debug_selector(|| "save-player-leader-row".to_owned())
             .into_any_element(),
             Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
             Err(error) => save::empty_state(&self.theme, format!("Could not read leader: {error}"))
@@ -743,7 +782,26 @@ impl AppFrame {
         cx: &mut Context<Self>,
     ) -> Div {
         let second_count = second_array_rows.len();
-        let second_list = self.save_second_array_list(document, second_array_rows, cx);
+        let second_panel = if second_array_rows.is_empty() {
+            None
+        } else {
+            let second_list = self.save_second_array_list(document, second_array_rows, cx);
+            Some(self.save_second_array_panel(second_list))
+        };
+        let fixed_scroll = div()
+            .id("save-mission-fixed-scroll")
+            .min_h_0()
+            .overflow_y_scroll()
+            .p(px(14.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .children(self.save_mission_fixed(mission));
+        let fixed_scroll = if second_count == 0 {
+            fixed_scroll.flex_1()
+        } else {
+            fixed_scroll.flex_none().w(px(430.0))
+        };
 
         div().size_full().child(
             div()
@@ -763,20 +821,8 @@ impl AppFrame {
                         .flex()
                         .flex_1()
                         .min_h_0()
-                        .child(
-                            div()
-                                .id("save-mission-fixed-scroll")
-                                .flex_none()
-                                .w(px(430.0))
-                                .min_h_0()
-                                .overflow_y_scroll()
-                                .p(px(14.0))
-                                .flex()
-                                .flex_col()
-                                .gap(px(12.0))
-                                .children(self.save_mission_fixed(mission)),
-                        )
-                        .child(self.save_second_array_panel(second_list)),
+                        .child(fixed_scroll)
+                        .children(second_panel),
                 ),
         )
     }
@@ -814,9 +860,8 @@ impl AppFrame {
             .into_any_element(),
         ];
         fixed.push(
-            save::group(
+            save::mission_completion_group(
                 &self.theme,
-                "MISSION COMPLETION · 20 ROWS",
                 mission
                     .completions
                     .iter()
@@ -828,6 +873,7 @@ impl AppFrame {
                             format!("Mission {}", index + 1),
                             field.display_value.clone(),
                         )
+                        .debug_selector(move || format!("save-mission-completion-{index}"))
                         .into_any_element()
                     })
                     .collect(),
@@ -837,8 +883,10 @@ impl AppFrame {
         fixed
     }
 
-    fn save_second_array_panel(&self, second_list: AnyElement) -> Div {
+    fn save_second_array_panel(&self, second_list: AnyElement) -> gpui::Stateful<Div> {
         div()
+            .id("save-second-array-panel")
+            .debug_selector(|| "save-second-array-panel".to_owned())
             .flex()
             .flex_col()
             .flex_1()
@@ -902,13 +950,15 @@ impl AppFrame {
         selected: SaveSection,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        let unit_count = self.workspace.save_unit_count(document).unwrap_or(0);
+        let roster_count = self.workspace.save_roster_count(document).unwrap_or(0);
         SAVE_SECTIONS
             .into_iter()
             .map(|section| {
                 save::section_rail_item(
                     &self.theme,
                     save_section_id(section),
-                    save_section_label(section),
+                    save_section_label(section, unit_count, roster_count),
                     selected == section,
                 )
                 .tab_stop(true)
@@ -926,6 +976,7 @@ impl AppFrame {
             SaveCatalogStatus::NotConfigured => Some(
                 save::catalog_status(
                     &self.theme,
+                    "save-catalog-not-configured",
                     "Crusaders installation is not configured",
                     Some("Raw IDs remain available without game names.".to_owned()),
                 )
@@ -934,6 +985,7 @@ impl AppFrame {
             SaveCatalogStatus::Dormant => Some(
                 save::catalog_status(
                     &self.theme,
+                    "save-catalog-dormant",
                     "Crusaders names are unavailable",
                     Some("Raw IDs remain available.".to_owned()),
                 )
@@ -942,6 +994,7 @@ impl AppFrame {
             SaveCatalogStatus::Loading { .. } => Some(
                 save::catalog_status(
                     &self.theme,
+                    "save-catalog-loading",
                     "Loading Crusaders names",
                     Some("The save remains readable as raw values.".to_owned()),
                 )
@@ -950,6 +1003,7 @@ impl AppFrame {
             SaveCatalogStatus::Failed { error, .. } => Some(
                 save::catalog_status(
                     &self.theme,
+                    "save-catalog-failed",
                     "Could not load Crusaders names",
                     Some(format!("{error}. Raw IDs remain available.")),
                 )
@@ -959,6 +1013,7 @@ impl AppFrame {
             SaveCatalogStatus::Ready { issue_count, .. } => Some(
                 save::catalog_status(
                     &self.theme,
+                    "save-catalog-ready-issues",
                     format!("Loaded names with {issue_count} catalog issues"),
                     Some("Some records can use raw fallback labels.".to_owned()),
                 )
@@ -1093,13 +1148,34 @@ fn equipment_field_group(target: SaveNumberTarget) -> Option<SaveEquipmentGroup>
     }
 }
 
-const fn save_section_label(section: SaveSection) -> &'static str {
+const fn equipment_slot_selector(slot: SaveEquipmentSlot, enabled: bool) -> &'static str {
+    match (slot, enabled) {
+        (SaveEquipmentSlot::LeaderWeapon, true) => "save-equipment-slot-leader-weapon",
+        (SaveEquipmentSlot::LeaderAccessory, true) => "save-equipment-slot-leader-accessory",
+        (SaveEquipmentSlot::LeaderArmor, true) => "save-equipment-slot-leader-armor",
+        (SaveEquipmentSlot::TroopWeapon, true) => "save-equipment-slot-troop-weapon",
+        (SaveEquipmentSlot::TroopAccessory, true) => "save-equipment-slot-troop-accessory",
+        (SaveEquipmentSlot::TroopArmor, true) => "save-equipment-slot-troop-armor",
+        (SaveEquipmentSlot::LeaderWeapon, false) => "save-equipment-slot-leader-weapon-disabled",
+        (SaveEquipmentSlot::LeaderAccessory, false) => {
+            "save-equipment-slot-leader-accessory-disabled"
+        }
+        (SaveEquipmentSlot::LeaderArmor, false) => "save-equipment-slot-leader-armor-disabled",
+        (SaveEquipmentSlot::TroopWeapon, false) => "save-equipment-slot-troop-weapon-disabled",
+        (SaveEquipmentSlot::TroopAccessory, false) => {
+            "save-equipment-slot-troop-accessory-disabled"
+        }
+        (SaveEquipmentSlot::TroopArmor, false) => "save-equipment-slot-troop-armor-disabled",
+    }
+}
+
+fn save_section_label(section: SaveSection, unit_count: usize, roster_count: usize) -> String {
     match section {
-        SaveSection::Summary => "Summary",
-        SaveSection::Units => "Units",
-        SaveSection::Equipment => "Equipment",
-        SaveSection::Roster => "Roster",
-        SaveSection::Missions => "Missions",
+        SaveSection::Summary => "Summary".to_owned(),
+        SaveSection::Units => format!("Units · {unit_count}"),
+        SaveSection::Equipment => "Equipment".to_owned(),
+        SaveSection::Roster => format!("Roster · {roster_count}"),
+        SaveSection::Missions => "Missions".to_owned(),
     }
 }
 
@@ -1135,14 +1211,41 @@ fn empty_label(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SAVE_SECTIONS, UNIT_FILTERS, save_section_id, save_section_label};
-    use crate::state::SaveSection;
+    #![allow(
+        clippy::unwrap_used,
+        reason = "controlled GPUI and save fixtures make failures fatal"
+    )]
+
+    use std::{fs, mem::size_of, path::PathBuf, sync::Arc};
+
+    use gpui::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
+    use kufeditor_game::{CatalogRole, Game, InstallationError, load_name_dictionary};
+    use kufeditor_workspace::{Document, DocumentID, SaveDocument, SaveEquipmentSlot};
+
+    use super::{AppFrame, SAVE_SECTIONS, UNIT_FILTERS, save_section_id, save_section_label};
+    use crate::{
+        catalog_status::CatalogRequestError,
+        save_catalog_status::SaveCatalogKey,
+        settings::SettingsStartup,
+        state::{Area, SaveSection},
+    };
+
+    const CONTEXT_SIZE: usize = 0x438;
+    const MAIN_SIZE: usize = 0x154;
+    const UNIT_SIZE: usize = 483;
+    const EQUIPMENT_SIZE: usize = 64;
 
     #[test]
     fn save_view_section_rail_has_stable_labels_and_focus_order() {
         assert_eq!(
-            SAVE_SECTIONS.map(save_section_label),
-            ["Summary", "Units", "Equipment", "Roster", "Missions"],
+            SAVE_SECTIONS.map(|section| save_section_label(section, 3, 7)),
+            [
+                "Summary",
+                "Units · 3",
+                "Equipment",
+                "Roster · 7",
+                "Missions",
+            ],
         );
         assert_eq!(
             SAVE_SECTIONS.map(save_section_id),
@@ -1168,5 +1271,292 @@ mod tests {
                 ("Troops", "troop"),
             ],
         );
+    }
+
+    #[gpui::test]
+    fn save_view_draws_each_real_section_from_the_app_frame(cx: &mut TestAppContext) {
+        let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
+        let cx = cx.add_empty_window();
+        let document = activate_save(&frame, cx, save_fixture(1, 1, 1));
+
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-summary").is_some());
+        assert!(cx.debug_bounds("save-summary-envelope").is_some());
+
+        select_and_draw(&frame, cx, document, SaveSection::Units);
+        assert!(cx.debug_bounds("save-units").is_some());
+        assert!(cx.debug_bounds("save-unit-master-row").is_some());
+
+        select_and_draw(&frame, cx, document, SaveSection::Equipment);
+        assert!(cx.debug_bounds("save-equipment").is_some());
+        assert!(
+            cx.debug_bounds("save-equipment-slot-leader-weapon")
+                .is_some()
+        );
+
+        select_and_draw(&frame, cx, document, SaveSection::Roster);
+        assert!(cx.debug_bounds("save-roster").is_some());
+        assert!(cx.debug_bounds("save-player-leader-row").is_some());
+        assert!(cx.debug_bounds("save-roster-field-byte-60").is_some());
+
+        select_and_draw(&frame, cx, document, SaveSection::Missions);
+        assert!(cx.debug_bounds("save-missions").is_some());
+        let first = cx.debug_bounds("save-mission-completion-0").unwrap();
+        let second = cx.debug_bounds("save-mission-completion-1").unwrap();
+        assert_eq!(first.origin.y, second.origin.y);
+        assert_ne!(first.origin.x, second.origin.x);
+        assert!(cx.debug_bounds("save-second-array-panel").is_some());
+    }
+
+    #[gpui::test]
+    fn save_view_draws_empty_states_without_duplicate_or_inert_panes(cx: &mut TestAppContext) {
+        let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
+        let cx = cx.add_empty_window();
+        let document = activate_save(&frame, cx, save_fixture(0, 0, 0));
+
+        select_and_draw(&frame, cx, document, SaveSection::Units);
+        assert!(cx.debug_bounds("save-unit-empty").is_some());
+        assert!(cx.debug_bounds("save-detail-panel:save-units").is_some());
+        assert!(cx.debug_bounds("save-unit-detail-empty").is_none());
+
+        select_and_draw(&frame, cx, document, SaveSection::Equipment);
+        let disabled = cx
+            .debug_bounds("save-equipment-slot-troop-armor-disabled")
+            .unwrap();
+        cx.simulate_click(disabled.center(), Modifiers::none());
+        let equipment_slot = frame.update(cx, |frame, _| {
+            frame
+                .save_presentations
+                .get(document)
+                .unwrap()
+                .equipment_slot()
+        });
+        assert_eq!(equipment_slot, SaveEquipmentSlot::LeaderWeapon,);
+
+        select_and_draw(&frame, cx, document, SaveSection::Roster);
+        assert!(cx.debug_bounds("save-player-leaders-empty").is_some());
+        assert!(cx.debug_bounds("save-roster-empty").is_some());
+
+        select_and_draw(&frame, cx, document, SaveSection::Missions);
+        assert!(cx.debug_bounds("save-missions").is_some());
+        assert!(cx.debug_bounds("save-second-array-panel").is_none());
+    }
+
+    #[gpui::test]
+    fn save_view_draws_filtered_equipment_as_no_match_not_empty_save(cx: &mut TestAppContext) {
+        let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
+        let cx = cx.add_empty_window();
+        let document = activate_save(&frame, cx, save_fixture_with_role(3));
+        frame.update(cx, |frame, cx| {
+            frame.set_save_unit_filter(document, "leader".to_owned(), cx);
+            frame.select_save_section(document, SaveSection::Equipment, cx);
+        });
+
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-equipment-filter-empty").is_some());
+        assert!(cx.debug_bounds("save-equipment-save-empty").is_none());
+    }
+
+    #[gpui::test]
+    fn save_view_draws_one_fixed_text_error_without_hiding_summary(cx: &mut TestAppContext) {
+        let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
+        let cx = cx.add_empty_window();
+        let mut bytes = save_fixture(0, 0, 0);
+        let main_offset = 2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>();
+        *bytes.get_mut(main_offset + 0x20).unwrap() = 0x80;
+        activate_save(&frame, cx, bytes);
+
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-summary").is_some());
+        assert!(cx.debug_bounds("save-fixed-text-error").is_some());
+        assert!(cx.debug_bounds("save-summary-values").is_some());
+        assert!(cx.debug_bounds("save-summary-counts").is_some());
+    }
+
+    #[gpui::test]
+    fn save_view_draws_catalog_states_inline(cx: &mut TestAppContext) {
+        let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
+        let cx = cx.add_empty_window();
+        let document = activate_save(&frame, cx, save_fixture(1, 0, 0));
+
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-catalog-not-configured").is_some());
+
+        let loading_key = frame.update(cx, |frame, cx| {
+            let key = SaveCatalogKey::new(frame.shell.begin_save_catalog(), "/catalog/loading");
+            frame.save_catalog.begin(key.clone());
+            cx.notify();
+            key
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-catalog-loading").is_some());
+
+        frame.update(cx, |frame, cx| {
+            assert!(frame.save_catalog.finish_failed(
+                loading_key,
+                CatalogRequestError::Installation(InstallationError::RootMissing {
+                    game: Game::Crusaders,
+                    root: PathBuf::from("/catalog/loading"),
+                }),
+            ));
+            cx.notify();
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-catalog-failed").is_some());
+
+        frame.update(cx, |frame, cx| {
+            let key = SaveCatalogKey::new(frame.shell.begin_save_catalog(), "/catalog/ready");
+            frame.save_catalog.begin(key.clone());
+            assert!(
+                frame
+                    .save_catalog
+                    .finish_ready(key, Arc::new(missing_name_dictionary()), 2,)
+            );
+            frame.select_save_section(document, SaveSection::Units, cx);
+            cx.notify();
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-catalog-ready-issues").is_some());
+        assert!(cx.debug_bounds("save-name-unavailable").is_some());
+    }
+
+    fn test_startup() -> SettingsStartup {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
+        drop(file);
+        SettingsStartup::load(path)
+    }
+
+    fn activate_save(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        bytes: Vec<u8>,
+    ) -> DocumentID {
+        frame.update(cx, |frame, cx| {
+            let document = frame.workspace.open_loaded(
+                PathBuf::from("campaign.sav"),
+                Document::Save(SaveDocument::parse(bytes).unwrap()),
+            );
+            frame.activate_document(document, cx);
+            frame.shell.select_area(Area::Files);
+            cx.notify();
+            document
+        })
+    }
+
+    fn select_and_draw(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        document: DocumentID,
+        section: SaveSection,
+    ) {
+        frame.update(cx, |frame, cx| {
+            frame.select_save_section(document, section, cx);
+        });
+        draw_frame(cx, frame);
+    }
+
+    fn draw_frame(cx: &mut VisualTestContext, frame: &Entity<AppFrame>) {
+        let frame = frame.clone();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(1180.0), px(780.0)),
+            move |_, _| frame,
+        );
+    }
+
+    fn missing_name_dictionary() -> kufeditor_game::NameDictionary {
+        let temporary = tempfile::tempdir().unwrap();
+        let sox = temporary.path().join("Data/SOX");
+        let path = sox.join(CatalogRole::TroopNames.relative_path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut bytes = 100_u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        bytes.extend_from_slice(&999_u32.to_le_bytes());
+        bytes.extend_from_slice(&7_u16.to_le_bytes());
+        bytes.extend_from_slice(b"Missing");
+        fs::write(path, bytes).unwrap();
+        load_name_dictionary(&sox).unwrap().dictionary
+    }
+
+    fn save_fixture(unit_count: usize, roster_count: usize, second_array_count: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        append_u32(&mut bytes, 0);
+        append_u32(&mut bytes, 0x6e);
+        append_u32(&mut bytes, u32::MAX);
+        bytes.resize(bytes.len() + CONTEXT_SIZE - size_of::<u32>(), 0);
+        append_u32(&mut bytes, 0);
+        bytes.resize(bytes.len() + MAIN_SIZE, 0);
+
+        append_u32(&mut bytes, u32::try_from(unit_count).unwrap());
+        if unit_count > 0 {
+            append_complete_unit(&mut bytes);
+            append_zero_records(&mut bytes, unit_count - 1, UNIT_SIZE);
+        }
+
+        append_i32(&mut bytes, -1);
+        append_u32(&mut bytes, u32::try_from(roster_count).unwrap());
+        append_zero_records(&mut bytes, roster_count, 8);
+
+        append_u32(&mut bytes, u32::try_from(second_array_count).unwrap());
+        for value in 0..second_array_count {
+            append_u32(&mut bytes, u32::try_from(value).unwrap());
+        }
+        for slot in 0_i32..20 {
+            append_i32(&mut bytes, slot - 1);
+        }
+        append_i32(&mut bytes, -2);
+
+        bytes.resize(0x8000, 0);
+        let length = u32::try_from(bytes.len()).unwrap();
+        bytes
+            .get_mut(..size_of::<u32>())
+            .unwrap()
+            .copy_from_slice(&length.to_le_bytes());
+        bytes
+    }
+
+    fn save_fixture_with_role(role: u32) -> Vec<u8> {
+        let mut bytes = save_fixture(1, 0, 0);
+        let unit_offset =
+            2 * size_of::<u32>() + CONTEXT_SIZE + size_of::<u32>() + MAIN_SIZE + size_of::<u32>();
+        let ucd_offset = unit_offset + 10 * size_of::<u32>();
+        bytes
+            .get_mut(ucd_offset..ucd_offset + size_of::<u32>())
+            .unwrap()
+            .copy_from_slice(&role.to_le_bytes());
+        bytes
+    }
+
+    fn append_complete_unit(bytes: &mut Vec<u8>) {
+        let start = bytes.len();
+        append_i32(bytes, -1);
+        for value in [2_u32, 2, 4, 0x34, 0x38, 0x3c, 0x40] {
+            append_u32(bytes, value);
+        }
+        append_i32(bytes, -1);
+        for value in [5_u32, 0, 6, 7, 8] {
+            append_u32(bytes, value);
+        }
+        bytes.extend_from_slice(&[1, 0, 1]);
+        for value in [60_u32, 64, 68] {
+            append_u32(bytes, value);
+        }
+        bytes.extend(0xa0_u8..=0xb7);
+        append_zero_records(bytes, 6, EQUIPMENT_SIZE);
+        append_u32(bytes, 504);
+        assert_eq!(bytes.len() - start, UNIT_SIZE);
+    }
+
+    fn append_zero_records(bytes: &mut Vec<u8>, count: usize, record_size: usize) {
+        bytes.resize(bytes.len() + count * record_size, 0);
+    }
+
+    fn append_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn append_i32(bytes: &mut Vec<u8>, value: i32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
     }
 }
