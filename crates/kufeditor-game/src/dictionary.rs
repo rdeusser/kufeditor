@@ -11,6 +11,8 @@ use crate::{
     static_translations::STATIC_TRANSLATIONS,
 };
 
+const MAX_STANDARD_JOB_TYPE: u32 = 42;
+
 #[derive(Debug)]
 pub struct NameDictionary {
     troop_names: HashMap<u32, String>,
@@ -141,7 +143,7 @@ impl NameDictionary {
             return Some(name);
         }
 
-        if job_type <= 42
+        if job_type <= MAX_STANDARD_JOB_TYPE
             && let Some(name) = self.troop_name(job_type)
         {
             return Some(name);

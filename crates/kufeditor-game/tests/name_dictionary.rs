@@ -100,6 +100,20 @@ fn unit_name_missing_or_invalid_leader_falls_back_to_bounded_troop() {
 }
 
 #[test]
+fn unit_name_failed_leader_pool_conversion_continues_to_troop() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(0, -1, 0), Some("Troop Zero"));
+}
+
+#[test]
+fn unit_name_missing_initial_character_continues_to_troop() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(-1, 73, 42), Some("Troop Forty Two"));
+}
+
+#[test]
 fn unit_name_uses_character_fallback_after_leader_and_troop_miss() {
     let dictionary = unit_name_dictionary();
 
@@ -107,6 +121,13 @@ fn unit_name_uses_character_fallback_after_leader_and_troop_miss() {
         dictionary.unit_name(0, 74, 200),
         Some("Character Two Hundred")
     );
+}
+
+#[test]
+fn unit_name_missing_standard_troop_continues_to_character() {
+    let dictionary = unit_name_dictionary();
+
+    assert_eq!(dictionary.unit_name(0, 74, 8), Some("Character Eight"));
 }
 
 #[test]
@@ -514,6 +535,7 @@ fn unit_name_dictionary() -> NameDictionary {
         &indexed_table(&[
             (0, b"Character Zero"),
             (7, b"Character Seven"),
+            (8, b"Character Eight"),
             (200, b"Character Two Hundred"),
             (u32::from(u8::MAX), b"Character 255"),
         ]),
