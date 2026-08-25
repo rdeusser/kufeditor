@@ -2889,6 +2889,9 @@ dependencies = [
  "kufeditor-mods",
  "kufeditor-patches",
  "kufeditor-workspace",
+ "serde",
+ "serde_json",
+ "tempfile",
  "unicode-segmentation",
 ]
 

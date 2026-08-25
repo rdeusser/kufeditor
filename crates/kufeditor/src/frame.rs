@@ -14,12 +14,17 @@ use kufeditor_workspace::{
 use crate::{
     actions::{OpenFile, Redo, Save, SaveAll, SaveAs, Undo},
     components,
+    notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
-    state::{Area, ClosePolicy, Notice, NoticeLevel, RecordSelections, RequestId, ShellState},
+    settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
+    state::{Area, ClosePolicy, RecordSelections, RequestId, ShellState},
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
     views,
 };
+
+mod settings;
+use self::settings::protected_settings_notice;
 
 struct ActiveNumberEdit {
     target: NumberEditTarget,
@@ -298,10 +303,15 @@ fn invalid_number_notice() -> Notice {
     Notice::editor_info("Enter a whole number within the allowed range")
 }
 
-fn clear_editor_notice(notice: &mut Option<Notice>) {
-    if notice.as_ref().is_some_and(Notice::is_editor_feedback) {
-        *notice = None;
-    }
+fn clear_editor_notice(notices: &mut NoticeCenter) {
+    notices.clear(NoticeSource::Editor);
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum CloseDocuments {
+    #[default]
+    Save,
+    Discard,
 }
 
 pub struct AppFrame {
@@ -313,28 +323,58 @@ pub struct AppFrame {
     selections: RecordSelections,
     number_edit: Option<ActiveNumberEdit>,
     text_edit: Option<ActiveTextEdit>,
-    notice: Option<Notice>,
+    game_paths: kufeditor_game::GamePaths,
+    recent_files: kufeditor_workspace::RecentFiles,
+    settings: SettingsWritePump,
+    notices: NoticeCenter,
     window_handle: Option<AnyWindowHandle>,
     close_armed: bool,
-    close_after_saves: bool,
+    close_pending: bool,
+    close_documents: CloseDocuments,
     close_prompt_open: bool,
 }
 
 impl AppFrame {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(startup: SettingsStartup, cx: &mut Context<Self>) -> Self {
+        let SettingsStartup {
+            path,
+            active_game,
+            game_paths,
+            recent_files,
+            persistence,
+            warning,
+        } = startup;
+        let settings = SettingsWritePump::new(path, persistence);
+        let mut notices = NoticeCenter::default();
+        if let Some(warning) = warning {
+            match warning {
+                SettingsStartupWarning::Load(error) => notices.replace(
+                    NoticeSource::Startup,
+                    Notice::error("Could not load application settings", &error),
+                ),
+                SettingsStartupWarning::UnsupportedVersion { found } => notices.replace(
+                    NoticeSource::SettingsWrite,
+                    protected_settings_notice(found),
+                ),
+            }
+        }
         Self {
             workspace: Workspace::new(),
-            shell: ShellState::default(),
+            shell: ShellState::with_game(active_game),
             theme: Theme::forged_steel(),
             focus: cx.focus_handle(),
             active_document: None,
             selections: RecordSelections::default(),
             number_edit: None,
             text_edit: None,
-            notice: None,
+            game_paths,
+            recent_files,
+            settings,
+            notices,
             window_handle: None,
             close_armed: false,
-            close_after_saves: false,
+            close_pending: false,
+            close_documents: CloseDocuments::Save,
             close_prompt_open: false,
         }
     }
@@ -346,7 +386,7 @@ impl AppFrame {
     fn cancel_property_edit(&mut self) {
         self.number_edit = None;
         self.text_edit = None;
-        clear_editor_notice(&mut self.notice);
+        clear_editor_notice(&mut self.notices);
     }
 
     fn begin_number_edit(&mut self, edit: ActiveNumberEdit) {
@@ -411,7 +451,10 @@ impl AppFrame {
         };
         if self.active_document != Some(target.document()) {
             self.cancel_property_edit();
-            self.notice = Some(Notice::info("The active document changed; edit canceled"));
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("The active document changed; edit canceled"),
+            );
             cx.notify();
             return;
         }
@@ -423,7 +466,7 @@ impl AppFrame {
                 match self.workspace.apply(document, edit) {
                     Ok(()) => {
                         self.cancel_property_edit();
-                        self.notice = None;
+                        self.notices.clear(NoticeSource::Editor);
                     }
                     Err(error) => {
                         let summary = match target {
@@ -443,7 +486,8 @@ impl AppFrame {
                                 format!("Could not update {}", target.format_name())
                             }
                         };
-                        self.notice = Some(Notice::editor_error(summary, &error));
+                        self.notices
+                            .replace(NoticeSource::Editor, Notice::editor_error(summary, &error));
                     }
                 }
             }
@@ -454,13 +498,19 @@ impl AppFrame {
     fn set_skill_type(&mut self, document: DocumentId, record: usize, choice: SkillTypeChoice) {
         self.cancel_property_edit();
         if self.active_document != Some(document) {
-            self.notice = Some(Notice::info("The active document changed; edit canceled"));
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("The active document changed; edit canceled"),
+            );
             return;
         }
         match self.workspace.apply(document, choice.document_edit(record)) {
-            Ok(()) => self.notice = None,
+            Ok(()) => self.notices.clear(NoticeSource::Editor),
             Err(error) => {
-                self.notice = Some(Notice::editor_error("Could not update SkillInfo", &error));
+                self.notices.replace(
+                    NoticeSource::Editor,
+                    Notice::editor_error("Could not update SkillInfo", &error),
+                );
             }
         }
     }
@@ -472,12 +522,12 @@ impl AppFrame {
         if std::mem::take(&mut self.close_armed) {
             return true;
         }
-        if self.close_prompt_open || self.close_after_saves {
+        if self.close_prompt_open || self.close_pending {
             return false;
         }
 
         match ClosePolicy::from_dirty_count(self.dirty_count()) {
-            ClosePolicy::Allow => true,
+            ClosePolicy::Allow => self.begin_settings_close(window, cx),
             ClosePolicy::PromptForUnsaved { count } => {
                 self.close_prompt_open = true;
                 let message = format!(
@@ -503,6 +553,32 @@ impl AppFrame {
         }
     }
 
+    fn begin_settings_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.settings.has_failed() {
+            self.close_prompt_open = true;
+            let answer = window.prompt(
+                PromptLevel::Warning,
+                "Settings could not be saved. Retry before closing?",
+                None,
+                &["Retry", "Close Without Saving", "Cancel"],
+                cx,
+            );
+            cx.spawn_in(window, async move |entity, cx| {
+                let answer = answer.await.ok();
+                let _ = entity.update_in(cx, move |frame, window, cx| {
+                    frame.finish_settings_close_prompt(answer, window, cx);
+                });
+            })
+            .detach();
+            return false;
+        }
+        if !self.settings.is_settled() {
+            self.close_pending = true;
+            return false;
+        }
+        true
+    }
+
     fn dirty_count(&self) -> usize {
         self.workspace
             .document_ids()
@@ -514,47 +590,94 @@ impl AppFrame {
     fn finish_close_prompt(
         &mut self,
         answer: Option<usize>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.close_prompt_open = false;
         match answer {
             Some(0) => {
-                self.close_after_saves = true;
-                self.continue_close_after_saves(cx);
+                self.close_pending = true;
+                self.close_documents = CloseDocuments::Save;
+                self.continue_close(cx);
             }
             Some(1) => {
-                self.close_armed = true;
-                window.remove_window();
+                self.close_pending = true;
+                self.close_documents = CloseDocuments::Discard;
+                self.continue_close(cx);
             }
-            Some(_) | None => {}
+            Some(_) | None => {
+                self.close_pending = false;
+                self.close_documents = CloseDocuments::Save;
+            }
         }
         cx.notify();
     }
 
-    fn continue_close_after_saves(&mut self, cx: &mut Context<Self>) {
-        if !self.close_after_saves {
+    fn finish_settings_close_prompt(
+        &mut self,
+        answer: Option<usize>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_prompt_open = false;
+        match answer {
+            Some(0) => {
+                if let Some(revision) = self.settings.retry_failed() {
+                    self.notices.begin(
+                        NoticeSource::SettingsWrite,
+                        revision.get(),
+                        Notice::info("Saving application settings"),
+                    );
+                    self.close_pending = true;
+                    self.start_next_settings_write(cx);
+                }
+            }
+            Some(1) => {
+                self.settings.discard_failed();
+                self.close_pending = true;
+                self.continue_close(cx);
+            }
+            Some(_) | None => {
+                self.close_pending = false;
+            }
+        }
+        cx.notify();
+    }
+
+    fn continue_close(&mut self, cx: &mut Context<Self>) {
+        if !self.close_pending {
             return;
         }
 
-        let document_ids = self.workspace.document_ids().to_vec();
-        let mut dirty_or_saving = false;
-        for document_id in document_ids {
-            let dirty = self.workspace.is_dirty(document_id).unwrap_or(false);
-            let saving = self
-                .workspace
-                .save_in_progress(document_id)
-                .unwrap_or(false);
-            dirty_or_saving |= dirty || saving;
-            if dirty && !saving && !self.start_save(document_id, None, cx) {
+        if self.close_documents == CloseDocuments::Save {
+            let document_ids = self.workspace.document_ids().to_vec();
+            let mut dirty_or_saving = false;
+            for document_id in document_ids {
+                let dirty = self.workspace.is_dirty(document_id).unwrap_or(false);
+                let saving = self
+                    .workspace
+                    .save_in_progress(document_id)
+                    .unwrap_or(false);
+                dirty_or_saving |= dirty || saving;
+                if dirty && !saving && !self.start_save(document_id, None, cx) {
+                    return;
+                }
+            }
+
+            if dirty_or_saving {
                 return;
             }
         }
-
-        if dirty_or_saving {
+        if self.settings.has_failed() {
+            self.close_pending = false;
+            self.close_documents = CloseDocuments::Save;
             return;
         }
-        self.close_after_saves = false;
+        if !self.settings.is_settled() {
+            return;
+        }
+        self.close_pending = false;
+        self.close_documents = CloseDocuments::Save;
         self.close_armed = true;
         let Some(window_handle) = self.window_handle else {
             return;
@@ -584,10 +707,12 @@ impl AppFrame {
                     .as_ref()
                     .is_some_and(|edit| edit.editor.is_valid())
                 {
-                    clear_editor_notice(&mut self.notice);
+                    clear_editor_notice(&mut self.notices);
                 }
             }
-            NumberOutcome::Invalid => self.notice = Some(invalid_number_notice()),
+            NumberOutcome::Invalid => self
+                .notices
+                .replace(NoticeSource::Editor, invalid_number_notice()),
             NumberOutcome::Cancel => self.cancel_property_edit(),
             NumberOutcome::Commit(value) => self.commit_number_edit(value),
         }
@@ -601,7 +726,10 @@ impl AppFrame {
         };
         if self.active_document != Some(target_document) {
             self.cancel_property_edit();
-            self.notice = Some(Notice::info("The active document changed; edit canceled"));
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("The active document changed; edit canceled"),
+            );
             return;
         }
 
@@ -612,23 +740,29 @@ impl AppFrame {
         let (document, document_edit) = match target.document_edit(value) {
             Ok(edit) => edit,
             Err(error) => {
-                self.notice = Some(Notice::editor_error(
-                    format!("Could not update {}", target.format_name()),
-                    &error,
-                ));
+                self.notices.replace(
+                    NoticeSource::Editor,
+                    Notice::editor_error(
+                        format!("Could not update {}", target.format_name()),
+                        &error,
+                    ),
+                );
                 return;
             }
         };
         match self.workspace.apply(document, document_edit) {
             Ok(()) => {
                 self.cancel_property_edit();
-                self.notice = None;
+                self.notices.clear(NoticeSource::Editor);
             }
             Err(error) => {
-                self.notice = Some(Notice::editor_error(
-                    format!("Could not update {}", target.format_name()),
-                    &error,
-                ));
+                self.notices.replace(
+                    NoticeSource::Editor,
+                    Notice::editor_error(
+                        format!("Could not update {}", target.format_name()),
+                        &error,
+                    ),
+                );
             }
         }
     }
@@ -642,7 +776,11 @@ impl AppFrame {
             multiple: true,
             prompt: Some("Open".into()),
         });
-        self.notice = Some(Notice::info("Choose one or more .sox files"));
+        self.notices.begin(
+            NoticeSource::Open,
+            request.get(),
+            Notice::info("Choose one or more .sox files"),
+        );
         cx.notify();
 
         cx.spawn(async move |entity, cx| {
@@ -691,15 +829,23 @@ impl AppFrame {
                                     frame.activate_document(document_id);
                                     frame.shell.select_area(Area::Files);
                                 }
-                                frame.notice = Some(Notice::success(format!("Opened {name}")));
+                                frame.notices.complete(
+                                    NoticeSource::Open,
+                                    request.get(),
+                                    Some(Notice::success(format!("Opened {name}"))),
+                                );
                                 cx.notify();
                                 true
                             }
                             Err(error) => {
-                                frame.notice = Some(Notice::error(
-                                    format!("Could not open {}", display_name(&path)),
-                                    &error,
-                                ));
+                                frame.notices.complete(
+                                    NoticeSource::Open,
+                                    request.get(),
+                                    Some(Notice::error(
+                                        format!("Could not open {}", display_name(&path)),
+                                        &error,
+                                    )),
+                                );
                                 cx.notify();
                                 false
                             }
@@ -735,7 +881,10 @@ impl AppFrame {
             }
         }
         if !started {
-            self.notice = Some(Notice::info("All documents are already saved"));
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("All documents are already saved"),
+            );
             cx.notify();
         }
     }
@@ -749,7 +898,10 @@ impl AppFrame {
         let current_path = match self.workspace.path(document_id) {
             Ok(path) => path.to_path_buf(),
             Err(error) => {
-                self.notice = Some(Notice::error("Could not determine the save path", &error));
+                self.notices.replace(
+                    NoticeSource::Workspace,
+                    Notice::error("Could not determine the save path", &error),
+                );
                 cx.notify();
                 return;
             }
@@ -774,13 +926,19 @@ impl AppFrame {
             Ok(Ok(None)) => {}
             Ok(Err(error)) => {
                 let _ = entity.update(cx, move |frame, cx| {
-                    frame.notice = Some(Notice::error("Could not open Save As", error.as_ref()));
+                    frame.notices.replace(
+                        NoticeSource::Workspace,
+                        Notice::error("Could not open Save As", error.as_ref()),
+                    );
                     cx.notify();
                 });
             }
             Err(error) => {
                 let _ = entity.update(cx, move |frame, cx| {
-                    frame.notice = Some(Notice::error("Save As did not respond", &error));
+                    frame.notices.replace(
+                        NoticeSource::Workspace,
+                        Notice::error("Save As did not respond", &error),
+                    );
                     cx.notify();
                 });
             }
@@ -807,10 +965,13 @@ impl AppFrame {
             self.workspace.undo(document_id)
         };
         match result {
-            Ok(true) => self.notice = None,
+            Ok(true) => self.notices.clear(NoticeSource::Workspace),
             Ok(false) => {}
             Err(error) => {
-                self.notice = Some(Notice::error("Could not change document history", &error));
+                self.notices.replace(
+                    NoticeSource::Workspace,
+                    Notice::error("Could not change document history", &error),
+                );
             }
         }
         cx.notify();
@@ -825,8 +986,12 @@ impl AppFrame {
         let request = match self.workspace.prepare_save(document_id, target) {
             Ok(request) => request,
             Err(error) => {
-                self.notice = Some(Notice::error("Could not start save", &error));
-                self.close_after_saves = false;
+                self.notices.replace(
+                    NoticeSource::Workspace,
+                    Notice::error("Could not start save", &error),
+                );
+                self.close_pending = false;
+                self.close_documents = CloseDocuments::Save;
                 self.close_armed = false;
                 cx.notify();
                 return false;
@@ -835,14 +1000,15 @@ impl AppFrame {
         let request_document = request.document_id();
         let token = request.token();
         let task = cx.background_executor().spawn(async move { request.run() });
-        self.notice = Some(Notice::info("Saving document"));
+        self.notices
+            .replace(NoticeSource::Workspace, Notice::info("Saving document"));
         cx.notify();
 
         cx.spawn(async move |entity, cx| {
             let result = task.await;
             let _ = entity.update(cx, move |frame, cx| {
                 frame.finish_save_result(request_document, token, result);
-                frame.continue_close_after_saves(cx);
+                frame.continue_close(cx);
                 cx.notify();
             });
         })
@@ -863,27 +1029,39 @@ impl AppFrame {
                         .workspace
                         .path(document_id)
                         .map_or_else(|_| "document".to_owned(), display_name);
-                    self.notice = Some(Notice::success(format!("Saved {name}")));
+                    self.notices.replace(
+                        NoticeSource::Workspace,
+                        Notice::success(format!("Saved {name}")),
+                    );
                 }
                 Err(error) => {
-                    self.close_after_saves = false;
+                    self.close_pending = false;
+                    self.close_documents = CloseDocuments::Save;
                     self.close_armed = false;
-                    self.notice = Some(Notice::error("Could not finish save", &error));
+                    self.notices.replace(
+                        NoticeSource::Workspace,
+                        Notice::error("Could not finish save", &error),
+                    );
                 }
             },
             Err(error) => match self.workspace.finish_save_failure(document_id, token) {
                 Ok(()) => {
-                    self.close_after_saves = false;
+                    self.close_pending = false;
+                    self.close_documents = CloseDocuments::Save;
                     self.close_armed = false;
-                    self.notice = Some(Notice::error("Could not save document", &error));
+                    self.notices.replace(
+                        NoticeSource::Workspace,
+                        Notice::error("Could not save document", &error),
+                    );
                 }
                 Err(cleanup_error) => {
-                    self.close_after_saves = false;
+                    self.close_pending = false;
+                    self.close_documents = CloseDocuments::Save;
                     self.close_armed = false;
-                    self.notice = Some(Notice::error(
-                        "Could not reconcile failed save",
-                        &cleanup_error,
-                    ));
+                    self.notices.replace(
+                        NoticeSource::Workspace,
+                        Notice::error("Could not reconcile failed save", &cleanup_error),
+                    );
                 }
             },
         }
@@ -988,11 +1166,19 @@ impl AppFrame {
                             .text_color(self.theme.accent)
                     })
                     .on_click(cx.listener(move |frame, _, _, cx| {
-                        frame.shell.select_game(game);
-                        frame.cancel_property_edit();
-                        cx.notify();
+                        frame.select_game(game, cx);
                     }))
             }))
+    }
+
+    fn select_game(&mut self, game: Game, cx: &mut Context<Self>) {
+        if self.shell.game() == game {
+            return;
+        }
+        self.shell.select_game(game);
+        self.cancel_property_edit();
+        self.schedule_settings_write(cx);
+        cx.notify();
     }
 
     fn navigation(&self, cx: &mut Context<Self>) -> Div {
@@ -1598,10 +1784,11 @@ impl AppFrame {
     }
 
     fn notice_bar(&self) -> Option<AnyElement> {
-        self.notice.as_ref().map(|notice| {
+        self.notices.current().map(|notice| {
             let label = match notice.level() {
                 NoticeLevel::Info => "INFO",
                 NoticeLevel::Success => "SAVED",
+                NoticeLevel::Warning => "WARNING",
                 NoticeLevel::Error => "ERROR",
             };
             div()
@@ -1662,7 +1849,9 @@ fn set_open_notice(
 ) {
     let _ = entity.update(cx, move |frame, cx| {
         if frame.shell.accepts_open(request) {
-            frame.notice = notice;
+            frame
+                .notices
+                .complete(NoticeSource::Open, request.get(), notice);
             cx.notify();
         }
     });
@@ -1746,9 +1935,10 @@ mod tests {
         reason = "the GPUI test creates one controlled in-memory window"
     )]
 
-    use std::{cell::Cell, path::PathBuf, rc::Rc};
+    use std::{cell::Cell, fs, path::PathBuf, rc::Rc};
 
     use gpui::{AppContext, EntityInputHandler, TestAppContext, WindowOptions};
+    use kufeditor_game::Game;
     use kufeditor_workspace::{
         Document, DocumentEdit, DocumentId, DocumentKind, SkillDocument, SkillTextField,
         TextSoxDocument, TroopDocument, TroopField, Workspace,
@@ -1760,9 +1950,18 @@ mod tests {
     };
     use crate::{
         actions::SaveAs,
-        state::{Area, Notice, NoticeLevel, RecordSelections},
+        notices::{Notice, NoticeLevel, NoticeSource},
+        settings::SettingsStartup,
+        state::{Area, RecordSelections},
         text_input::{TextInputEvent, bind as bind_text_input},
     };
+
+    fn test_startup() -> SettingsStartup {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
+        drop(file);
+        SettingsStartup::load(path)
+    }
 
     #[test]
     fn invalid_number_notice_explains_the_allowed_range() {
@@ -2036,8 +2235,10 @@ mod tests {
     fn text_sox_native_input_commit_creates_one_edit_and_clears_the_draft(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             bind_text_input(cx);
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let document = window
             .update(cx, |frame, window, cx| {
@@ -2074,8 +2275,10 @@ mod tests {
     #[gpui::test]
     fn text_sox_canceled_save_as_notifies_after_canceling_the_draft(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         window
             .update(cx, |frame, window, cx| {
@@ -2117,8 +2320,10 @@ mod tests {
     fn empty_text_sox_commit_keeps_the_same_draft_and_history(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             bind_text_input(cx);
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let (document, state, input) = window
             .update(cx, |frame, window, cx| {
@@ -2146,7 +2351,7 @@ mod tests {
                 assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
                 assert_eq!(input.read(cx).content(), "");
                 assert!(input.read(cx).focus_handle().is_focused(window));
-                let notice = frame.notice.as_ref().unwrap();
+                let notice = frame.notices.current().unwrap();
                 assert!(notice.is_editor_feedback());
                 assert!(notice.summary().contains("text SOX"));
                 assert!(notice.summary().contains("1..=5 bytes"));
@@ -2158,8 +2363,10 @@ mod tests {
     fn oversized_text_sox_commit_keeps_the_same_draft_and_history(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             bind_text_input(cx);
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let (document, state, input) = window
             .update(cx, |frame, window, cx| {
@@ -2187,7 +2394,7 @@ mod tests {
                 assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
                 assert_eq!(input.read(cx).content(), "Longer");
                 assert!(input.read(cx).focus_handle().is_focused(window));
-                let notice = frame.notice.as_ref().unwrap();
+                let notice = frame.notices.current().unwrap();
                 assert!(notice.is_editor_feedback());
                 assert!(notice.summary().contains("text SOX"));
                 assert!(notice.summary().contains("1..=5 bytes"));
@@ -2198,8 +2405,10 @@ mod tests {
     #[gpui::test]
     fn non_ascii_text_sox_commit_is_state_neutral_and_keeps_the_draft(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let (document, state, input) = window
             .update(cx, |frame, window, cx| {
@@ -2234,7 +2443,7 @@ mod tests {
                 assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
                 assert_eq!(input.read(cx).content(), "Café");
                 assert!(input.read(cx).focus_handle().is_focused(window));
-                let notice = frame.notice.as_ref().unwrap();
+                let notice = frame.notices.current().unwrap();
                 assert!(notice.is_editor_feedback());
                 assert!(notice.summary().contains("text SOX"));
                 assert!(notice.summary().contains("1..=5 bytes"));
@@ -2245,8 +2454,10 @@ mod tests {
     #[gpui::test]
     fn stale_text_sox_event_cannot_mutate_a_hidden_document(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let (first, first_state, second, second_state, stale_input) = window
             .update(cx, |frame, window, cx| {
@@ -2289,7 +2500,7 @@ mod tests {
                 assert!(!frame.workspace.is_dirty(first).unwrap());
                 assert!(!frame.workspace.is_dirty(second).unwrap());
                 assert_eq!(
-                    frame.notice.as_ref().map(Notice::summary),
+                    frame.notices.current().map(Notice::summary),
                     Some("The active document changed; edit canceled")
                 );
             })
@@ -2299,8 +2510,10 @@ mod tests {
     #[gpui::test]
     fn selecting_another_text_sox_record_cancels_the_active_draft(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
 
         window
@@ -2328,8 +2541,10 @@ mod tests {
     #[gpui::test]
     fn skill_maximum_level_feedback_clears_only_after_valid_recovery(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         window
             .update(cx, |frame, window, _| {
@@ -2348,7 +2563,7 @@ mod tests {
                     Some("70000")
                 );
                 assert_eq!(
-                    frame.notice.as_ref().map(Notice::summary),
+                    frame.notices.current().map(Notice::summary),
                     Some("Enter a whole number within the allowed range")
                 );
             })
@@ -2362,7 +2577,7 @@ mod tests {
                     Some("700000")
                 );
                 assert_eq!(
-                    frame.notice.as_ref().map(Notice::summary),
+                    frame.notices.current().map(Notice::summary),
                     Some("Enter a whole number within the allowed range")
                 );
             })
@@ -2376,7 +2591,7 @@ mod tests {
                     Some("70000")
                 );
                 assert_eq!(
-                    frame.notice.as_ref().map(Notice::summary),
+                    frame.notices.current().map(Notice::summary),
                     Some("Enter a whole number within the allowed range")
                 );
             })
@@ -2389,7 +2604,7 @@ mod tests {
                     frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
                     Some("7000")
                 );
-                assert!(frame.notice.is_none());
+                assert!(frame.notices.current().is_none());
             })
             .unwrap();
     }
@@ -2397,8 +2612,10 @@ mod tests {
     #[gpui::test]
     fn inactive_number_edit_cannot_survive_activation_or_commit(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
 
         window
@@ -2442,8 +2659,10 @@ mod tests {
     #[gpui::test]
     fn stale_skill_text_event_cannot_mutate_a_hidden_document(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let (first, second, stale_input) = window
             .update(cx, |frame, window, cx| {
@@ -2490,8 +2709,10 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let (document, stale_input, active_input) = window
             .update(cx, |frame, window, cx| {
@@ -2560,8 +2781,10 @@ mod tests {
     #[gpui::test]
     fn skill_record_switch_and_cancel_event_clear_the_active_text_draft(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
         let (document, canceled_input) = window
             .update(cx, |frame, window, cx| {
@@ -2583,7 +2806,9 @@ mod tests {
                     window,
                     cx,
                 );
-                frame.notice = Some(invalid_number_notice());
+                frame
+                    .notices
+                    .replace(NoticeSource::Editor, invalid_number_notice());
                 let input = frame.text_edit.as_ref().unwrap().input.clone();
                 (document, input)
             })
@@ -2594,7 +2819,7 @@ mod tests {
         window
             .update(cx, |frame, _, _| {
                 assert!(frame.text_edit.is_none());
-                assert!(frame.notice.is_none());
+                assert!(frame.notices.current().is_none());
                 assert_eq!(
                     frame
                         .workspace
@@ -2609,8 +2834,10 @@ mod tests {
     #[gpui::test]
     fn app_frame_opens_at_home(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
 
         window
@@ -2621,10 +2848,357 @@ mod tests {
     }
 
     #[gpui::test]
+    fn startup_bootstrap_initializes_the_canonical_runtime_owners(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        fs::write(
+            &path,
+            br#"{
+                "version": 1,
+                "active_game": "heroes",
+                "crusaders_path": "/games/Crusaders",
+                "heroes_path": "/games/Heroes",
+                "max_recent_files": 5,
+                "recent_files": ["/files/recent.sox"]
+            }"#,
+        )
+        .unwrap();
+        let startup = SettingsStartup::load(path);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.shell.game(), Game::Heroes);
+                assert_eq!(
+                    frame.game_paths.root(Game::Crusaders),
+                    Some(std::path::Path::new("/games/Crusaders"))
+                );
+                assert_eq!(
+                    frame.game_paths.root(Game::Heroes),
+                    Some(std::path::Path::new("/games/Heroes"))
+                );
+                assert_eq!(frame.recent_files.limit(), 5);
+                assert_eq!(
+                    frame.recent_files.paths(),
+                    [PathBuf::from("/files/recent.sox")]
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn changing_the_game_persists_once_and_an_identical_selection_is_skipped(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let startup = SettingsStartup::load(path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| frame.select_game(Game::Heroes, cx))
+            .unwrap();
+        cx.run_until_parked();
+        let saved = serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved.get("active_game").and_then(serde_json::Value::as_str),
+            Some("heroes")
+        );
+
+        fs::remove_file(&path).unwrap();
+        window
+            .update(cx, |frame, _, cx| frame.select_game(Game::Heroes, cx))
+            .unwrap();
+        cx.run_until_parked();
+        assert!(!path.exists());
+    }
+
+    #[gpui::test]
+    fn protected_settings_changes_warn_without_starting_a_write(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let original = br#"{"version":2,"future":true}"#;
+        fs::write(&path, original).unwrap();
+        let startup = SettingsStartup::load(path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.select_game(Game::Heroes, cx);
+                assert!(frame.settings.is_settled());
+                assert_eq!(
+                    frame.notices.current().map(Notice::level),
+                    Some(NoticeLevel::Warning)
+                );
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        assert_eq!(fs::read(path).unwrap(), original);
+    }
+
+    #[gpui::test]
+    fn close_waits_for_the_newest_coalesced_settings_write(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let startup = SettingsStartup::load(path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                frame.select_game(Game::Heroes, cx);
+                frame.select_game(Game::Crusaders, cx);
+                assert!(!frame.window_should_close(window, cx));
+                assert!(frame.close_pending);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        assert!(cx.read(|app| app.windows().is_empty()));
+        let saved = serde_json::from_slice::<serde_json::Value>(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            saved.get("active_game").and_then(serde_json::Value::as_str),
+            Some("crusaders")
+        );
+    }
+
+    #[gpui::test]
+    fn failed_settings_retry_resumes_close_and_removes_the_exact_window(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let blocker = directory.path().join("not-a-directory");
+        fs::write(&blocker, b"blocker").unwrap();
+        let path = blocker.join("settings.json");
+        let startup = SettingsStartup::load(path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                frame.select_game(Game::Heroes, cx);
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert!(!cx.read(|app| app.windows().is_empty()));
+
+        window
+            .update(cx, |frame, window, cx| {
+                assert!(frame.settings.has_failed());
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        assert_eq!(
+            cx.pending_prompt().map(|prompt| prompt.0),
+            Some("Settings could not be saved. Retry before closing?".to_owned())
+        );
+
+        fs::remove_file(&blocker).unwrap();
+        fs::create_dir(&blocker).unwrap();
+        cx.simulate_prompt_answer("Retry");
+        cx.run_until_parked();
+
+        assert!(path.exists());
+        assert!(cx.read(|app| app.windows().is_empty()));
+    }
+
+    #[gpui::test]
+    fn close_without_saving_discards_a_failed_settings_snapshot(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let blocker = directory.path().join("not-a-directory");
+        fs::write(&blocker, b"blocker").unwrap();
+        let path = blocker.join("settings.json");
+        let startup = SettingsStartup::load(path);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |frame, _, cx| frame.select_game(Game::Heroes, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, window, cx| {
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        cx.simulate_prompt_answer("Close Without Saving");
+        cx.run_until_parked();
+
+        assert!(cx.read(|app| app.windows().is_empty()));
+    }
+
+    #[gpui::test]
+    fn cancel_after_a_failed_settings_write_keeps_the_window_and_failure(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let blocker = directory.path().join("not-a-directory");
+        fs::write(&blocker, b"blocker").unwrap();
+        let startup = SettingsStartup::load(blocker.join("settings.json"));
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |frame, _, cx| frame.select_game(Game::Heroes, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, window, cx| {
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        cx.simulate_prompt_answer("Cancel");
+        cx.run_until_parked();
+
+        assert!(!cx.read(|app| app.windows().is_empty()));
+        window
+            .update(cx, |frame, _, _| {
+                assert!(frame.settings.has_failed());
+                assert!(!frame.close_pending);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn protected_settings_mode_bypasses_close_drain(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        fs::write(&path, br#"{"version":2}"#).unwrap();
+        let startup = SettingsStartup::load(path);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                frame.select_game(Game::Heroes, cx);
+                assert!(frame.window_should_close(window, cx));
+                assert_eq!(
+                    frame.notices.current().map(Notice::level),
+                    Some(NoticeLevel::Warning)
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn dirty_documents_save_before_pending_settings_allow_close(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let document_path = directory.path().join("document.sox");
+        let settings_path = directory.path().join("settings.json");
+        let startup = SettingsStartup::load(settings_path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                let document = open_troop(frame, &document_path.to_string_lossy(), 100);
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetTroopField {
+                            record: 0,
+                            field: TroopField::MoveSpeed,
+                            value: 101,
+                        },
+                    )
+                    .unwrap();
+                frame.select_game(Game::Heroes, cx);
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        assert!(cx.has_pending_prompt());
+        cx.simulate_prompt_answer("Save All");
+        cx.run_until_parked();
+
+        assert!(document_path.exists());
+        assert!(settings_path.exists());
+        assert!(cx.read(|app| app.windows().is_empty()));
+    }
+
+    #[gpui::test]
+    fn discarded_documents_still_wait_for_pending_settings_before_close(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let document_path = directory.path().join("discarded.sox");
+        let settings_path = directory.path().join("settings.json");
+        let startup = SettingsStartup::load(settings_path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                let document = open_troop(frame, &document_path.to_string_lossy(), 100);
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetTroopField {
+                            record: 0,
+                            field: TroopField::MoveSpeed,
+                            value: 101,
+                        },
+                    )
+                    .unwrap();
+                frame.select_game(Game::Heroes, cx);
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        cx.simulate_prompt_answer("Discard Changes");
+        cx.run_until_parked();
+
+        assert!(!document_path.exists());
+        assert!(settings_path.exists());
+        assert!(cx.read(|app| app.windows().is_empty()));
+    }
+
+    #[gpui::test]
     fn troop_editor_builds_for_a_loaded_document(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
-            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
-                .unwrap()
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
         });
 
         window

@@ -3,97 +3,6 @@ use std::collections::HashMap;
 use kufeditor_game::Game;
 use kufeditor_workspace::DocumentId;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum NoticeLevel {
-    Info,
-    Success,
-    Error,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NoticeScope {
-    Workspace,
-    Editor,
-}
-
-#[derive(Clone, Debug)]
-pub struct Notice {
-    level: NoticeLevel,
-    scope: NoticeScope,
-    summary: String,
-    detail: String,
-}
-
-impl Notice {
-    pub fn info(summary: impl Into<String>) -> Self {
-        Self {
-            level: NoticeLevel::Info,
-            scope: NoticeScope::Workspace,
-            summary: summary.into(),
-            detail: String::new(),
-        }
-    }
-
-    pub fn success(summary: impl Into<String>) -> Self {
-        Self {
-            level: NoticeLevel::Success,
-            scope: NoticeScope::Workspace,
-            summary: summary.into(),
-            detail: String::new(),
-        }
-    }
-
-    pub fn error(summary: impl Into<String>, error: &(dyn std::error::Error + 'static)) -> Self {
-        let mut detail = error.to_string();
-        let mut source = error.source();
-        while let Some(cause) = source {
-            detail.push_str("\nCaused by: ");
-            detail.push_str(&cause.to_string());
-            source = cause.source();
-        }
-        Self {
-            level: NoticeLevel::Error,
-            scope: NoticeScope::Workspace,
-            summary: summary.into(),
-            detail,
-        }
-    }
-
-    pub fn editor_info(summary: impl Into<String>) -> Self {
-        Self {
-            level: NoticeLevel::Info,
-            scope: NoticeScope::Editor,
-            summary: summary.into(),
-            detail: String::new(),
-        }
-    }
-
-    pub fn editor_error(
-        summary: impl Into<String>,
-        error: &(dyn std::error::Error + 'static),
-    ) -> Self {
-        let mut notice = Self::error(summary, error);
-        notice.scope = NoticeScope::Editor;
-        notice
-    }
-
-    pub const fn level(&self) -> NoticeLevel {
-        self.level
-    }
-
-    pub fn summary(&self) -> &str {
-        &self.summary
-    }
-
-    pub fn detail(&self) -> &str {
-        &self.detail
-    }
-
-    pub const fn is_editor_feedback(&self) -> bool {
-        matches!(self.scope, NoticeScope::Editor)
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct RecordSelections {
     records: HashMap<DocumentId, usize>,
@@ -111,6 +20,12 @@ impl RecordSelections {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestId(u64);
+
+impl RequestId {
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClosePolicy {
@@ -168,6 +83,13 @@ pub struct ShellState {
 }
 
 impl ShellState {
+    pub fn with_game(game: Game) -> Self {
+        Self {
+            game,
+            ..Self::default()
+        }
+    }
+
     pub const fn area(&self) -> Area {
         self.area
     }
@@ -218,20 +140,20 @@ mod tests {
     }
 
     #[test]
+    fn shell_can_start_with_the_persisted_game() {
+        let state = ShellState::with_game(Game::Heroes);
+
+        assert_eq!(state.area(), Area::Home);
+        assert_eq!(state.game(), Game::Heroes);
+    }
+
+    #[test]
     fn request_ids_make_old_open_results_stale() {
         let mut state = ShellState::default();
         let first = state.begin_open();
         let second = state.begin_open();
         assert!(!state.accepts_open(first));
         assert!(state.accepts_open(second));
-    }
-
-    #[test]
-    fn an_error_notice_keeps_summary_and_source_chain() {
-        let error = std::io::Error::new(std::io::ErrorKind::NotFound, "fixture missing");
-        let notice = super::Notice::error("Could not open file", &error);
-        assert_eq!(notice.summary(), "Could not open file");
-        assert!(notice.detail().contains("fixture missing"));
     }
 }
 

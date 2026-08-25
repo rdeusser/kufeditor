@@ -1,7 +1,9 @@
 mod actions;
 mod components;
 mod frame;
+mod notices;
 mod number_edit;
+mod settings;
 mod state;
 mod text_input;
 mod theme;
@@ -14,10 +16,12 @@ use gpui::{
 };
 
 use crate::frame::AppFrame;
+use crate::settings::{SettingsStartup, settings_path};
 
 fn main() -> ExitCode {
     let startup_failed = Rc::new(Cell::new(false));
     let failure_in_app = Rc::clone(&startup_failed);
+    let startup = SettingsStartup::load(settings_path());
 
     Application::new().run(move |cx| {
         actions::bind(cx);
@@ -39,7 +43,7 @@ fn main() -> ExitCode {
                 ..Default::default()
             },
             |window, cx| {
-                let frame = cx.new(AppFrame::new);
+                let frame = cx.new(|cx| AppFrame::new(startup, cx));
                 let weak_frame = frame.downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
                     weak_frame
