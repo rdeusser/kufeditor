@@ -1,6 +1,12 @@
 //! Supported games, installation discovery, paths, and data catalogs.
 
+mod catalog;
+mod error;
+
 use std::fmt;
+
+pub use catalog::CatalogRole;
+pub use error::{CatalogFileError, CatalogIssue, CatalogLoadError};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Game {
