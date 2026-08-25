@@ -38,15 +38,28 @@ pub enum SaveUnitVisibility<'a> {
     Filtered(&'a [usize]),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SaveUnitReconciliation {
+    inspected_unit: usize,
+    requested_visible: bool,
+}
+
 impl SaveUnitVisibility<'_> {
-    fn inspected_unit(self, requested_unit: usize) -> usize {
+    fn reconcile(self, requested_unit: usize) -> SaveUnitReconciliation {
         match self {
-            Self::All { unit_count } => clamp_unit(requested_unit, unit_count),
+            Self::All { unit_count } => SaveUnitReconciliation {
+                inspected_unit: clamp_unit(requested_unit, unit_count),
+                requested_visible: requested_unit < unit_count,
+            },
             Self::Filtered(indices) => {
-                if indices.contains(&requested_unit) {
-                    requested_unit
-                } else {
-                    indices.first().copied().unwrap_or(0)
+                let requested_visible = indices.contains(&requested_unit);
+                SaveUnitReconciliation {
+                    inspected_unit: if requested_visible {
+                        requested_unit
+                    } else {
+                        indices.first().copied().unwrap_or(0)
+                    },
+                    requested_visible,
                 }
             }
         }
@@ -157,12 +170,15 @@ impl SavePresentationStates {
         draft_active: bool,
     ) -> SavePresentationTransition {
         let state = self.documents.entry(document).or_default();
-        let inspected_unit = visibility.inspected_unit(state.inspected_unit);
-        if state.inspected_unit == inspected_unit {
-            return SavePresentationTransition::Unchanged;
-        }
-        state.inspected_unit = inspected_unit;
-        changed_transition(draft_active)
+        let reconciliation = visibility.reconcile(state.inspected_unit);
+        let transition = unit_reconciliation_transition(
+            state.inspected_unit,
+            reconciliation,
+            false,
+            draft_active,
+        );
+        state.inspected_unit = reconciliation.inspected_unit;
+        transition
     }
 
     pub fn select_section(
@@ -187,12 +203,15 @@ impl SavePresentationStates {
         draft_active: bool,
     ) -> SavePresentationTransition {
         let state = self.documents.entry(document).or_default();
-        let unit = visibility.inspected_unit(unit);
-        if state.inspected_unit == unit {
-            return SavePresentationTransition::Unchanged;
-        }
-        state.inspected_unit = unit;
-        changed_transition(draft_active)
+        let reconciliation = visibility.reconcile(unit);
+        let transition = unit_reconciliation_transition(
+            state.inspected_unit,
+            reconciliation,
+            false,
+            draft_active,
+        );
+        state.inspected_unit = reconciliation.inspected_unit;
+        transition
     }
 
     pub fn select_equipment_slot(
@@ -217,13 +236,16 @@ impl SavePresentationStates {
         draft_active: bool,
     ) -> SavePresentationTransition {
         let state = self.documents.entry(document).or_default();
-        let inspected_unit = visibility.inspected_unit(state.inspected_unit);
-        if state.unit_filter == filter && state.inspected_unit == inspected_unit {
-            return SavePresentationTransition::Unchanged;
-        }
+        let reconciliation = visibility.reconcile(state.inspected_unit);
+        let transition = unit_reconciliation_transition(
+            state.inspected_unit,
+            reconciliation,
+            state.unit_filter != filter,
+            draft_active,
+        );
         state.unit_filter = filter;
-        state.inspected_unit = inspected_unit;
-        changed_transition(draft_active)
+        state.inspected_unit = reconciliation.inspected_unit;
+        transition
     }
 
     pub fn remove_document(&mut self, document: DocumentID) -> bool {
@@ -257,6 +279,21 @@ const fn changed_transition(draft_active: bool) -> SavePresentationTransition {
         SavePresentationTransition::ChangedAndCancelDraft
     } else {
         SavePresentationTransition::Changed
+    }
+}
+
+const fn unit_reconciliation_transition(
+    previous_unit: usize,
+    reconciliation: SaveUnitReconciliation,
+    presentation_changed: bool,
+    draft_active: bool,
+) -> SavePresentationTransition {
+    if presentation_changed || previous_unit != reconciliation.inspected_unit {
+        changed_transition(draft_active)
+    } else if draft_active && !reconciliation.requested_visible {
+        SavePresentationTransition::ChangedAndCancelDraft
+    } else {
+        SavePresentationTransition::Unchanged
     }
 }
 
@@ -798,6 +835,58 @@ mod save_presentation_tests {
 
         assert_eq!(
             states.set_unit_filter(document, "missing".to_owned(), filtered_units(&[]), true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
+    }
+
+    #[test]
+    fn save_presentation_unchanged_filter_cancels_unit_zero_draft_when_visibility_empties() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.set_unit_filter(document, "leader".to_owned(), filtered_units(&[0]), false);
+
+        assert_eq!(
+            states.set_unit_filter(document, "leader".to_owned(), filtered_units(&[]), true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
+    }
+
+    #[test]
+    fn save_presentation_zero_count_reconciliation_cancels_unit_zero_draft() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.reconcile_document(document, all_units(1), false);
+
+        assert_eq!(
+            states.reconcile_document(document, all_units(0), true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
+    }
+
+    #[test]
+    fn save_presentation_inspection_cancels_unit_zero_draft_when_visibility_empties() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.inspect_unit(document, 0, all_units(1), false);
+
+        assert_eq!(
+            states.inspect_unit(document, 0, all_units(0), true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
+    }
+
+    #[test]
+    fn save_presentation_active_activation_cancels_unit_zero_draft_when_visibility_empties() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.activate_document(document, filtered_units(&[0]), false);
+
+        assert_eq!(
+            states.activate_document(document, filtered_units(&[]), true),
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
