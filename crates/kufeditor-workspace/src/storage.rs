@@ -4,7 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Document, DocumentId, StateId, TroopDocument, WorkspaceError};
+use kufeditor_formats::{SoxDocument, parse_sox};
+
+use crate::{Document, DocumentId, StateId, WorkspaceError};
 
 #[derive(Debug)]
 pub struct LoadedDocument {
@@ -115,14 +117,15 @@ pub fn load_path(path: PathBuf) -> Result<LoadedDocument, WorkspaceError> {
         path: path.clone(),
         source,
     })?;
-    let document = TroopDocument::parse(bytes).map_err(|source| WorkspaceError::Parse {
+    let document = parse_sox(bytes).map_err(|source| WorkspaceError::Parse {
         path: path.clone(),
         source,
     })?;
-    Ok(LoadedDocument {
-        path,
-        document: Document::Troop(document),
-    })
+    let document = match document {
+        SoxDocument::Troop(document) => Document::Troop(document),
+        SoxDocument::Skill(document) => Document::Skill(document),
+    };
+    Ok(LoadedDocument { path, document })
 }
 
 fn save_parent(path: &Path) -> Result<&Path, WorkspaceError> {

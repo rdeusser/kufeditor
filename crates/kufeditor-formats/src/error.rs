@@ -16,6 +16,9 @@ pub struct SkillCleaveError(#[from] sox_skill_info::Error);
 
 #[derive(Debug, Error)]
 pub enum FormatError {
+    #[error("SOX input is neither a TroopInfo nor SkillInfo document")]
+    UnsupportedSox,
+
     #[error("ASCII-hex SOX input has an odd length of {length} bytes")]
     OddAsciiHexLength { length: usize },
 

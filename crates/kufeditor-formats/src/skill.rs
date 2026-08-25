@@ -79,7 +79,10 @@ pub struct SkillDocument {
 
 impl SkillDocument {
     pub fn parse(bytes: Vec<u8>) -> Result<Self, FormatError> {
-        let source = SoxSource::parse(bytes)?;
+        Self::from_source(SoxSource::parse(bytes)?)
+    }
+
+    pub(crate) fn from_source(source: SoxSource) -> Result<Self, FormatError> {
         let decoded = source.decoded();
         preflight_record_count(decoded)?;
         let mut offset = 0;

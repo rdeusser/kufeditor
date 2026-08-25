@@ -9,8 +9,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use document::{Document, DocumentEdit, DocumentId, StateId};
-pub use kufeditor_formats::{Diagnostic, Severity, TroopDocument, TroopField, TroopGroup};
+pub use document::{Document, DocumentEdit, DocumentId, DocumentKind, StateId};
+pub use kufeditor_formats::{
+    Diagnostic, Severity, SkillDocument, SkillTextField, TroopDocument, TroopField, TroopGroup,
+};
 pub use storage::{LoadedDocument, SaveRequest, SaveToken, SavedDocument, load_path};
 use thiserror::Error;
 
@@ -24,10 +26,13 @@ pub enum WorkspaceError {
     #[error("document {0:?} is not a TroopInfo document")]
     NotTroop(DocumentId),
 
+    #[error("document {0:?} is not a SkillInfo document")]
+    NotSkill(DocumentId),
+
     #[error(transparent)]
     Format(#[from] kufeditor_formats::FormatError),
 
-    #[error("unsupported Stage 1 file {path}: expected a .sox file")]
+    #[error("unsupported file {path}: expected a .sox TroopInfo or SkillInfo file")]
     UnsupportedFile { path: PathBuf },
 
     #[error("failed to read {path}: {source}")]
@@ -192,7 +197,7 @@ impl Workspace {
         let (before, inverse) = {
             let session = self.session_mut(id)?;
             let before = session.current_state;
-            let inverse = session.document.apply(edit)?;
+            let inverse = session.document.apply(id, edit.clone())?;
             (before, inverse)
         };
         let after = self.allocate_state();
@@ -214,9 +219,9 @@ impl Workspace {
             return Ok(false);
         };
 
-        if let Err(error) = session.document.apply(entry.inverse) {
+        if let Err(error) = session.document.apply(id, entry.inverse.clone()) {
             session.undo.push(entry);
-            return Err(error.into());
+            return Err(error);
         }
 
         session.current_state = entry.before;
@@ -230,9 +235,9 @@ impl Workspace {
             return Ok(false);
         };
 
-        if let Err(error) = session.document.apply(entry.forward) {
+        if let Err(error) = session.document.apply(id, entry.forward.clone()) {
             session.redo.push(entry);
-            return Err(error.into());
+            return Err(error);
         }
 
         session.current_state = entry.after;
@@ -277,10 +282,15 @@ impl Workspace {
         })
     }
 
+    pub fn document_kind(&self, id: DocumentId) -> Result<DocumentKind, WorkspaceError> {
+        self.session(id).map(|session| session.document.kind())
+    }
+
     pub fn record_count(&self, id: DocumentId) -> Result<usize, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => Ok(document.record_count()),
+            Document::Skill(document) => Ok(document.record_count()),
         }
     }
 
@@ -293,6 +303,44 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => document.value(record, field).map_err(Into::into),
+            Document::Skill(_) => Err(WorkspaceError::NotTroop(id)),
+        }
+    }
+
+    pub fn skill_id(&self, id: DocumentId, record: usize) -> Result<i32, WorkspaceError> {
+        let session = self.session(id)?;
+        match &session.document {
+            Document::Skill(document) => document.skill_id(record).map_err(Into::into),
+            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
+        }
+    }
+
+    pub fn skill_type(&self, id: DocumentId, record: usize) -> Result<u32, WorkspaceError> {
+        let session = self.session(id)?;
+        match &session.document {
+            Document::Skill(document) => document.skill_type(record).map_err(Into::into),
+            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
+        }
+    }
+
+    pub fn skill_max_level(&self, id: DocumentId, record: usize) -> Result<u32, WorkspaceError> {
+        let session = self.session(id)?;
+        match &session.document {
+            Document::Skill(document) => document.max_level(record).map_err(Into::into),
+            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
+        }
+    }
+
+    pub fn skill_text(
+        &self,
+        id: DocumentId,
+        record: usize,
+        field: SkillTextField,
+    ) -> Result<&str, WorkspaceError> {
+        let session = self.session(id)?;
+        match &session.document {
+            Document::Skill(document) => document.text(record, field).map_err(Into::into),
+            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -300,6 +348,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => Ok(document.diagnostics()),
+            Document::Skill(document) => Ok(document.diagnostics()),
         }
     }
 
