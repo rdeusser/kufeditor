@@ -473,6 +473,7 @@ impl AppFrame {
                 let (document, edit) = target.document_edit(value.clone());
                 match self.workspace.apply(document, edit) {
                     Ok(()) => {
+                        self.document_did_mutate();
                         self.cancel_property_edit();
                         self.notices.clear(NoticeSource::Editor);
                     }
@@ -513,7 +514,10 @@ impl AppFrame {
             return;
         }
         match self.workspace.apply(document, choice.document_edit(record)) {
-            Ok(()) => self.notices.clear(NoticeSource::Editor),
+            Ok(()) => {
+                self.document_did_mutate();
+                self.notices.clear(NoticeSource::Editor);
+            }
             Err(error) => {
                 self.notices.replace(
                     NoticeSource::Editor,
@@ -650,6 +654,7 @@ impl AppFrame {
             }
             Some(_) | None => {
                 self.close_pending = false;
+                self.close_documents = CloseDocuments::Save;
             }
         }
         cx.notify();
@@ -762,6 +767,7 @@ impl AppFrame {
         };
         match self.workspace.apply(document, document_edit) {
             Ok(()) => {
+                self.document_did_mutate();
                 self.cancel_property_edit();
                 self.notices.clear(NoticeSource::Editor);
             }
@@ -1000,7 +1006,10 @@ impl AppFrame {
             self.workspace.undo(document_id)
         };
         match result {
-            Ok(true) => self.notices.clear(NoticeSource::Workspace),
+            Ok(true) => {
+                self.document_did_mutate();
+                self.notices.clear(NoticeSource::Workspace);
+            }
             Ok(false) => {}
             Err(error) => {
                 self.notices.replace(
@@ -1127,6 +1136,14 @@ impl AppFrame {
 
     fn cancel_close_after_document_save_failure(&mut self) {
         if self.close_documents == CloseDocuments::Save {
+            self.close_pending = false;
+            self.close_armed = false;
+        }
+    }
+
+    fn document_did_mutate(&mut self) {
+        if self.close_documents == CloseDocuments::Discard {
+            self.close_documents = CloseDocuments::Save;
             self.close_pending = false;
             self.close_armed = false;
         }
@@ -2464,6 +2481,51 @@ mod tests {
     }
 
     #[gpui::test]
+    fn canceled_save_as_restores_an_in_flight_save_notice_identity(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let document_path = directory.path().join("document.sox");
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+        let (document, token, result, notice_identity) = window
+            .update(cx, |frame, window, cx| {
+                let document = open_troop(frame, &document_path.to_string_lossy(), 100);
+                frame.activate_document(document);
+                let request = frame.workspace.prepare_save(document, None).unwrap();
+                let token = request.token();
+                let result = request.run();
+                assert!(result.is_ok());
+                let notice_identity = frame.allocate_workspace_notice_identity();
+                frame.notices.begin(
+                    NoticeSource::Workspace,
+                    notice_identity,
+                    Notice::info("Saving document"),
+                );
+
+                frame.save_as_action(&SaveAs, window, cx);
+                (document, token, result, notice_identity)
+            })
+            .unwrap();
+        assert!(cx.did_prompt_for_new_path());
+
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        window
+            .update(cx, |frame, _, _| {
+                frame.finish_save_result(document, token, notice_identity, result);
+
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Saved document.sox")
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn empty_text_sox_commit_keeps_the_same_draft_and_history(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             bind_text_input(cx);
@@ -3523,6 +3585,117 @@ mod tests {
         assert_eq!(
             cx.pending_prompt().map(|prompt| prompt.0),
             Some("Settings could not be saved. Retry before closing?".to_owned())
+        );
+    }
+
+    #[gpui::test]
+    fn canceling_settings_close_revokes_the_document_discard_decision(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let document_path = directory.path().join("discarded.sox");
+        let blocker = directory.path().join("not-a-directory");
+        fs::write(&blocker, b"blocker").unwrap();
+        let startup = SettingsStartup::load(blocker.join("settings.json"));
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                let document = open_troop(frame, &document_path.to_string_lossy(), 100);
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetTroopField {
+                            record: 0,
+                            field: TroopField::MoveSpeed,
+                            value: 101,
+                        },
+                    )
+                    .unwrap();
+                frame.select_game(Game::Heroes, cx);
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        cx.simulate_prompt_answer("Discard Changes");
+        cx.run_until_parked();
+        window
+            .update(cx, |frame, window, cx| {
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        cx.simulate_prompt_answer("Cancel");
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, window, cx| {
+                assert_eq!(frame.close_documents, CloseDocuments::Save);
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        assert_eq!(
+            cx.pending_prompt().map(|prompt| prompt.0),
+            Some("1 unsaved document. Save before closing?".to_owned())
+        );
+    }
+
+    #[gpui::test]
+    fn editing_after_a_settings_failure_revokes_the_document_discard_decision(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let document_path = directory.path().join("discarded.sox");
+        let blocker = directory.path().join("not-a-directory");
+        fs::write(&blocker, b"blocker").unwrap();
+        let startup = SettingsStartup::load(blocker.join("settings.json"));
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        let document = window
+            .update(cx, |frame, window, cx| {
+                let document = open_troop(frame, &document_path.to_string_lossy(), 100);
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetTroopField {
+                            record: 0,
+                            field: TroopField::MoveSpeed,
+                            value: 101,
+                        },
+                    )
+                    .unwrap();
+                frame.select_game(Game::Heroes, cx);
+                assert!(!frame.window_should_close(window, cx));
+                document
+            })
+            .unwrap();
+        cx.simulate_prompt_answer("Discard Changes");
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, window, cx| {
+                frame.activate_document(document);
+                frame.begin_number_edit(ActiveNumberEdit::troop_field(
+                    document,
+                    0,
+                    TroopField::MoveSpeed,
+                    101,
+                ));
+                frame.commit_number_edit(102);
+                assert!(!frame.window_should_close(window, cx));
+            })
+            .unwrap();
+        assert_eq!(
+            cx.pending_prompt().map(|prompt| prompt.0),
+            Some("1 unsaved document. Save before closing?".to_owned())
         );
     }
 

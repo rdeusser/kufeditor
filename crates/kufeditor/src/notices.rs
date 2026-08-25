@@ -138,6 +138,7 @@ struct NoticeSlot {
     identity: NoticeIdentity,
     sequence: u64,
     notice: Option<Notice>,
+    suspended: Option<Box<NoticeSlot>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -165,11 +166,20 @@ impl NoticeCenter {
     }
 
     pub(crate) fn begin_pending(&mut self, source: NoticeSource, identity: u64) {
-        if let Some(slot) = self.slots.get_mut(&source) {
-            slot.identity = NoticeIdentity::External(identity);
-        } else {
-            self.insert(source, NoticeIdentity::External(identity), None);
-        }
+        let suspended = self.slots.remove(&source).map(Box::new);
+        let (sequence, notice) = suspended.as_ref().map_or_else(
+            || (self.allocate_sequence(), None),
+            |slot| (slot.sequence, slot.notice.clone()),
+        );
+        self.slots.insert(
+            source,
+            NoticeSlot {
+                identity: NoticeIdentity::External(identity),
+                sequence,
+                notice,
+                suspended,
+            },
+        );
     }
 
     pub(crate) fn cancel(&mut self, source: NoticeSource, identity: u64) -> bool {
@@ -177,18 +187,11 @@ impl NoticeCenter {
         if self.slots.get(&source).map(|slot| slot.identity) != Some(identity) {
             return false;
         }
-        if self
-            .slots
-            .get(&source)
-            .is_some_and(|slot| slot.notice.is_some())
-        {
-            let local_identity = self.next_identity;
-            self.next_identity += 1;
-            if let Some(slot) = self.slots.get_mut(&source) {
-                slot.identity = NoticeIdentity::Local(local_identity);
-            }
-        } else {
-            self.slots.remove(&source);
+        let Some(slot) = self.slots.remove(&source) else {
+            return false;
+        };
+        if let Some(suspended) = slot.suspended {
+            self.slots.insert(source, *suspended);
         }
         true
     }
@@ -201,6 +204,7 @@ impl NoticeCenter {
                 identity,
                 sequence,
                 notice,
+                suspended: None,
             },
         );
     }
@@ -293,6 +297,24 @@ mod tests {
         assert_eq!(
             center.current().map(Notice::summary),
             Some("local replacement")
+        );
+    }
+
+    #[test]
+    fn canceling_a_pending_notice_restores_the_suspended_external_identity() {
+        let mut center = NoticeCenter::default();
+        center.begin(NoticeSource::Workspace, 7, Notice::info("Saving document"));
+        center.begin_pending(NoticeSource::Workspace, 8);
+
+        assert!(center.cancel(NoticeSource::Workspace, 8));
+        assert!(center.complete(
+            NoticeSource::Workspace,
+            7,
+            Some(Notice::success("Saved document")),
+        ));
+        assert_eq!(
+            center.current().map(Notice::summary),
+            Some("Saved document")
         );
     }
 
