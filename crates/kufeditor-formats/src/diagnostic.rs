@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{SkillField, TextSOXField, TroopField};
+use crate::{SaveNumberTarget, SkillField, TextSOXField, TroopField};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Severity {
@@ -32,10 +32,46 @@ impl fmt::Display for DiagnosticField {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum DiagnosticLocation {
+    Record {
+        record: usize,
+        field: DiagnosticField,
+    },
+    Save(SaveNumberTarget),
+}
+
+impl DiagnosticLocation {
+    pub const fn record(self) -> Option<usize> {
+        match self {
+            Self::Record { record, .. }
+            | Self::Save(
+                SaveNumberTarget::Roster { record, .. } | SaveNumberTarget::SecondArray { record },
+            ) => Some(record),
+            Self::Save(
+                SaveNumberTarget::Unit { unit, .. } | SaveNumberTarget::Equipment { unit, .. },
+            ) => Some(unit),
+            Self::Save(SaveNumberTarget::MissionCompletion { slot }) => Some(slot),
+            Self::Save(
+                SaveNumberTarget::CampaignIndex
+                | SaveNumberTarget::Main(_)
+                | SaveNumberTarget::SelectedUnit
+                | SaveNumberTarget::CurrentMissionIndex,
+            ) => None,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Record { field, .. } => field.label(),
+            Self::Save(target) => target.label(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Diagnostic {
     pub severity: Severity,
-    pub record: usize,
-    pub field: DiagnosticField,
+    pub location: DiagnosticLocation,
     pub message: &'static str,
 }

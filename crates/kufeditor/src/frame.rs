@@ -1932,10 +1932,10 @@ impl AppFrame {
         diagnostics
             .into_iter()
             .map(|diagnostic| {
-                let wire_index = self
-                    .workspace
-                    .text_sox_index(document_id, diagnostic.record)
-                    .unwrap_or_default();
+                let wire_index = diagnostic
+                    .location
+                    .record()
+                    .and_then(|record| self.workspace.text_sox_index(document_id, record).ok());
                 let item = views::text::diagnostic_item(diagnostic, wire_index);
                 views::text::diagnostic_row(&self.theme, &item).into_any_element()
             })
@@ -2087,14 +2087,15 @@ impl AppFrame {
         diagnostics
             .into_iter()
             .map(|diagnostic| {
+                let label = diagnostic.location.label();
+                let title = diagnostic.location.record().map_or_else(
+                    || label.to_owned(),
+                    |record| format!("{} · {label}", views::troop::troop_name(record)),
+                );
                 views::troop::diagnostic_row(
                     &self.theme,
                     diagnostic.severity,
-                    format!(
-                        "{} · {}",
-                        views::troop::troop_name(diagnostic.record),
-                        diagnostic.field.label()
-                    ),
+                    title,
                     diagnostic.message,
                 )
                 .into_any_element()

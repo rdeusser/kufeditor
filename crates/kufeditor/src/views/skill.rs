@@ -41,10 +41,10 @@ impl DiagnosticItem {
     }
 
     pub(crate) fn title(&self) -> String {
-        format!(
-            "{} · {}",
-            skill_name(self.diagnostic.record),
-            self.diagnostic.field.label()
+        let label = self.diagnostic.location.label();
+        self.diagnostic.location.record().map_or_else(
+            || label.to_owned(),
+            |record| format!("{} · {label}", skill_name(record)),
         )
     }
 }

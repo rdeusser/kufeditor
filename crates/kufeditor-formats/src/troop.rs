@@ -1,5 +1,5 @@
 use crate::{
-    diagnostic::{Diagnostic, DiagnosticField, Severity},
+    diagnostic::{Diagnostic, DiagnosticField, DiagnosticLocation, Severity},
     error::FormatError,
     generated::sox_troop_info::{self, File, TroopInfoRecord},
     sox::SOXSource,
@@ -195,8 +195,10 @@ impl TroopDocument {
                 if value < 0 || (value > 500 && value < 1_000_000) {
                     diagnostics.push(Diagnostic {
                         severity: Severity::Warning,
-                        record: record_index,
-                        field: DiagnosticField::Troop(field),
+                        location: DiagnosticLocation::Record {
+                            record: record_index,
+                            field: DiagnosticField::Troop(field),
+                        },
                         message: "Resistance is outside the expected 0 to 500 percent range",
                     });
                 }
@@ -205,8 +207,10 @@ impl TroopDocument {
             if record.default_unit_hp <= 0 {
                 diagnostics.push(Diagnostic {
                     severity: Severity::Error,
-                    record: record_index,
-                    field: DiagnosticField::Troop(TroopField::DefaultUnitHP),
+                    location: DiagnosticLocation::Record {
+                        record: record_index,
+                        field: DiagnosticField::Troop(TroopField::DefaultUnitHP),
+                    },
                     message: "Default unit HP must be greater than zero",
                 });
             }

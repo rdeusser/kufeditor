@@ -4,7 +4,8 @@
 )]
 
 use kufeditor_formats::{
-    DiagnosticField, FormatError, Severity, TextSOXDocument, TextSOXField, TextSOXParseError,
+    DiagnosticField, DiagnosticLocation, FormatError, Severity, TextSOXDocument, TextSOXField,
+    TextSOXParseError,
 };
 
 fn text_fixture(records: &[(u32, &[u8])], tail: &[u8]) -> Vec<u8> {
@@ -294,14 +295,18 @@ fn reports_duplicate_stored_indices_and_ignores_sparse_unique_indices() {
         vec![
             kufeditor_formats::Diagnostic {
                 severity: Severity::Warning,
-                record: 0,
-                field: DiagnosticField::TextSOX(TextSOXField::Index),
+                location: DiagnosticLocation::Record {
+                    record: 0,
+                    field: DiagnosticField::TextSOX(TextSOXField::Index),
+                },
                 message: "Stored index is duplicated",
             },
             kufeditor_formats::Diagnostic {
                 severity: Severity::Warning,
-                record: 1,
-                field: DiagnosticField::TextSOX(TextSOXField::Index),
+                location: DiagnosticLocation::Record {
+                    record: 1,
+                    field: DiagnosticField::TextSOX(TextSOXField::Index),
+                },
                 message: "Stored index is duplicated",
             },
         ]

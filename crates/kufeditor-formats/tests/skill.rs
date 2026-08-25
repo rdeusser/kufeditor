@@ -4,7 +4,8 @@
 )]
 
 use kufeditor_formats::{
-    DiagnosticField, FormatError, Severity, SkillDocument, SkillField, SkillTextField, TroopField,
+    DiagnosticField, DiagnosticLocation, FormatError, Severity, SkillDocument, SkillField,
+    SkillTextField, TroopField,
 };
 
 #[derive(Clone, Copy)]
@@ -288,46 +289,49 @@ fn reports_the_legacy_skill_warnings() {
     let observed: Vec<_> = document
         .diagnostics()
         .into_iter()
-        .map(|diagnostic| {
-            (
-                diagnostic.severity,
-                diagnostic.record,
-                diagnostic.field,
-                diagnostic.message,
-            )
-        })
+        .map(|diagnostic| (diagnostic.severity, diagnostic.location, diagnostic.message))
         .collect();
     assert_eq!(
         observed,
         vec![
             (
                 Severity::Warning,
-                0,
-                DiagnosticField::Skill(SkillField::SkillType),
+                DiagnosticLocation::Record {
+                    record: 0,
+                    field: DiagnosticField::Skill(SkillField::SkillType),
+                },
                 "Skill type should be 1 (Combat) or 2 (Magic)",
             ),
             (
                 Severity::Warning,
-                0,
-                DiagnosticField::Skill(SkillField::MaxLevel),
+                DiagnosticLocation::Record {
+                    record: 0,
+                    field: DiagnosticField::Skill(SkillField::MaxLevel),
+                },
                 "Max level is 0 or exceeds 65535",
             ),
             (
                 Severity::Warning,
-                0,
-                DiagnosticField::Skill(SkillField::LocalizationKey),
+                DiagnosticLocation::Record {
+                    record: 0,
+                    field: DiagnosticField::Skill(SkillField::LocalizationKey),
+                },
                 "Localization key is empty",
             ),
             (
                 Severity::Warning,
-                0,
-                DiagnosticField::Skill(SkillField::IconPath),
+                DiagnosticLocation::Record {
+                    record: 0,
+                    field: DiagnosticField::Skill(SkillField::IconPath),
+                },
                 "Icon path is empty",
             ),
             (
                 Severity::Warning,
-                1,
-                DiagnosticField::Skill(SkillField::MaxLevel),
+                DiagnosticLocation::Record {
+                    record: 1,
+                    field: DiagnosticField::Skill(SkillField::MaxLevel),
+                },
                 "Max level is 0 or exceeds 65535",
             ),
         ]
@@ -373,8 +377,11 @@ fn invalid_utf8_stays_unchanged_when_another_field_is_edited() {
     ));
     assert!(document.diagnostics().iter().any(|diagnostic| {
         diagnostic.severity == Severity::Error
-            && diagnostic.record == 0
-            && diagnostic.field == DiagnosticField::Skill(SkillField::LocalizationKey)
+            && diagnostic.location
+                == DiagnosticLocation::Record {
+                    record: 0,
+                    field: DiagnosticField::Skill(SkillField::LocalizationKey),
+                }
     }));
 
     document.set_skill_type(0, 2).unwrap();

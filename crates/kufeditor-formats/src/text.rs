@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    Diagnostic, DiagnosticField, FormatError, Severity, TextSOXParseError, sox::SOXSource,
+    Diagnostic, DiagnosticField, DiagnosticLocation, FormatError, Severity, TextSOXParseError,
+    sox::SOXSource,
 };
 
 const HEADER_SIZE: usize = 8;
@@ -106,8 +107,10 @@ impl TextSOXDocument {
             .filter(|(_, record)| counts.get(&record.index).is_some_and(|count| *count > 1))
             .map(|(record, _)| Diagnostic {
                 severity: Severity::Warning,
-                record,
-                field: DiagnosticField::TextSOX(TextSOXField::Index),
+                location: DiagnosticLocation::Record {
+                    record,
+                    field: DiagnosticField::TextSOX(TextSOXField::Index),
+                },
                 message: "Stored index is duplicated",
             })
             .collect()

@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use kufeditor_formats::{DiagnosticField, FormatError};
 use kufeditor_workspace::{
-    Document, DocumentEdit, DocumentKind, SkillDocument, SkillTextField, TextSOXDocument,
-    TextSOXField, TroopDocument, TroopField, Workspace, WorkspaceError,
+    DiagnosticLocation, Document, DocumentEdit, DocumentKind, SkillDocument, SkillTextField,
+    TextSOXDocument, TextSOXField, TroopDocument, TroopField, Workspace, WorkspaceError,
 };
 
 fn troop_fixture() -> Vec<u8> {
@@ -610,9 +610,11 @@ fn text_sox_duplicate_index_diagnostics_retain_the_typed_field() {
     let diagnostics = workspace.diagnostics(id).unwrap();
 
     assert_eq!(diagnostics.len(), 2);
-    assert!(
-        diagnostics.iter().all(|diagnostic| {
-            diagnostic.field == DiagnosticField::TextSOX(TextSOXField::Index)
-        })
-    );
+    assert!(diagnostics.iter().enumerate().all(|(record, diagnostic)| {
+        diagnostic.location
+            == DiagnosticLocation::Record {
+                record,
+                field: DiagnosticField::TextSOX(TextSOXField::Index),
+            }
+    }));
 }

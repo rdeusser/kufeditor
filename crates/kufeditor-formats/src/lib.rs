@@ -3,6 +3,7 @@
 mod diagnostic;
 mod error;
 mod generated;
+mod save;
 mod schema;
 mod skill;
 mod sox;
@@ -10,10 +11,14 @@ mod string_table;
 mod text;
 mod troop;
 
-pub use diagnostic::{Diagnostic, DiagnosticField, Severity};
+pub use diagnostic::{Diagnostic, DiagnosticField, DiagnosticLocation, Severity};
 pub use error::{
     FormatError, GeneratedSOXError, SkillCleaveError, StringTableEncodeError,
     StringTableParseError, TextSOXParseError, TroopCleaveError,
+};
+pub use save::{
+    SaveChoice, SaveEditor, SaveEquipmentField, SaveEquipmentGroup, SaveEquipmentSlot,
+    SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField, SaveUnitField, SaveUnitGroup,
 };
 pub use schema::{SOXSchema, SchemaDocument, SpecialNameRef};
 pub use skill::{SkillDocument, SkillField, SkillTextField};

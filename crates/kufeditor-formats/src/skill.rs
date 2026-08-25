@@ -1,5 +1,5 @@
 use crate::{
-    diagnostic::{Diagnostic, DiagnosticField, Severity},
+    diagnostic::{Diagnostic, DiagnosticField, DiagnosticLocation, Severity},
     error::FormatError,
     generated::sox_skill_info::{self, File, SkillInfoRecord},
     sox::SOXSource,
@@ -170,8 +170,10 @@ impl SkillDocument {
             if record.skill_type != 1 && record.skill_type != 2 {
                 diagnostics.push(Diagnostic {
                     severity: Severity::Warning,
-                    record: record_index,
-                    field: DiagnosticField::Skill(SkillField::SkillType),
+                    location: DiagnosticLocation::Record {
+                        record: record_index,
+                        field: DiagnosticField::Skill(SkillField::SkillType),
+                    },
                     message: "Skill type should be 1 (Combat) or 2 (Magic)",
                 });
             }
@@ -179,8 +181,10 @@ impl SkillDocument {
             if record.max_level == 0 || record.max_level > 65_535 {
                 diagnostics.push(Diagnostic {
                     severity: Severity::Warning,
-                    record: record_index,
-                    field: DiagnosticField::Skill(SkillField::MaxLevel),
+                    location: DiagnosticLocation::Record {
+                        record: record_index,
+                        field: DiagnosticField::Skill(SkillField::MaxLevel),
+                    },
                     message: "Max level is 0 or exceeds 65535",
                 });
             }
@@ -234,8 +238,10 @@ impl SkillDocument {
         if value.is_empty() {
             diagnostics.push(Diagnostic {
                 severity: Severity::Warning,
-                record,
-                field: DiagnosticField::Skill(field.as_field()),
+                location: DiagnosticLocation::Record {
+                    record,
+                    field: DiagnosticField::Skill(field.as_field()),
+                },
                 message: match field {
                     SkillTextField::LocalizationKey => "Localization key is empty",
                     SkillTextField::IconPath => "Icon path is empty",
@@ -244,8 +250,10 @@ impl SkillDocument {
         } else if std::str::from_utf8(value).is_err() {
             diagnostics.push(Diagnostic {
                 severity: Severity::Error,
-                record,
-                field: DiagnosticField::Skill(field.as_field()),
+                location: DiagnosticLocation::Record {
+                    record,
+                    field: DiagnosticField::Skill(field.as_field()),
+                },
                 message: match field {
                     SkillTextField::LocalizationKey => "Localization key is not valid UTF-8",
                     SkillTextField::IconPath => "Icon path is not valid UTF-8",

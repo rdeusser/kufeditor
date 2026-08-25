@@ -29,7 +29,7 @@ pub(crate) fn diagnostic_title(wire_index: u32, field_label: &str) -> String {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct DiagnosticItem {
     diagnostic: Diagnostic,
-    wire_index: u32,
+    wire_index: Option<u32>,
 }
 
 impl DiagnosticItem {
@@ -38,11 +38,16 @@ impl DiagnosticItem {
     }
 
     pub(crate) fn title(&self) -> String {
-        diagnostic_title(self.wire_index, self.diagnostic.field.label())
+        let label = self.diagnostic.location.label();
+        self.wire_index
+            .map_or_else(|| label.to_owned(), |index| diagnostic_title(index, label))
     }
 }
 
-pub(crate) const fn diagnostic_item(diagnostic: Diagnostic, wire_index: u32) -> DiagnosticItem {
+pub(crate) const fn diagnostic_item(
+    diagnostic: Diagnostic,
+    wire_index: Option<u32>,
+) -> DiagnosticItem {
     DiagnosticItem {
         diagnostic,
         wire_index,
@@ -395,7 +400,7 @@ mod tests {
         let diagnostic = document.diagnostics().remove(0);
 
         assert_eq!(
-            diagnostic_item(diagnostic, 9001).title(),
+            diagnostic_item(diagnostic, Some(9001)).title(),
             "Wire 9001 · Index"
         );
         assert_eq!(
