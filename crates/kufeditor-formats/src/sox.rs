@@ -206,4 +206,24 @@ mod tests {
 
         assert_eq!(source.decoded(), original);
     }
+
+    #[test]
+    fn partial_marker_match_stays_raw_for_automatic_detection() {
+        let original = b"6400010000000000".to_vec();
+
+        let source = SoxSource::parse(original.clone()).unwrap();
+
+        assert_eq!(source.decoded(), original);
+        assert_eq!(source.original_bytes(), original);
+    }
+
+    #[test]
+    fn non_hex_byte_inside_marker_prefix_stays_raw() {
+        let original = b"64G0000000000000".to_vec();
+
+        let source = SoxSource::parse(original.clone()).unwrap();
+
+        assert_eq!(source.decoded(), original);
+        assert_eq!(source.original_bytes(), original);
+    }
 }
