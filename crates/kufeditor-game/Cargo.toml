@@ -1,0 +1,10 @@
+[package]
+name = "kufeditor-game"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kufeditor-formats.workspace = true
+
+[lints]
+workspace = true

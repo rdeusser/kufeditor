@@ -1,5 +1,6 @@
 # Build directories
 build/
+/target/
 cmake-build-*/
 .cache
 

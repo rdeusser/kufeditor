@@ -1,0 +1,10 @@
+[package]
+name = "kufeditor-patches"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kufeditor-game.workspace = true
+
+[lints]
+workspace = true

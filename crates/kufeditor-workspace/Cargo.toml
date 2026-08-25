@@ -1,0 +1,12 @@
+[package]
+name = "kufeditor-workspace"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kufeditor-formats.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

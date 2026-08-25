@@ -1,0 +1,17 @@
+[package]
+name = "kufeditor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gpui.workspace = true
+kufeditor-game.workspace = true
+kufeditor-mods.workspace = true
+kufeditor-patches.workspace = true
+kufeditor-workspace.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
