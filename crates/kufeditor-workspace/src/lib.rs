@@ -11,7 +11,8 @@ use std::{
 
 pub use document::{Document, DocumentEdit, DocumentId, DocumentKind, StateId};
 pub use kufeditor_formats::{
-    Diagnostic, Severity, SkillDocument, SkillTextField, TroopDocument, TroopField, TroopGroup,
+    Diagnostic, Severity, SkillDocument, SkillTextField, TextSoxDocument, TextSoxField,
+    TroopDocument, TroopField, TroopGroup,
 };
 pub use storage::{LoadedDocument, SaveRequest, SaveToken, SavedDocument, load_path};
 use thiserror::Error;
@@ -29,10 +30,13 @@ pub enum WorkspaceError {
     #[error("document {0:?} is not a SkillInfo document")]
     NotSkill(DocumentId),
 
+    #[error("document {0:?} is not a text SOX document")]
+    NotTextSox(DocumentId),
+
     #[error(transparent)]
     Format(#[from] kufeditor_formats::FormatError),
 
-    #[error("unsupported file {path}: expected a .sox TroopInfo or SkillInfo file")]
+    #[error("unsupported file {path}: expected a .sox TroopInfo, SkillInfo, or text SOX file")]
     UnsupportedFile { path: PathBuf },
 
     #[error("failed to read {path}: {source}")]
@@ -291,6 +295,7 @@ impl Workspace {
         match &session.document {
             Document::Troop(document) => Ok(document.record_count()),
             Document::Skill(document) => Ok(document.record_count()),
+            Document::TextSox(document) => Ok(document.record_count()),
         }
     }
 
@@ -303,7 +308,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => document.value(record, field).map_err(Into::into),
-            Document::Skill(_) => Err(WorkspaceError::NotTroop(id)),
+            Document::Skill(_) | Document::TextSox(_) => Err(WorkspaceError::NotTroop(id)),
         }
     }
 
@@ -311,7 +316,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.skill_id(record).map_err(Into::into),
-            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -319,7 +324,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.skill_type(record).map_err(Into::into),
-            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -327,7 +332,7 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.max_level(record).map_err(Into::into),
-            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
@@ -340,7 +345,35 @@ impl Workspace {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.text(record, field).map_err(Into::into),
-            Document::Troop(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
+        }
+    }
+
+    pub fn text_sox_index(&self, id: DocumentId, record: usize) -> Result<u32, WorkspaceError> {
+        let session = self.session(id)?;
+        match &session.document {
+            Document::TextSox(document) => document.record_index(record).map_err(Into::into),
+            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSox(id)),
+        }
+    }
+
+    pub fn text_sox_max_length(
+        &self,
+        id: DocumentId,
+        record: usize,
+    ) -> Result<u16, WorkspaceError> {
+        let session = self.session(id)?;
+        match &session.document {
+            Document::TextSox(document) => document.max_length(record).map_err(Into::into),
+            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSox(id)),
+        }
+    }
+
+    pub fn text_sox_text(&self, id: DocumentId, record: usize) -> Result<&str, WorkspaceError> {
+        let session = self.session(id)?;
+        match &session.document {
+            Document::TextSox(document) => document.text(record).map_err(Into::into),
+            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSox(id)),
         }
     }
 
@@ -349,6 +382,7 @@ impl Workspace {
         match &session.document {
             Document::Troop(document) => Ok(document.diagnostics()),
             Document::Skill(document) => Ok(document.diagnostics()),
+            Document::TextSox(document) => Ok(document.diagnostics()),
         }
     }
 

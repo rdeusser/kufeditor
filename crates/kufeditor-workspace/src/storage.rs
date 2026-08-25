@@ -124,6 +124,7 @@ pub fn load_path(path: PathBuf) -> Result<LoadedDocument, WorkspaceError> {
     let document = match document {
         SoxDocument::Troop(document) => Document::Troop(document),
         SoxDocument::Skill(document) => Document::Skill(document),
+        SoxDocument::Text(document) => Document::TextSox(document),
     };
     Ok(LoadedDocument { path, document })
 }

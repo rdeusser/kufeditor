@@ -1,4 +1,6 @@
-use kufeditor_formats::{FormatError, SkillDocument, SkillTextField, TroopDocument, TroopField};
+use kufeditor_formats::{
+    FormatError, SkillDocument, SkillTextField, TextSoxDocument, TroopDocument, TroopField,
+};
 
 use crate::WorkspaceError;
 
@@ -12,12 +14,14 @@ pub struct StateId(pub(crate) u64);
 pub enum Document {
     Troop(TroopDocument),
     Skill(SkillDocument),
+    TextSox(TextSoxDocument),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentKind {
     TroopInfo,
     SkillInfo,
+    TextSox,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,6 +48,10 @@ pub enum DocumentEdit {
         field: SkillTextField,
         value: String,
     },
+    SetTextSoxText {
+        record: usize,
+        value: String,
+    },
 }
 
 impl Document {
@@ -51,6 +59,7 @@ impl Document {
         match self {
             Self::Troop(_) => DocumentKind::TroopInfo,
             Self::Skill(_) => DocumentKind::SkillInfo,
+            Self::TextSox(_) => DocumentKind::TextSox,
         }
     }
 
@@ -111,10 +120,22 @@ impl Document {
                     value: previous,
                 })
             }
-            (Self::Troop(_), _) => Err(WorkspaceError::NotSkill(id)),
-            (Self::Skill(_), DocumentEdit::SetTroopField { .. }) => {
-                Err(WorkspaceError::NotTroop(id))
+            (Self::TextSox(document), DocumentEdit::SetTextSoxText { record, value }) => {
+                let previous = document.set_text(record, value)?;
+                Ok(DocumentEdit::SetTextSoxText {
+                    record,
+                    value: previous,
+                })
             }
+            (_, DocumentEdit::SetTroopField { .. }) => Err(WorkspaceError::NotTroop(id)),
+            (
+                _,
+                DocumentEdit::SetSkillId { .. }
+                | DocumentEdit::SetSkillType { .. }
+                | DocumentEdit::SetSkillMaxLevel { .. }
+                | DocumentEdit::SetSkillText { .. },
+            ) => Err(WorkspaceError::NotSkill(id)),
+            (_, DocumentEdit::SetTextSoxText { .. }) => Err(WorkspaceError::NotTextSox(id)),
         }
     }
 
@@ -122,6 +143,7 @@ impl Document {
         match self {
             Self::Troop(document) => document.encode(),
             Self::Skill(document) => document.encode(),
+            Self::TextSox(document) => document.encode(),
         }
     }
 
@@ -133,6 +155,7 @@ impl Document {
         match (self, saved) {
             (Self::Troop(document), Self::Troop(saved)) => document.rebase_source(saved, bytes),
             (Self::Skill(document), Self::Skill(saved)) => document.rebase_source(saved, bytes),
+            (Self::TextSox(document), Self::TextSox(saved)) => document.rebase_source(saved, bytes),
             _ => Err(FormatError::InconsistentSoxRebase),
         }
     }
