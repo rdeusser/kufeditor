@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{SkillField, TroopField};
+use crate::{SkillField, TextSoxField, TroopField};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Severity {
@@ -13,6 +13,7 @@ pub enum Severity {
 pub enum DiagnosticField {
     Troop(TroopField),
     Skill(SkillField),
+    TextSox(TextSoxField),
 }
 
 impl DiagnosticField {
@@ -20,6 +21,7 @@ impl DiagnosticField {
         match self {
             Self::Troop(field) => field.label(),
             Self::Skill(field) => field.label(),
+            Self::TextSox(field) => field.label(),
         }
     }
 }

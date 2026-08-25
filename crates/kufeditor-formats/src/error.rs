@@ -6,6 +6,41 @@ use crate::{
     skill::SkillTextField,
 };
 
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum TextSoxParseError {
+    #[error("text SOX header is truncated")]
+    TruncatedHeader { actual: usize },
+
+    #[error("text SOX marker is invalid")]
+    InvalidMarker { marker: u32 },
+
+    #[error("text SOX record count is invalid")]
+    InvalidRecordCount { count: u32 },
+
+    #[error("text SOX record count cannot fit the source")]
+    ImpossibleRecordCount { count: u32, maximum: usize },
+
+    #[error("text SOX record header is truncated")]
+    TruncatedRecordHeader { record: usize, remaining: usize },
+
+    #[error("text SOX text is empty")]
+    EmptyText { record: usize },
+
+    #[error("text SOX text payload is truncated")]
+    TruncatedText {
+        record: usize,
+        length: u16,
+        remaining: usize,
+    },
+
+    #[error("text SOX text contains an unsupported byte")]
+    InvalidTextByte {
+        record: usize,
+        index: usize,
+        byte: u8,
+    },
+}
+
 #[derive(Debug, Error)]
 #[error(transparent)]
 pub struct TroopCleaveError(#[from] sox_troop_info::Error);
@@ -27,6 +62,30 @@ pub enum FormatError {
 
     #[error("saved SOX source image has an inconsistent encoding envelope")]
     InconsistentSoxRebase,
+
+    #[error("failed to parse text SOX at offset {offset}: {source}")]
+    TextSoxParse {
+        offset: usize,
+        #[source]
+        source: TextSoxParseError,
+    },
+
+    #[error("text SOX record {record} is empty")]
+    TextSoxEmptyText { record: usize },
+
+    #[error("text SOX record {record} exceeds its byte budget")]
+    TextSoxTooLong {
+        record: usize,
+        length: usize,
+        maximum: u16,
+    },
+
+    #[error("text SOX record {record} contains an unsupported byte")]
+    TextSoxInvalidTextByte {
+        record: usize,
+        index: usize,
+        byte: u8,
+    },
 
     #[error("failed to parse TroopInfo at offset {offset}: {source}")]
     TroopParse {
