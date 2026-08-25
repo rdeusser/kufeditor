@@ -22,15 +22,28 @@ use crate::{
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
-    state::{Area, ClosePolicy, RecordSelections, RequestId, ShellState},
+    state::{Area, ClosePolicy, RecordSelections, RequestId, ShellState, navigation_projection},
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
     views,
 };
 
 mod catalog;
+mod discovery;
+#[path = "discovery_status.rs"]
+pub(crate) mod discovery_status;
 mod settings;
+use self::discovery::{BrowsePromptLauncher, PlatformBrowsePromptLauncher};
 use self::settings::protected_settings_notice;
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct TaskLaunchCounts {
+    catalog: usize,
+    discovery: usize,
+    inspection: usize,
+    settings: usize,
+}
 
 struct ActiveNumberEdit {
     target: NumberEditTarget,
@@ -400,8 +413,10 @@ pub struct AppFrame {
     number_edit: Option<ActiveNumberEdit>,
     text_edit: Option<ActiveTextEdit>,
     game_paths: kufeditor_game::GamePaths,
+    root_revisions: discovery_status::RootRevisions,
     recent_files: kufeditor_workspace::RecentFiles,
     catalog: CatalogSession<NameDictionary, CatalogRequestError>,
+    discovery: discovery_status::DiscoveryStatus,
     settings: SettingsWritePump,
     notices: NoticeCenter,
     next_workspace_notice: u64,
@@ -412,6 +427,9 @@ pub struct AppFrame {
     close_prompt_open: bool,
     open_prompt_launcher: Rc<dyn OpenPromptLauncher>,
     open_path_loader: Rc<dyn OpenPathLoader>,
+    browse_prompt_launcher: Rc<dyn BrowsePromptLauncher>,
+    #[cfg(test)]
+    task_launches: TaskLaunchCounts,
 }
 
 impl AppFrame {
@@ -448,8 +466,10 @@ impl AppFrame {
             number_edit: None,
             text_edit: None,
             game_paths,
+            root_revisions: discovery_status::RootRevisions::default(),
             recent_files,
             catalog: CatalogSession::default(),
+            discovery: discovery_status::DiscoveryStatus::default(),
             settings,
             notices,
             next_workspace_notice: 1,
@@ -460,6 +480,9 @@ impl AppFrame {
             close_prompt_open: false,
             open_prompt_launcher: Rc::new(PlatformOpenPromptLauncher),
             open_path_loader: Rc::new(FileSystemOpenPathLoader),
+            browse_prompt_launcher: Rc::new(PlatformBrowsePromptLauncher),
+            #[cfg(test)]
+            task_launches: TaskLaunchCounts::default(),
         }
     }
 
@@ -1402,7 +1425,49 @@ impl AppFrame {
         cx.notify();
     }
 
+    fn select_area(&mut self, area: Area, cx: &mut Context<Self>) {
+        if self.shell.area() == area {
+            return;
+        }
+        self.shell.select_area(area);
+        self.cancel_property_edit();
+        cx.notify();
+    }
+
+    pub(crate) fn set_recent_limit(&mut self, limit: usize, cx: &mut Context<Self>) {
+        let previous = self.recent_files.clone();
+        if !self.recent_files.set_limit(limit) {
+            return;
+        }
+        if !self.schedule_settings_write(self.shell.game(), cx) {
+            self.recent_files = previous;
+            return;
+        }
+        #[cfg(test)]
+        {
+            self.task_launches.settings += 1;
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn clear_recent_files(&mut self, cx: &mut Context<Self>) {
+        let previous = self.recent_files.clone();
+        if !self.recent_files.clear() {
+            return;
+        }
+        if !self.schedule_settings_write(self.shell.game(), cx) {
+            self.recent_files = previous;
+            return;
+        }
+        #[cfg(test)]
+        {
+            self.task_launches.settings += 1;
+        }
+        cx.notify();
+    }
+
     fn navigation(&self, cx: &mut Context<Self>) -> Div {
+        let projection = navigation_projection();
         div()
             .flex()
             .flex_col()
@@ -1413,7 +1478,7 @@ impl AppFrame {
             .bg(self.theme.surface)
             .border_r_1()
             .border_color(self.theme.border)
-            .children(Area::ALL.into_iter().map(|area| {
+            .children(projection.primary.iter().copied().map(|area| {
                 components::rail_item(
                     &self.theme,
                     area.element_id(),
@@ -1421,17 +1486,21 @@ impl AppFrame {
                     self.shell.area() == area,
                 )
                 .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.shell.select_area(area);
-                    frame.cancel_property_edit();
-                    cx.notify();
+                    frame.select_area(area, cx);
                 }))
             }))
             .child(div().flex_1())
-            .child(components::disabled_rail_item(
-                &self.theme,
-                "rail-settings",
-                "Settings · later",
-            ))
+            .child(
+                components::rail_item(
+                    &self.theme,
+                    projection.bottom.element_id(),
+                    projection.bottom.label(),
+                    self.shell.area() == projection.bottom,
+                )
+                .on_click(cx.listener(move |frame, _, _, cx| {
+                    frame.select_area(projection.bottom, cx);
+                })),
+            )
     }
 
     fn home_recent_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -1478,19 +1547,30 @@ impl AppFrame {
         }
     }
 
-    fn content(&self, cx: &mut Context<Self>) -> Div {
+    fn content(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.shell.area() {
             Area::Home => {
                 views::home::render(&self.theme, self.shell.game(), self.home_recent_rows(cx))
+                    .into_any_element()
             }
             Area::Files => {
                 let editor = self
                     .active_document
                     .map(|document_id| self.document_editor(document_id, cx));
-                views::files::render(&self.theme, self.document_tabs(cx), editor)
+                views::files::render(&self.theme, self.document_tabs(cx), editor).into_any_element()
             }
-            Area::Mods => views::mods::render(&self.theme),
-            Area::Patches => views::patches::render(&self.theme),
+            Area::Mods => views::mods::render(&self.theme).into_any_element(),
+            Area::Patches => views::patches::render(&self.theme).into_any_element(),
+            Area::Settings => {
+                let projection = views::settings::project_settings(
+                    &self.game_paths,
+                    self.catalog.status(),
+                    self.discovery.status(),
+                    &self.recent_files,
+                    kufeditor_game::steam_discovery_available(),
+                );
+                views::settings::render(&self.theme, projection, cx).into_any_element()
+            }
         }
     }
 
@@ -2166,8 +2246,7 @@ impl Focusable for AppFrame {
 }
 
 impl Render for AppFrame {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.window_handle = Some(window.window_handle());
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("kufeditor-root")
             .size_full()
@@ -2224,8 +2303,8 @@ mod tests {
     };
 
     use gpui::{
-        AppContext, BackgroundExecutor, Context, EntityInputHandler, PathPromptOptions, Task,
-        TestAppContext, WindowOptions,
+        AppContext, BackgroundExecutor, Context, EntityInputHandler, PathPromptOptions, Render,
+        Task, TestAppContext, WindowOptions,
     };
     use kufeditor_game::Game;
     use kufeditor_workspace::{
@@ -2241,9 +2320,11 @@ mod tests {
     };
     use crate::{
         actions::{OpenFile, SaveAs},
+        catalog_status::CatalogStatus,
+        frame::discovery_status::DiscoveryStatus,
         notices::{Notice, NoticeLevel, NoticeSource},
         settings::SettingsStartup,
-        state::{Area, RecordSelections, RequestId},
+        state::{Area, RecordSelections, RequestId, navigation_projection},
         text_input::{TextInputEvent, bind as bind_text_input},
     };
 
@@ -4633,6 +4714,133 @@ mod tests {
                 let _editor = frame.troop_editor(document_id, cx);
 
                 assert_eq!(frame.workspace.record_count(document_id).unwrap(), 1);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn navigation_selecting_settings_updates_the_shell_route(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.select_area(Area::Settings, cx);
+                assert_eq!(frame.shell.area(), Area::Settings);
+                let navigation = navigation_projection();
+                assert_eq!(navigation.primary, Area::PRIMARY);
+                assert_eq!(navigation.bottom, Area::Settings);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn settings_view_recent_limit_changes_schedule_one_revision(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.set_recent_limit(5, cx);
+                let revision = frame.settings.latest_revision_for_test().unwrap();
+                assert_eq!(frame.recent_files.limit(), 5);
+                assert_eq!(revision.get(), 1);
+                assert_eq!(frame.task_launches.settings, 1);
+
+                frame.set_recent_limit(5, cx);
+                assert_eq!(frame.settings.latest_revision_for_test(), Some(revision));
+                assert_eq!(frame.task_launches.settings, 1);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn settings_view_clear_recents_schedules_only_a_real_change(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.recent_files.add(PathBuf::from("/files/recent.sox"));
+                frame.clear_recent_files(cx);
+                let revision = frame.settings.latest_revision_for_test().unwrap();
+                assert!(frame.recent_files.paths().is_empty());
+                assert_eq!(revision.get(), 1);
+                assert_eq!(frame.task_launches.settings, 1);
+
+                frame.clear_recent_files(cx);
+                assert_eq!(frame.settings.latest_revision_for_test(), Some(revision));
+                assert_eq!(frame.task_launches.settings, 1);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn settings_view_render_is_state_and_task_launch_pure(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                frame.shell.select_area(Area::Settings);
+                let shell = (frame.shell.area(), frame.shell.game());
+                let paths = frame.game_paths.clone();
+                let recent = frame.recent_files.clone();
+                let settings_revision = frame.settings.latest_revision_for_test();
+                let settings_settled = frame.settings.is_settled();
+                let notice = frame.notices.current().map(|notice| {
+                    (
+                        notice.level(),
+                        notice.summary().to_owned(),
+                        notice.detail().to_owned(),
+                    )
+                });
+                let task_launches = frame.task_launches;
+                assert!(frame.window_handle.is_none());
+                assert!(matches!(
+                    frame.catalog.status(),
+                    CatalogStatus::NotConfigured
+                ));
+                assert!(matches!(frame.discovery.status(), DiscoveryStatus::Idle));
+
+                drop(frame.render(window, cx));
+
+                assert!(frame.window_handle.is_none());
+                assert_eq!((frame.shell.area(), frame.shell.game()), shell);
+                assert_eq!(frame.game_paths, paths);
+                assert_eq!(frame.recent_files, recent);
+                assert!(matches!(
+                    frame.catalog.status(),
+                    CatalogStatus::NotConfigured
+                ));
+                assert!(matches!(frame.discovery.status(), DiscoveryStatus::Idle));
+                assert_eq!(
+                    frame.notices.current().map(|notice| (
+                        notice.level(),
+                        notice.summary().to_owned(),
+                        notice.detail().to_owned(),
+                    )),
+                    notice
+                );
+                assert_eq!(frame.settings.latest_revision_for_test(), settings_revision);
+                assert_eq!(frame.settings.is_settled(), settings_settled);
+                assert_eq!(frame.task_launches, task_launches);
             })
             .unwrap();
     }
