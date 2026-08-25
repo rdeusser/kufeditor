@@ -1,350 +1,156 @@
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveMainField {
-    Field00,
-    Field04,
-    Field08,
-    Field0C,
-    Field10,
-    Field14,
-    Field18,
-}
-
-impl SaveMainField {
-    pub const ALL: [Self; 7] = [
-        Self::Field00,
-        Self::Field04,
-        Self::Field08,
-        Self::Field0C,
-        Self::Field10,
-        Self::Field14,
-        Self::Field18,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Field00 => "Field 0x00",
-            Self::Field04 => "Field 0x04",
-            Self::Field08 => "Field 0x08",
-            Self::Field0C => "Field 0x0C",
-            Self::Field10 => "Field 0x10",
-            Self::Field14 => "Field 0x14",
-            Self::Field18 => "Field 0x18",
+macro_rules! save_metadata {
+    ($name:ident[$count:expr] { $($variant:ident => $label:literal),+ $(,)? }) => {
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        pub enum $name {
+            $($variant),+
         }
-    }
-}
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveUnitField {
-    LeaderNameIndex,
-    TroopInfoIndex,
-    JobType,
-    ModelID,
-    STGField34,
-    STGField38,
-    STGField3C,
-    STGField40,
-    CharacterID,
-    TroopInfoIndex2,
-    UCD,
-    FormationType,
-    GridConfig,
-    SkillLevel,
-    Byte58,
-    HeroFlag,
-    Byte5A,
-    Field60,
-    Field64,
-    Field68,
-    Field504,
-}
+        impl $name {
+            pub const ALL: [Self; $count] = [$(Self::$variant),+];
 
-impl SaveUnitField {
-    pub const ALL: [Self; 21] = [
-        Self::LeaderNameIndex,
-        Self::TroopInfoIndex,
-        Self::JobType,
-        Self::ModelID,
-        Self::STGField34,
-        Self::STGField38,
-        Self::STGField3C,
-        Self::STGField40,
-        Self::CharacterID,
-        Self::TroopInfoIndex2,
-        Self::UCD,
-        Self::FormationType,
-        Self::GridConfig,
-        Self::SkillLevel,
-        Self::Byte58,
-        Self::HeroFlag,
-        Self::Byte5A,
-        Self::Field60,
-        Self::Field64,
-        Self::Field68,
-        Self::Field504,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::LeaderNameIndex => "Leader Name Index",
-            Self::TroopInfoIndex => "Troop Info Index",
-            Self::JobType => "Job Type",
-            Self::ModelID => "Model ID",
-            Self::STGField34 => "STG Field 0x34",
-            Self::STGField38 => "STG Field 0x38",
-            Self::STGField3C => "STG Field 0x3C",
-            Self::STGField40 => "STG Field 0x40",
-            Self::CharacterID => "Character ID",
-            Self::TroopInfoIndex2 => "Troop Info Index 2",
-            Self::UCD => "UCD",
-            Self::FormationType => "Formation Type",
-            Self::GridConfig => "Grid Config",
-            Self::SkillLevel => "Skill Level",
-            Self::Byte58 => "Byte 0x58",
-            Self::HeroFlag => "Hero Flag",
-            Self::Byte5A => "Byte 0x5A",
-            Self::Field60 => "Field 0x60",
-            Self::Field64 => "Field 0x64",
-            Self::Field68 => "Field 0x68",
-            Self::Field504 => "Field 0x504",
-        }
-    }
-
-    pub const fn group(self) -> SaveUnitGroup {
-        match self {
-            Self::TroopInfoIndex
-            | Self::JobType
-            | Self::ModelID
-            | Self::CharacterID
-            | Self::TroopInfoIndex2
-            | Self::UCD
-            | Self::SkillLevel
-            | Self::Byte58
-            | Self::HeroFlag
-            | Self::Byte5A => SaveUnitGroup::Core,
-            Self::FormationType | Self::GridConfig => SaveUnitGroup::Formation,
-            Self::LeaderNameIndex
-            | Self::STGField34
-            | Self::STGField38
-            | Self::STGField3C
-            | Self::STGField40
-            | Self::Field60
-            | Self::Field64
-            | Self::Field68
-            | Self::Field504 => SaveUnitGroup::Advanced,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveUnitGroup {
-    Core,
-    Formation,
-    Advanced,
-}
-
-impl SaveUnitGroup {
-    pub const ALL: [Self; 3] = [Self::Core, Self::Formation, Self::Advanced];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Core => "Core",
-            Self::Formation => "Formation",
-            Self::Advanced => "Advanced",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveEquipmentSlot {
-    LeaderWeapon,
-    LeaderAccessory,
-    LeaderArmor,
-    TroopWeapon,
-    TroopAccessory,
-    TroopArmor,
-}
-
-impl SaveEquipmentSlot {
-    pub const ALL: [Self; 6] = [
-        Self::LeaderWeapon,
-        Self::LeaderAccessory,
-        Self::LeaderArmor,
-        Self::TroopWeapon,
-        Self::TroopAccessory,
-        Self::TroopArmor,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::LeaderWeapon => "Leader Weapon",
-            Self::LeaderAccessory => "Leader Accessory",
-            Self::LeaderArmor => "Leader Armor",
-            Self::TroopWeapon => "Troop Weapon",
-            Self::TroopAccessory => "Troop Accessory",
-            Self::TroopArmor => "Troop Armor",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveEquipmentField {
-    AutoID,
-    ItemTypeID,
-    Level,
-    EnhancementTier,
-    VariantIndex,
-    ItemPower,
-    EquippedFlag,
-    Reserved,
-    Attribute1Index,
-    Attribute2Index,
-    SkillType1,
-    SkillBonus1,
-    SkillType2,
-    SkillBonus2,
-    ResistType1,
-    ResistBonus1,
-    ResistType2,
-    ResistBonus2,
-    SlotCategory,
-}
-
-impl SaveEquipmentField {
-    pub const ALL: [Self; 19] = [
-        Self::AutoID,
-        Self::ItemTypeID,
-        Self::Level,
-        Self::EnhancementTier,
-        Self::VariantIndex,
-        Self::ItemPower,
-        Self::EquippedFlag,
-        Self::Reserved,
-        Self::Attribute1Index,
-        Self::Attribute2Index,
-        Self::SkillType1,
-        Self::SkillBonus1,
-        Self::SkillType2,
-        Self::SkillBonus2,
-        Self::ResistType1,
-        Self::ResistBonus1,
-        Self::ResistType2,
-        Self::ResistBonus2,
-        Self::SlotCategory,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::AutoID => "Auto ID",
-            Self::ItemTypeID => "Item Type ID",
-            Self::Level => "Level",
-            Self::EnhancementTier => "Enhancement Tier",
-            Self::VariantIndex => "Variant Index",
-            Self::ItemPower => "Item Power",
-            Self::EquippedFlag => "Equipped Flag",
-            Self::Reserved => "Reserved",
-            Self::Attribute1Index => "Attribute 1 Index",
-            Self::Attribute2Index => "Attribute 2 Index",
-            Self::SkillType1 => "Skill Type 1",
-            Self::SkillBonus1 => "Skill Bonus 1",
-            Self::SkillType2 => "Skill Type 2",
-            Self::SkillBonus2 => "Skill Bonus 2",
-            Self::ResistType1 => "Resist Type 1",
-            Self::ResistBonus1 => "Resist Bonus 1",
-            Self::ResistType2 => "Resist Type 2",
-            Self::ResistBonus2 => "Resist Bonus 2",
-            Self::SlotCategory => "Slot Category",
-        }
-    }
-
-    pub const fn group(self) -> SaveEquipmentGroup {
-        match self {
-            Self::ItemTypeID
-            | Self::Level
-            | Self::EnhancementTier
-            | Self::VariantIndex
-            | Self::Attribute1Index
-            | Self::Attribute2Index => SaveEquipmentGroup::Core,
-            Self::SkillType1 | Self::SkillBonus1 | Self::SkillType2 | Self::SkillBonus2 => {
-                SaveEquipmentGroup::Skills
+            pub const fn label(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $label),+
+                }
             }
-            Self::ResistType1 | Self::ResistBonus1 | Self::ResistType2 | Self::ResistBonus2 => {
-                SaveEquipmentGroup::Resistances
+        }
+    };
+}
+
+macro_rules! grouped_save_metadata {
+    (
+        $name:ident[$count:expr] -> $group:ident {
+            $($variant:ident => ($label:literal, $group_variant:ident)),+ $(,)?
+        }
+    ) => {
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        pub enum $name {
+            $($variant),+
+        }
+
+        impl $name {
+            pub const ALL: [Self; $count] = [$(Self::$variant),+];
+
+            pub const fn label(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $label),+
+                }
             }
-            Self::AutoID
-            | Self::ItemPower
-            | Self::EquippedFlag
-            | Self::Reserved
-            | Self::SlotCategory => SaveEquipmentGroup::Advanced,
+
+            pub const fn group(self) -> $group {
+                match self {
+                    $(Self::$variant => $group::$group_variant),+
+                }
+            }
         }
+    };
+}
+
+save_metadata! {
+    SaveMainField[7] {
+        Field00 => "Field 0x00",
+        Field04 => "Field 0x04",
+        Field08 => "Field 0x08",
+        Field0C => "Field 0x0C",
+        Field10 => "Field 0x10",
+        Field14 => "Field 0x14",
+        Field18 => "Field 0x18",
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveEquipmentGroup {
-    Core,
-    Skills,
-    Resistances,
-    Advanced,
-}
-
-impl SaveEquipmentGroup {
-    pub const ALL: [Self; 4] = [Self::Core, Self::Skills, Self::Resistances, Self::Advanced];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Core => "Core",
-            Self::Skills => "Skills",
-            Self::Resistances => "Resistances",
-            Self::Advanced => "Advanced",
-        }
+grouped_save_metadata! {
+    SaveUnitField[21] -> SaveUnitGroup {
+        LeaderNameIndex => ("Leader Name Index", Advanced),
+        TroopInfoIndex => ("Troop Info Index", Core),
+        JobType => ("Job Type", Core),
+        ModelID => ("Model ID", Core),
+        STGField34 => ("STG Field 0x34", Advanced),
+        STGField38 => ("STG Field 0x38", Advanced),
+        STGField3C => ("STG Field 0x3C", Advanced),
+        STGField40 => ("STG Field 0x40", Advanced),
+        CharacterID => ("Character ID", Core),
+        TroopInfoIndex2 => ("Troop Info Index 2", Core),
+        UCD => ("UCD", Core),
+        FormationType => ("Formation Type", Formation),
+        GridConfig => ("Grid Config", Formation),
+        SkillLevel => ("Skill Level", Core),
+        Byte58 => ("Byte 0x58", Core),
+        HeroFlag => ("Hero Flag", Core),
+        Byte5A => ("Byte 0x5A", Core),
+        Field60 => ("Field 0x60", Advanced),
+        Field64 => ("Field 0x64", Advanced),
+        Field68 => ("Field 0x68", Advanced),
+        Field504 => ("Field 0x504", Advanced),
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveRosterField {
-    Byte60,
-    Byte61,
-    Byte62,
-    Byte63,
-    Value64,
-}
-
-impl SaveRosterField {
-    pub const ALL: [Self; 5] = [
-        Self::Byte60,
-        Self::Byte61,
-        Self::Byte62,
-        Self::Byte63,
-        Self::Value64,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Byte60 => "Byte 60",
-            Self::Byte61 => "Byte 61",
-            Self::Byte62 => "Byte 62",
-            Self::Byte63 => "Byte 63",
-            Self::Value64 => "Value 64",
-        }
+save_metadata! {
+    SaveUnitGroup[3] {
+        Core => "Core",
+        Formation => "Formation",
+        Advanced => "Advanced",
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SaveTextField {
-    MapName,
-    SetFile,
-    SkyEffects,
+save_metadata! {
+    SaveEquipmentSlot[6] {
+        LeaderWeapon => "Leader Weapon",
+        LeaderAccessory => "Leader Accessory",
+        LeaderArmor => "Leader Armor",
+        TroopWeapon => "Troop Weapon",
+        TroopAccessory => "Troop Accessory",
+        TroopArmor => "Troop Armor",
+    }
 }
 
-impl SaveTextField {
-    pub const ALL: [Self; 3] = [Self::MapName, Self::SetFile, Self::SkyEffects];
+grouped_save_metadata! {
+    SaveEquipmentField[19] -> SaveEquipmentGroup {
+        AutoID => ("Auto ID", Advanced),
+        ItemTypeID => ("Item Type ID", Core),
+        Level => ("Level", Core),
+        EnhancementTier => ("Enhancement Tier", Core),
+        VariantIndex => ("Variant Index", Core),
+        ItemPower => ("Item Power", Advanced),
+        EquippedFlag => ("Equipped Flag", Advanced),
+        Reserved => ("Reserved", Advanced),
+        Attribute1Index => ("Attribute 1 Index", Core),
+        Attribute2Index => ("Attribute 2 Index", Core),
+        SkillType1 => ("Skill Type 1", Skills),
+        SkillBonus1 => ("Skill Bonus 1", Skills),
+        SkillType2 => ("Skill Type 2", Skills),
+        SkillBonus2 => ("Skill Bonus 2", Skills),
+        ResistType1 => ("Resist Type 1", Resistances),
+        ResistBonus1 => ("Resist Bonus 1", Resistances),
+        ResistType2 => ("Resist Type 2", Resistances),
+        ResistBonus2 => ("Resist Bonus 2", Resistances),
+        SlotCategory => ("Slot Category", Advanced),
+    }
+}
 
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::MapName => "Map Name",
-            Self::SetFile => "Set File",
-            Self::SkyEffects => "Sky Effects",
-        }
+save_metadata! {
+    SaveEquipmentGroup[4] {
+        Core => "Core",
+        Skills => "Skills",
+        Resistances => "Resistances",
+        Advanced => "Advanced",
+    }
+}
+
+save_metadata! {
+    SaveRosterField[5] {
+        Byte60 => "Byte 60",
+        Byte61 => "Byte 61",
+        Byte62 => "Byte 62",
+        Byte63 => "Byte 63",
+        Value64 => "Value 64",
+    }
+}
+
+save_metadata! {
+    SaveTextField[3] {
+        MapName => "Map Name",
+        SetFile => "Set File",
+        SkyEffects => "Sky Effects",
     }
 }
 

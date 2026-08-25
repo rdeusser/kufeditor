@@ -12,8 +12,8 @@ use std::{
 
 pub use document::{Document, DocumentEdit, DocumentID, DocumentKind, StateID};
 pub use kufeditor_formats::{
-    Diagnostic, DiagnosticLocation, Severity, SkillDocument, SkillTextField, TextSOXDocument,
-    TextSOXField, TroopDocument, TroopField, TroopGroup,
+    Diagnostic, DiagnosticLocation, SaveNumberTarget, Severity, SkillDocument, SkillTextField,
+    TextSOXDocument, TextSOXField, TroopDocument, TroopField, TroopGroup,
 };
 pub use recent::{
     DEFAULT_RECENT_FILE_LIMIT, RECENT_FILE_LIMITS, RecentFiles, normalize_recent_limit,

@@ -367,7 +367,9 @@ fn column_heading(theme: &Theme, label: &'static str) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use kufeditor_workspace::{TextSOXDocument, TextSOXField};
+    use kufeditor_workspace::{
+        Diagnostic, DiagnosticLocation, SaveNumberTarget, Severity, TextSOXDocument, TextSOXField,
+    };
 
     use super::{diagnostic_item, diagnostic_title, entry_metadata, preview};
 
@@ -407,6 +409,17 @@ mod tests {
             diagnostic_title(9001, TextSOXField::Text.label()),
             "Wire 9001 · Text"
         );
+    }
+
+    #[test]
+    fn text_sox_diagnostic_title_uses_document_location_without_wire_prefix() {
+        let diagnostic = Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::Save(SaveNumberTarget::CampaignIndex),
+            message: "Campaign warning",
+        };
+
+        assert_eq!(diagnostic_item(diagnostic, None).title(), "Campaign");
     }
 
     #[test]

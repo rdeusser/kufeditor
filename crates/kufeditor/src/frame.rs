@@ -11,8 +11,8 @@ use gpui::{
 };
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
-    DocumentEdit, DocumentID, DocumentKind, LoadedDocument, SaveToken, SkillTextField, TroopField,
-    TroopGroup, Workspace, WorkspaceError, load_path,
+    DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument, SaveToken,
+    SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError, load_path,
 };
 
 use crate::{
@@ -316,6 +316,14 @@ fn skill_text_projection(
             diagnostic: error.to_string(),
         },
     }
+}
+
+fn troop_diagnostic_title(location: DiagnosticLocation) -> String {
+    let label = location.label();
+    location.record().map_or_else(
+        || label.to_owned(),
+        |record| format!("{} · {label}", views::troop::troop_name(record)),
+    )
 }
 
 fn invalid_number_notice() -> Notice {
@@ -2087,11 +2095,7 @@ impl AppFrame {
         diagnostics
             .into_iter()
             .map(|diagnostic| {
-                let label = diagnostic.location.label();
-                let title = diagnostic.location.record().map_or_else(
-                    || label.to_owned(),
-                    |record| format!("{} · {label}", views::troop::troop_name(record)),
-                );
+                let title = troop_diagnostic_title(diagnostic.location);
                 views::troop::diagnostic_row(
                     &self.theme,
                     diagnostic.severity,
@@ -2309,15 +2313,15 @@ mod tests {
     };
     use kufeditor_game::Game;
     use kufeditor_workspace::{
-        Document, DocumentEdit, DocumentID, DocumentKind, LoadedDocument, SkillDocument,
-        SkillTextField, TextSOXDocument, TroopDocument, TroopField, Workspace, WorkspaceError,
-        load_path,
+        DiagnosticLocation, Document, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
+        SaveNumberTarget, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument,
+        TroopField, Workspace, WorkspaceError, load_path,
     };
 
     use super::{
         ActiveNumberEdit, AppFrame, CloseDocuments, EditorRoute, OpenPathLoader,
         OpenPromptLauncher, OpenPromptResult, SkillTextProjection, SkillTypeChoice, TextEditTarget,
-        editor_route, invalid_number_notice, skill_text_projection,
+        editor_route, invalid_number_notice, skill_text_projection, troop_diagnostic_title,
     };
     use crate::{
         actions::{OpenFile, SaveAs},
@@ -2334,6 +2338,14 @@ mod tests {
         let path = file.path().to_path_buf();
         drop(file);
         SettingsStartup::load(path)
+    }
+
+    #[test]
+    fn troop_diagnostic_title_uses_document_location_without_record_prefix() {
+        assert_eq!(
+            troop_diagnostic_title(DiagnosticLocation::Save(SaveNumberTarget::CampaignIndex)),
+            "Campaign"
+        );
     }
 
     fn write_valid_sox(path: &std::path::Path) {

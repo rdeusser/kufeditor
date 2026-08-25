@@ -420,7 +420,9 @@ mod tests {
         reason = "the synthetic SkillInfo fixture has checked wire lengths"
     )]
 
-    use kufeditor_workspace::SkillDocument;
+    use kufeditor_workspace::{
+        Diagnostic, DiagnosticLocation, SaveNumberTarget, Severity, SkillDocument,
+    };
 
     use super::{diagnostic_item, skill_name};
 
@@ -477,5 +479,16 @@ mod tests {
 
         assert_eq!(item.diagnostic(), &expected);
         assert_eq!(item.title(), "Melee · Skill Type");
+    }
+
+    #[test]
+    fn skill_diagnostic_title_uses_document_location_without_record_prefix() {
+        let diagnostic = Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::Save(SaveNumberTarget::CampaignIndex),
+            message: "Campaign warning",
+        };
+
+        assert_eq!(diagnostic_item(diagnostic).title(), "Campaign");
     }
 }
