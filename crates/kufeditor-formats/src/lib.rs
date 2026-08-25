@@ -3,6 +3,7 @@
 mod diagnostic;
 mod error;
 mod generated;
+mod schema;
 mod skill;
 mod sox;
 mod text;
@@ -10,6 +11,7 @@ mod troop;
 
 pub use diagnostic::{Diagnostic, DiagnosticField, Severity};
 pub use error::{FormatError, SkillCleaveError, TextSoxParseError, TroopCleaveError};
+pub use schema::SoxSchema;
 pub use skill::{SkillDocument, SkillField, SkillTextField};
 pub use sox::{SoxDocument, parse_sox};
 pub use text::{TextSoxDocument, TextSoxField};
