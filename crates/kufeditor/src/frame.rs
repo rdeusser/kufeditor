@@ -2,19 +2,21 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
 use gpui::{
-    Action, AnyElement, AnyWindowHandle, App, AsyncApp, Context, Div, FocusHandle, Focusable,
-    KeyDownEvent, PathPromptOptions, PromptLevel, Stateful, WeakEntity, Window, div, px,
+    Action, AnyElement, AnyWindowHandle, App, AsyncApp, Context, Div, Entity, FocusHandle,
+    Focusable, KeyDownEvent, PathPromptOptions, PromptLevel, Stateful, WeakEntity, Window, div, px,
 };
 use kufeditor_game::Game;
 use kufeditor_workspace::{
-    DocumentEdit, DocumentId, SaveToken, TroopField, TroopGroup, Workspace, load_path,
+    DocumentEdit, DocumentId, DocumentKind, SaveToken, SkillTextField, TroopField, TroopGroup,
+    Workspace, load_path,
 };
 
 use crate::{
     actions::{OpenFile, Redo, Save, SaveAll, SaveAs, Undo},
     components,
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
-    state::{Area, ClosePolicy, Notice, NoticeLevel, RequestId, ShellState},
+    state::{Area, ClosePolicy, Notice, NoticeLevel, RecordSelections, RequestId, ShellState},
+    text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
     views,
 };
@@ -35,21 +37,52 @@ impl ActiveNumberEdit {
             editor: NumberEdit::new(i64::from(value), i64::from(i32::MIN), i64::from(i32::MAX)),
         }
     }
+
+    fn skill_id(document: DocumentId, record: usize, value: i32) -> Self {
+        Self {
+            target: NumberEditTarget::SkillId { document, record },
+            editor: NumberEdit::new(i64::from(value), i64::from(i32::MIN), i64::from(i32::MAX)),
+        }
+    }
+
+    fn skill_max_level(document: DocumentId, record: usize, value: u32) -> Self {
+        Self {
+            target: NumberEditTarget::SkillMaxLevel { document, record },
+            editor: NumberEdit::new(i64::from(value), 1, 65_535),
+        }
+    }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NumberEditTarget {
     TroopField {
         document: DocumentId,
         record: usize,
         field: TroopField,
     },
+    SkillId {
+        document: DocumentId,
+        record: usize,
+    },
+    SkillMaxLevel {
+        document: DocumentId,
+        record: usize,
+    },
 }
 
 impl NumberEditTarget {
     fn document(&self) -> DocumentId {
         match self {
-            Self::TroopField { document, .. } => *document,
+            Self::TroopField { document, .. }
+            | Self::SkillId { document, .. }
+            | Self::SkillMaxLevel { document, .. } => *document,
+        }
+    }
+
+    const fn format_name(self) -> &'static str {
+        match self {
+            Self::TroopField { .. } => "TroopInfo",
+            Self::SkillId { .. } | Self::SkillMaxLevel { .. } => "SkillInfo",
         }
     }
 
@@ -61,6 +94,26 @@ impl NumberEditTarget {
                 record: target_record,
                 field: target_field,
             } if *target_document == document && *target_record == record && *target_field == field
+        )
+    }
+
+    fn is_skill_id(&self, document: DocumentId, record: usize) -> bool {
+        matches!(
+            self,
+            Self::SkillId {
+                document: target_document,
+                record: target_record,
+            } if *target_document == document && *target_record == record
+        )
+    }
+
+    fn is_skill_max_level(&self, document: DocumentId, record: usize) -> bool {
+        matches!(
+            self,
+            Self::SkillMaxLevel {
+                document: target_document,
+                record: target_record,
+            } if *target_document == document && *target_record == record
         )
     }
 
@@ -81,12 +134,133 @@ impl NumberEditTarget {
                     value: i32::try_from(value)?,
                 },
             )),
+            Self::SkillId { document, record } => Ok((
+                document,
+                DocumentEdit::SetSkillId {
+                    record,
+                    value: i32::try_from(value)?,
+                },
+            )),
+            Self::SkillMaxLevel { document, record } => Ok((
+                document,
+                DocumentEdit::SetSkillMaxLevel {
+                    record,
+                    value: u32::try_from(value)?,
+                },
+            )),
         }
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SkillTypeChoice {
+    Combat,
+    Magic,
+}
+
+impl SkillTypeChoice {
+    const ALL: [Self; 2] = [Self::Combat, Self::Magic];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Combat => "Combat",
+            Self::Magic => "Magic",
+        }
+    }
+
+    const fn value(self) -> u32 {
+        match self {
+            Self::Combat => 1,
+            Self::Magic => 2,
+        }
+    }
+
+    const fn document_edit(self, record: usize) -> DocumentEdit {
+        DocumentEdit::SetSkillType {
+            record,
+            value: self.value(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TextEditTarget {
+    document: DocumentId,
+    record: usize,
+    field: SkillTextField,
+}
+
+impl TextEditTarget {
+    const fn new(document: DocumentId, record: usize, field: SkillTextField) -> Self {
+        Self {
+            document,
+            record,
+            field,
+        }
+    }
+
+    fn document_edit(self, value: String) -> (DocumentId, DocumentEdit) {
+        (
+            self.document,
+            DocumentEdit::SetSkillText {
+                record: self.record,
+                field: self.field,
+                value,
+            },
+        )
+    }
+}
+
+struct ActiveTextEdit {
+    target: TextEditTarget,
+    input: Entity<TextInput>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditorRoute {
+    Troop,
+    Skill,
+}
+
+const fn editor_route(kind: DocumentKind) -> EditorRoute {
+    match kind {
+        DocumentKind::TroopInfo => EditorRoute::Troop,
+        DocumentKind::SkillInfo => EditorRoute::Skill,
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum SkillTextProjection {
+    Editable(String),
+    Invalid {
+        value: &'static str,
+        diagnostic: String,
+    },
+}
+
+fn skill_text_projection(
+    workspace: &Workspace,
+    document: DocumentId,
+    record: usize,
+    field: SkillTextField,
+) -> SkillTextProjection {
+    match workspace.skill_text(document, record, field) {
+        Ok(value) => SkillTextProjection::Editable(value.to_owned()),
+        Err(error) => SkillTextProjection::Invalid {
+            value: "Invalid UTF-8",
+            diagnostic: error.to_string(),
+        },
+    }
+}
+
 fn invalid_number_notice() -> Notice {
-    Notice::info("Enter a whole number within the allowed range")
+    Notice::editor_info("Enter a whole number within the allowed range")
+}
+
+fn clear_editor_notice(notice: &mut Option<Notice>) {
+    if notice.as_ref().is_some_and(Notice::is_editor_feedback) {
+        *notice = None;
+    }
 }
 
 pub struct AppFrame {
@@ -95,8 +269,9 @@ pub struct AppFrame {
     theme: Theme,
     focus: FocusHandle,
     active_document: Option<DocumentId>,
-    selected_troop: usize,
+    selections: RecordSelections,
     number_edit: Option<ActiveNumberEdit>,
+    text_edit: Option<ActiveTextEdit>,
     notice: Option<Notice>,
     window_handle: Option<AnyWindowHandle>,
     close_armed: bool,
@@ -112,8 +287,9 @@ impl AppFrame {
             theme: Theme::forged_steel(),
             focus: cx.focus_handle(),
             active_document: None,
-            selected_troop: 0,
+            selections: RecordSelections::default(),
             number_edit: None,
+            text_edit: None,
             notice: None,
             window_handle: None,
             close_armed: false,
@@ -126,10 +302,115 @@ impl AppFrame {
         self.focus.clone()
     }
 
-    fn activate_document(&mut self, document: DocumentId, selected_troop: usize) {
-        self.active_document = Some(document);
-        self.selected_troop = selected_troop;
+    fn cancel_property_edit(&mut self) {
         self.number_edit = None;
+        self.text_edit = None;
+        clear_editor_notice(&mut self.notice);
+    }
+
+    fn begin_number_edit(&mut self, edit: ActiveNumberEdit) {
+        self.cancel_property_edit();
+        self.number_edit = Some(edit);
+    }
+
+    fn activate_document(&mut self, document: DocumentId) {
+        self.cancel_property_edit();
+        self.active_document = Some(document);
+    }
+
+    fn select_record(&mut self, document: DocumentId, record: usize) {
+        self.cancel_property_edit();
+        self.active_document = Some(document);
+        self.selections.select(document, record);
+    }
+
+    fn text_input_colors(&self) -> TextInputColors {
+        TextInputColors {
+            background: self.theme.raised,
+            border: self.theme.accent,
+            text: self.theme.text,
+            placeholder: self.theme.text_dim,
+            selection: self.theme.accent_dim,
+            cursor: self.theme.accent,
+        }
+    }
+
+    fn start_skill_text_edit(
+        &mut self,
+        document: DocumentId,
+        record: usize,
+        field: SkillTextField,
+        value: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_property_edit();
+        let colors = self.text_input_colors();
+        let input = cx.new(|cx| TextInput::new(value, field.label(), colors, cx));
+        cx.subscribe(&input, |frame, input, event, cx| {
+            frame.handle_text_input_event(&input, event, cx);
+        })
+        .detach();
+        window.focus(&input.read(cx).focus_handle());
+        self.text_edit = Some(ActiveTextEdit {
+            target: TextEditTarget::new(document, record, field),
+            input,
+        });
+        cx.notify();
+    }
+
+    fn handle_text_input_event(
+        &mut self,
+        input: &Entity<TextInput>,
+        event: &TextInputEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = self
+            .text_edit
+            .as_ref()
+            .filter(|edit| edit.input == *input)
+            .map(|edit| edit.target)
+        else {
+            return;
+        };
+        if self.active_document != Some(target.document) {
+            self.cancel_property_edit();
+            self.notice = Some(Notice::info("The active document changed; edit canceled"));
+            cx.notify();
+            return;
+        }
+
+        match event {
+            TextInputEvent::Cancel => self.cancel_property_edit(),
+            TextInputEvent::Commit(value) => {
+                let (document, edit) = target.document_edit(value.clone());
+                match self.workspace.apply(document, edit) {
+                    Ok(()) => {
+                        self.cancel_property_edit();
+                        self.notice = None;
+                    }
+                    Err(error) => {
+                        self.notice =
+                            Some(Notice::editor_error("Could not update SkillInfo", &error));
+                    }
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn set_skill_type(&mut self, document: DocumentId, record: usize, choice: SkillTypeChoice) {
+        self.cancel_property_edit();
+        if self.active_document != Some(document) {
+            self.notice = Some(Notice::info("The active document changed; edit canceled"));
+            return;
+        }
+        match self.workspace.apply(document, choice.document_edit(record)) {
+            Ok(()) => self.notice = None,
+            Err(error) => {
+                self.notice = Some(Notice::editor_error("Could not update SkillInfo", &error));
+            }
+        }
     }
 
     pub fn window_should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -243,9 +524,17 @@ impl AppFrame {
             .as_mut()
             .map_or(NumberOutcome::Cancel, |edit| edit.editor.apply(command));
         match outcome {
-            NumberOutcome::Continue => {}
+            NumberOutcome::Continue => {
+                if self
+                    .number_edit
+                    .as_ref()
+                    .is_some_and(|edit| !edit.editor.invalid())
+                {
+                    clear_editor_notice(&mut self.notice);
+                }
+            }
             NumberOutcome::Invalid => self.notice = Some(invalid_number_notice()),
-            NumberOutcome::Cancel => self.number_edit = None,
+            NumberOutcome::Cancel => self.cancel_property_edit(),
             NumberOutcome::Commit(value) => self.commit_number_edit(value),
         }
         cx.notify();
@@ -257,7 +546,7 @@ impl AppFrame {
             return;
         };
         if self.active_document != Some(target_document) {
-            self.number_edit = None;
+            self.cancel_property_edit();
             self.notice = Some(Notice::info("The active document changed; edit canceled"));
             return;
         }
@@ -265,26 +554,33 @@ impl AppFrame {
         let Some(edit) = self.number_edit.as_ref() else {
             return;
         };
-        let (document, document_edit) = match edit.target.document_edit(value) {
+        let target = edit.target;
+        let (document, document_edit) = match target.document_edit(value) {
             Ok(edit) => edit,
             Err(error) => {
-                self.notice = Some(Notice::error("Could not update TroopInfo", &error));
+                self.notice = Some(Notice::editor_error(
+                    format!("Could not update {}", target.format_name()),
+                    &error,
+                ));
                 return;
             }
         };
         match self.workspace.apply(document, document_edit) {
             Ok(()) => {
-                self.number_edit = None;
+                self.cancel_property_edit();
                 self.notice = None;
             }
             Err(error) => {
-                self.notice = Some(Notice::error("Could not update TroopInfo", &error));
+                self.notice = Some(Notice::editor_error(
+                    format!("Could not update {}", target.format_name()),
+                    &error,
+                ));
             }
         }
     }
 
     fn open_action(&mut self, _: &OpenFile, _: &mut Window, cx: &mut Context<Self>) {
-        self.number_edit = None;
+        self.cancel_property_edit();
         let request = self.shell.begin_open();
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -338,7 +634,7 @@ impl AppFrame {
                                 let name = display_name(&path);
                                 let document_id = frame.workspace.insert_loaded(loaded);
                                 if activate {
-                                    frame.activate_document(document_id, 0);
+                                    frame.activate_document(document_id);
                                     frame.shell.select_area(Area::Files);
                                 }
                                 frame.notice = Some(Notice::success(format!("Opened {name}")));
@@ -363,14 +659,14 @@ impl AppFrame {
     }
 
     fn save_action(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
-        self.number_edit = None;
+        self.cancel_property_edit();
         if let Some(document_id) = self.active_document {
             self.start_save(document_id, None, cx);
         }
     }
 
     fn save_all_action(&mut self, _: &SaveAll, _: &mut Window, cx: &mut Context<Self>) {
-        self.number_edit = None;
+        self.cancel_property_edit();
         let document_ids = self.workspace.document_ids().to_vec();
         let mut started = false;
         for document_id in document_ids {
@@ -391,7 +687,7 @@ impl AppFrame {
     }
 
     fn save_as_action(&mut self, _: &SaveAs, _: &mut Window, cx: &mut Context<Self>) {
-        self.number_edit = None;
+        self.cancel_property_edit();
         let Some(document_id) = self.active_document else {
             return;
         };
@@ -446,7 +742,7 @@ impl AppFrame {
     }
 
     fn move_history(&mut self, redo: bool, cx: &mut Context<Self>) {
-        self.number_edit = None;
+        self.cancel_property_edit();
         let Some(document_id) = self.active_document else {
             return;
         };
@@ -638,7 +934,7 @@ impl AppFrame {
                     })
                     .on_click(cx.listener(move |frame, _, _, cx| {
                         frame.shell.select_game(game);
-                        frame.number_edit = None;
+                        frame.cancel_property_edit();
                         cx.notify();
                     }))
             }))
@@ -664,7 +960,7 @@ impl AppFrame {
                 )
                 .on_click(cx.listener(move |frame, _, _, cx| {
                     frame.shell.select_area(area);
-                    frame.number_edit = None;
+                    frame.cancel_property_edit();
                     cx.notify();
                 }))
             }))
@@ -682,12 +978,257 @@ impl AppFrame {
             Area::Files => {
                 let editor = self
                     .active_document
-                    .map(|document_id| self.troop_editor(document_id, cx));
+                    .map(|document_id| self.document_editor(document_id, cx));
                 views::files::render(&self.theme, self.document_tabs(cx), editor)
             }
             Area::Mods => views::mods::render(&self.theme),
             Area::Patches => views::patches::render(&self.theme),
         }
+    }
+
+    fn document_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+        match self.workspace.document_kind(document_id).map(editor_route) {
+            Ok(EditorRoute::Troop) => self.troop_editor(document_id, cx),
+            Ok(EditorRoute::Skill) => self.skill_editor(document_id, cx),
+            Err(error) => div()
+                .size_full()
+                .p(px(28.0))
+                .text_color(self.theme.text_dim)
+                .child(format!("Could not open the document editor: {error}")),
+        }
+    }
+
+    fn skill_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+        let record_count = match self.workspace.record_count(document_id) {
+            Ok(count) => count,
+            Err(error) => {
+                return div()
+                    .size_full()
+                    .p(px(28.0))
+                    .text_color(self.theme.text_dim)
+                    .child(format!("Could not read SkillInfo: {error}"));
+            }
+        };
+        let selected = self
+            .selections
+            .selected(document_id)
+            .min(record_count.saturating_sub(1));
+        let records = self.skill_records(document_id, record_count, selected, cx);
+        let details = if record_count == 0 {
+            vec![
+                div()
+                    .text_color(self.theme.text_dim)
+                    .child("This file has no skill records.")
+                    .into_any_element(),
+            ]
+        } else {
+            vec![
+                self.skill_group(document_id, selected, cx)
+                    .into_any_element(),
+            ]
+        };
+        let diagnostics = self.skill_diagnostics(document_id);
+        views::skill::render(&self.theme, records, details, diagnostics)
+    }
+
+    fn skill_records(
+        &self,
+        document_id: DocumentId,
+        record_count: usize,
+        selected: usize,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        (0..record_count)
+            .map(|record| {
+                views::skill::record_row(
+                    &self.theme,
+                    ("skill-record", record),
+                    record,
+                    record == selected,
+                )
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.select_record(document_id, record);
+                    window.focus(&frame.focus);
+                    cx.notify();
+                }))
+                .into_any_element()
+            })
+            .collect()
+    }
+
+    fn skill_group(&self, document_id: DocumentId, record: usize, cx: &mut Context<Self>) -> Div {
+        let fields = vec![
+            self.skill_id_field(document_id, record, cx),
+            self.skill_text_field(document_id, record, SkillTextField::LocalizationKey, 1, cx),
+            self.skill_text_field(document_id, record, SkillTextField::IconPath, 2, cx),
+            self.skill_type_field(document_id, record, cx),
+            self.skill_max_level_field(document_id, record, cx),
+        ];
+        views::skill::group(
+            &self.theme,
+            views::skill::skill_name(record).into_owned(),
+            fields,
+        )
+    }
+
+    fn skill_id_field(
+        &self,
+        document_id: DocumentId,
+        record: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let value = self.workspace.skill_id(document_id, record);
+        let active_edit = self
+            .number_edit
+            .as_ref()
+            .filter(|edit| edit.target.is_skill_id(document_id, record));
+        let display = active_edit.map_or_else(
+            || {
+                value
+                    .as_ref()
+                    .map_or_else(|_| "—".to_owned(), i32::to_string)
+            },
+            |edit| edit.editor.draft().to_owned(),
+        );
+        let row = views::skill::number_field_row(
+            &self.theme,
+            ("skill-field", 0_usize),
+            "Skill ID",
+            display,
+            active_edit.is_some(),
+            active_edit.is_some_and(|edit| edit.editor.invalid()),
+        );
+        match value {
+            Ok(value) => row
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.begin_number_edit(ActiveNumberEdit::skill_id(document_id, record, value));
+                    window.focus(&frame.focus);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            Err(_) => row.into_any_element(),
+        }
+    }
+
+    fn skill_text_field(
+        &self,
+        document_id: DocumentId,
+        record: usize,
+        field: SkillTextField,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let target = TextEditTarget::new(document_id, record, field);
+        if let Some(edit) = self.text_edit.as_ref().filter(|edit| edit.target == target) {
+            return views::skill::text_editor_row(
+                &self.theme,
+                field.label(),
+                edit.input.clone().into_any_element(),
+            )
+            .into_any_element();
+        }
+
+        match skill_text_projection(&self.workspace, document_id, record, field) {
+            SkillTextProjection::Editable(value) => views::skill::text_field_row(
+                &self.theme,
+                ("skill-field", index),
+                field.label(),
+                value.clone(),
+            )
+            .on_click(cx.listener(move |frame, _, window, cx| {
+                frame.start_skill_text_edit(document_id, record, field, value.clone(), window, cx);
+            }))
+            .into_any_element(),
+            SkillTextProjection::Invalid { value, diagnostic } => {
+                views::skill::invalid_text_field(&self.theme, field.label(), value, diagnostic)
+                    .into_any_element()
+            }
+        }
+    }
+
+    fn skill_type_field(
+        &self,
+        document_id: DocumentId,
+        record: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let value = self.workspace.skill_type(document_id, record).ok();
+        let choices = SkillTypeChoice::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, choice)| {
+                components::choice_button(
+                    &self.theme,
+                    ("skill-type", index),
+                    choice.label(),
+                    value == Some(choice.value()),
+                )
+                .on_click(cx.listener(move |frame, _, _, cx| {
+                    frame.set_skill_type(document_id, record, choice);
+                    cx.notify();
+                }))
+                .into_any_element()
+            })
+            .collect();
+        views::skill::choice_row(&self.theme, choices).into_any_element()
+    }
+
+    fn skill_max_level_field(
+        &self,
+        document_id: DocumentId,
+        record: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let value = self.workspace.skill_max_level(document_id, record);
+        let active_edit = self
+            .number_edit
+            .as_ref()
+            .filter(|edit| edit.target.is_skill_max_level(document_id, record));
+        let display = active_edit.map_or_else(
+            || {
+                value
+                    .as_ref()
+                    .map_or_else(|_| "—".to_owned(), u32::to_string)
+            },
+            |edit| edit.editor.draft().to_owned(),
+        );
+        let row = views::skill::number_field_row(
+            &self.theme,
+            ("skill-field", 4_usize),
+            "Maximum Level",
+            display,
+            active_edit.is_some(),
+            active_edit.is_some_and(|edit| edit.editor.invalid()),
+        );
+        match value {
+            Ok(value) => row
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.begin_number_edit(ActiveNumberEdit::skill_max_level(
+                        document_id,
+                        record,
+                        value,
+                    ));
+                    window.focus(&frame.focus);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            Err(_) => row.into_any_element(),
+        }
+    }
+
+    fn skill_diagnostics(&self, document_id: DocumentId) -> Vec<AnyElement> {
+        let diagnostics = self.workspace.diagnostics(document_id).unwrap_or_default();
+        if diagnostics.is_empty() {
+            return vec![views::skill::no_diagnostics(&self.theme).into_any_element()];
+        }
+
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                let item = views::skill::diagnostic_item(diagnostic);
+                views::skill::diagnostic_row(&self.theme, &item).into_any_element()
+            })
+            .collect()
     }
 
     fn troop_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
@@ -701,7 +1242,10 @@ impl AppFrame {
                     .child(format!("Could not read TroopInfo: {error}"));
             }
         };
-        let selected = self.selected_troop.min(record_count.saturating_sub(1));
+        let selected = self
+            .selections
+            .selected(document_id)
+            .min(record_count.saturating_sub(1));
         let records = self.troop_records(document_id, record_count, selected, cx);
         let groups = if record_count == 0 {
             vec![
@@ -733,7 +1277,7 @@ impl AppFrame {
                     record == selected,
                 )
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.activate_document(document_id, record);
+                    frame.select_record(document_id, record);
                     window.focus(&frame.focus);
                     cx.notify();
                 }))
@@ -809,7 +1353,7 @@ impl AppFrame {
         match value {
             Ok(value) => row
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    frame.number_edit = Some(ActiveNumberEdit::troop_field(
+                    frame.begin_number_edit(ActiveNumberEdit::troop_field(
                         document_id,
                         record,
                         field,
@@ -867,7 +1411,7 @@ impl AppFrame {
                     dirty,
                 )
                 .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.activate_document(document_id, 0);
+                    frame.activate_document(document_id);
                     cx.notify();
                 }))
                 .into_any_element()
@@ -1027,10 +1571,20 @@ mod tests {
     use std::path::PathBuf;
 
     use gpui::{AppContext, TestAppContext, WindowOptions};
-    use kufeditor_workspace::{Document, DocumentId, TroopDocument, TroopField};
+    use kufeditor_workspace::{
+        Document, DocumentEdit, DocumentId, DocumentKind, SkillDocument, SkillTextField,
+        TroopDocument, TroopField, Workspace,
+    };
 
-    use super::{ActiveNumberEdit, AppFrame, invalid_number_notice};
-    use crate::state::{Area, NoticeLevel};
+    use super::{
+        ActiveNumberEdit, AppFrame, EditorRoute, SkillTextProjection, SkillTypeChoice,
+        TextEditTarget, clear_editor_notice, editor_route, invalid_number_notice,
+        skill_text_projection,
+    };
+    use crate::{
+        state::{Area, Notice, NoticeLevel, RecordSelections},
+        text_input::TextInputEvent,
+    };
 
     #[test]
     fn invalid_number_notice_explains_the_allowed_range() {
@@ -1062,6 +1616,175 @@ mod tests {
             .open_loaded(PathBuf::from(path), Document::Troop(document))
     }
 
+    fn skill_document(
+        record_count: usize,
+        localization_key: &[u8],
+        icon_path: &[u8],
+    ) -> SkillDocument {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&100_u32.to_le_bytes());
+        bytes.extend_from_slice(&u32::try_from(record_count).unwrap().to_le_bytes());
+        for record in 0..record_count {
+            bytes.extend_from_slice(&i32::try_from(record).unwrap().to_le_bytes());
+            bytes.extend_from_slice(&u16::try_from(localization_key.len()).unwrap().to_le_bytes());
+            bytes.extend_from_slice(localization_key);
+            bytes.extend_from_slice(&u16::try_from(icon_path.len()).unwrap().to_le_bytes());
+            bytes.extend_from_slice(icon_path);
+            bytes.extend_from_slice(&1_u32.to_le_bytes());
+            bytes.extend_from_slice(&50_u32.to_le_bytes());
+        }
+        bytes.resize(bytes.len() + 64, 0);
+        SkillDocument::parse(bytes).unwrap()
+    }
+
+    fn open_skill(frame: &mut AppFrame, path: &str, record_count: usize) -> DocumentId {
+        frame.workspace.open_loaded(
+            PathBuf::from(path),
+            Document::Skill(skill_document(
+                record_count,
+                b"@(S_Melee)",
+                b"IL_SKL_Melee.tga",
+            )),
+        )
+    }
+
+    #[test]
+    fn skill_and_troop_documents_choose_their_own_editor_routes() {
+        assert_eq!(editor_route(DocumentKind::SkillInfo), EditorRoute::Skill);
+        assert_eq!(editor_route(DocumentKind::TroopInfo), EditorRoute::Troop);
+    }
+
+    #[test]
+    fn skill_number_targets_build_checked_typed_edits() {
+        let mut workspace = Workspace::new();
+        let document = workspace.open_loaded(
+            PathBuf::from("SkillInfo.sox"),
+            Document::Skill(skill_document(1, b"@(S_Melee)", b"IL_SKL_Melee.tga")),
+        );
+
+        let skill_id = ActiveNumberEdit::skill_id(document, 0, 0);
+        assert_eq!(
+            skill_id.target.document_edit(i64::from(i32::MIN)).unwrap(),
+            (
+                document,
+                DocumentEdit::SetSkillId {
+                    record: 0,
+                    value: i32::MIN,
+                },
+            )
+        );
+
+        let maximum_level = ActiveNumberEdit::skill_max_level(document, 0, 50);
+        assert_eq!(
+            maximum_level.target.document_edit(65_535).unwrap(),
+            (
+                document,
+                DocumentEdit::SetSkillMaxLevel {
+                    record: 0,
+                    value: 65_535,
+                },
+            )
+        );
+        assert!(maximum_level.target.document_edit(-1).is_err());
+    }
+
+    #[test]
+    fn skill_type_choices_build_wire_values_one_and_two() {
+        assert_eq!(
+            SkillTypeChoice::Combat.document_edit(4),
+            DocumentEdit::SetSkillType {
+                record: 4,
+                value: 1,
+            }
+        );
+        assert_eq!(
+            SkillTypeChoice::Magic.document_edit(4),
+            DocumentEdit::SetSkillType {
+                record: 4,
+                value: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn skill_text_targets_build_field_specific_edits() {
+        let mut workspace = Workspace::new();
+        let document = workspace.open_loaded(
+            PathBuf::from("SkillInfo.sox"),
+            Document::Skill(skill_document(1, b"@(S_Melee)", b"IL_SKL_Melee.tga")),
+        );
+
+        for (field, value) in [
+            (SkillTextField::LocalizationKey, "@(S_Changed)"),
+            (SkillTextField::IconPath, "changed.tga"),
+        ] {
+            let target = TextEditTarget::new(document, 0, field);
+            assert_eq!(
+                target.document_edit(value.to_owned()),
+                (
+                    document,
+                    DocumentEdit::SetSkillText {
+                        record: 0,
+                        field,
+                        value: value.to_owned(),
+                    },
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_skill_utf8_projects_as_a_disabled_diagnostic() {
+        let mut workspace = Workspace::new();
+        let document = workspace.open_loaded(
+            PathBuf::from("SkillInfo.sox"),
+            Document::Skill(skill_document(1, &[0xff, 0xfe], b"IL_SKL_Melee.tga")),
+        );
+
+        let projection =
+            skill_text_projection(&workspace, document, 0, SkillTextField::LocalizationKey);
+
+        let SkillTextProjection::Invalid { value, diagnostic } = projection else {
+            panic!("invalid UTF-8 must not become an editable string");
+        };
+        assert_eq!(value, "Invalid UTF-8");
+        assert!(diagnostic.contains("Localization Key is not valid UTF-8"));
+    }
+
+    #[test]
+    fn skill_record_selection_is_kept_per_document() {
+        let mut workspace = Workspace::new();
+        let first = workspace.open_loaded(
+            PathBuf::from("first.sox"),
+            Document::Skill(skill_document(10, b"first", b"first.tga")),
+        );
+        let second = workspace.open_loaded(
+            PathBuf::from("second.sox"),
+            Document::Skill(skill_document(6, b"second", b"second.tga")),
+        );
+        let mut selections = RecordSelections::default();
+
+        selections.select(first, 9);
+        selections.select(second, 5);
+
+        assert_eq!(selections.selected(first), 9);
+        assert_eq!(selections.selected(second), 5);
+    }
+
+    #[test]
+    fn skill_editor_feedback_clears_without_removing_workspace_notices() {
+        let mut editor_notice = Some(invalid_number_notice());
+        clear_editor_notice(&mut editor_notice);
+        assert!(editor_notice.is_none());
+
+        let mut workspace_notice = Some(Notice::info("Saving document"));
+        clear_editor_notice(&mut workspace_notice);
+        assert_eq!(
+            workspace_notice.as_ref().map(Notice::summary),
+            Some("Saving document")
+        );
+    }
+
     #[gpui::test]
     fn inactive_number_edit_cannot_survive_activation_or_commit(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
@@ -1073,7 +1796,7 @@ mod tests {
             .update(cx, |frame, _, _| {
                 let first = open_troop(frame, "first.sox", 100);
                 let second = open_troop(frame, "second.sox", 200);
-                frame.activate_document(first, 0);
+                frame.activate_document(first);
                 frame.number_edit = Some(ActiveNumberEdit::troop_field(
                     first,
                     0,
@@ -1081,7 +1804,7 @@ mod tests {
                     100,
                 ));
 
-                frame.activate_document(second, 0);
+                frame.activate_document(second);
 
                 assert_eq!(frame.active_document, Some(second));
                 assert!(frame.number_edit.is_none());
@@ -1103,6 +1826,183 @@ mod tests {
                     100
                 );
                 assert!(!frame.workspace.is_dirty(first).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn stale_skill_text_event_cannot_mutate_a_hidden_document(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let (first, second, stale_input) = window
+            .update(cx, |frame, window, cx| {
+                let first = open_skill(frame, "first.sox", 1);
+                let second = open_skill(frame, "second.sox", 1);
+                frame.activate_document(first);
+                frame.start_skill_text_edit(
+                    first,
+                    0,
+                    SkillTextField::LocalizationKey,
+                    "@(S_Melee)".to_owned(),
+                    window,
+                    cx,
+                );
+                let input = frame.text_edit.as_ref().unwrap().input.clone();
+                assert!(input.read(cx).focus_handle().is_focused(window));
+
+                frame.activate_document(second);
+                assert!(frame.text_edit.is_none());
+                (first, second, input)
+            })
+            .unwrap();
+
+        stale_input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("hidden mutation".to_owned()));
+        });
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.active_document, Some(second));
+                assert_eq!(
+                    frame
+                        .workspace
+                        .skill_text(first, 0, SkillTextField::LocalizationKey)
+                        .unwrap(),
+                    "@(S_Melee)"
+                );
+                assert!(!frame.workspace.is_dirty(first).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn skill_property_switches_cancel_old_drafts_and_only_active_text_commits(
+        cx: &mut TestAppContext,
+    ) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let (document, stale_input, active_input) = window
+            .update(cx, |frame, window, cx| {
+                let document = open_skill(frame, "SkillInfo.sox", 1);
+                frame.activate_document(document);
+                frame.begin_number_edit(ActiveNumberEdit::skill_id(document, 0, 0));
+                assert!(frame.number_edit.is_some());
+
+                frame.start_skill_text_edit(
+                    document,
+                    0,
+                    SkillTextField::LocalizationKey,
+                    "@(S_Melee)".to_owned(),
+                    window,
+                    cx,
+                );
+                let stale_input = frame.text_edit.as_ref().unwrap().input.clone();
+                assert!(frame.number_edit.is_none());
+
+                frame.start_skill_text_edit(
+                    document,
+                    0,
+                    SkillTextField::IconPath,
+                    "IL_SKL_Melee.tga".to_owned(),
+                    window,
+                    cx,
+                );
+                let active_input = frame.text_edit.as_ref().unwrap().input.clone();
+                assert_ne!(stale_input, active_input);
+                (document, stale_input, active_input)
+            })
+            .unwrap();
+
+        stale_input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("wrong field".to_owned()));
+        });
+        cx.run_until_parked();
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame
+                        .workspace
+                        .skill_text(document, 0, SkillTextField::LocalizationKey)
+                        .unwrap(),
+                    "@(S_Melee)"
+                );
+                assert_eq!(frame.text_edit.as_ref().unwrap().input, active_input);
+            })
+            .unwrap();
+
+        active_input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("changed.tga".to_owned()));
+        });
+        cx.run_until_parked();
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame
+                        .workspace
+                        .skill_text(document, 0, SkillTextField::IconPath)
+                        .unwrap(),
+                    "changed.tga"
+                );
+                assert!(frame.text_edit.is_none());
+                assert!(frame.workspace.is_dirty(document).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn skill_record_switch_and_cancel_event_clear_the_active_text_draft(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        let (document, canceled_input) = window
+            .update(cx, |frame, window, cx| {
+                let document = open_skill(frame, "SkillInfo.sox", 2);
+                frame.activate_document(document);
+                frame.start_skill_text_edit(
+                    document,
+                    0,
+                    SkillTextField::LocalizationKey,
+                    "@(S_Melee)".to_owned(),
+                    window,
+                    cx,
+                );
+                frame.select_record(document, 1);
+                assert_eq!(frame.selections.selected(document), 1);
+                assert!(frame.text_edit.is_none());
+
+                frame.start_skill_text_edit(
+                    document,
+                    1,
+                    SkillTextField::LocalizationKey,
+                    "@(S_Melee)".to_owned(),
+                    window,
+                    cx,
+                );
+                frame.notice = Some(invalid_number_notice());
+                let input = frame.text_edit.as_ref().unwrap().input.clone();
+                (document, input)
+            })
+            .unwrap();
+
+        canceled_input.update(cx, |_, cx| cx.emit(TextInputEvent::Cancel));
+        cx.run_until_parked();
+        window
+            .update(cx, |frame, _, _| {
+                assert!(frame.text_edit.is_none());
+                assert!(frame.notice.is_none());
+                assert_eq!(
+                    frame
+                        .workspace
+                        .skill_text(document, 1, SkillTextField::LocalizationKey)
+                        .unwrap(),
+                    "@(S_Melee)"
+                );
             })
             .unwrap();
     }

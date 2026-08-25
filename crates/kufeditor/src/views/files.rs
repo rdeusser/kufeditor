@@ -20,7 +20,7 @@ pub fn render(theme: &Theme, tabs: Vec<AnyElement>, editor: Option<Div>) -> Div 
                 .child(
                     div()
                         .text_color(theme.text_dim)
-                        .child("Open a TroopInfo.sox file to begin editing."),
+                        .child("Open a TroopInfo.sox or SkillInfo.sox file to begin editing."),
                 ),
         )
     });

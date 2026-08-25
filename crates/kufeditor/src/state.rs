@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use kufeditor_game::Game;
+use kufeditor_workspace::DocumentId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NoticeLevel {
@@ -7,9 +10,16 @@ pub enum NoticeLevel {
     Error,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NoticeScope {
+    Workspace,
+    Editor,
+}
+
 #[derive(Clone, Debug)]
 pub struct Notice {
     level: NoticeLevel,
+    scope: NoticeScope,
     summary: String,
     detail: String,
 }
@@ -18,6 +28,7 @@ impl Notice {
     pub fn info(summary: impl Into<String>) -> Self {
         Self {
             level: NoticeLevel::Info,
+            scope: NoticeScope::Workspace,
             summary: summary.into(),
             detail: String::new(),
         }
@@ -26,6 +37,7 @@ impl Notice {
     pub fn success(summary: impl Into<String>) -> Self {
         Self {
             level: NoticeLevel::Success,
+            scope: NoticeScope::Workspace,
             summary: summary.into(),
             detail: String::new(),
         }
@@ -41,9 +53,28 @@ impl Notice {
         }
         Self {
             level: NoticeLevel::Error,
+            scope: NoticeScope::Workspace,
             summary: summary.into(),
             detail,
         }
+    }
+
+    pub fn editor_info(summary: impl Into<String>) -> Self {
+        Self {
+            level: NoticeLevel::Info,
+            scope: NoticeScope::Editor,
+            summary: summary.into(),
+            detail: String::new(),
+        }
+    }
+
+    pub fn editor_error(
+        summary: impl Into<String>,
+        error: &(dyn std::error::Error + 'static),
+    ) -> Self {
+        let mut notice = Self::error(summary, error);
+        notice.scope = NoticeScope::Editor;
+        notice
     }
 
     pub const fn level(&self) -> NoticeLevel {
@@ -56,6 +87,25 @@ impl Notice {
 
     pub fn detail(&self) -> &str {
         &self.detail
+    }
+
+    pub const fn is_editor_feedback(&self) -> bool {
+        matches!(self.scope, NoticeScope::Editor)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct RecordSelections {
+    records: HashMap<DocumentId, usize>,
+}
+
+impl RecordSelections {
+    pub fn selected(&self, document: DocumentId) -> usize {
+        self.records.get(&document).copied().unwrap_or(0)
+    }
+
+    pub fn select(&mut self, document: DocumentId, record: usize) {
+        self.records.insert(document, record);
     }
 }
 

@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "Task 7 wires the reusable text input into the SkillInfo form"
-)]
-
 use std::ops::Range;
 
 use gpui::{
@@ -403,6 +398,10 @@ impl TextInput {
             last_bounds: None,
             is_selecting: false,
         }
+    }
+
+    pub(crate) fn focus_handle(&self) -> FocusHandle {
+        self.focus_handle.clone()
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -817,7 +816,7 @@ impl Render for TextInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .key_context(KEY_CONTEXT)
-            .track_focus(&self.focus_handle(cx))
+            .track_focus(&self.focus_handle())
             .flex()
             .items_center()
             .w_full()

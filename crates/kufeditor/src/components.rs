@@ -103,6 +103,38 @@ pub fn primary_button(theme: &Theme, id: &'static str, label: &'static str) -> S
         .child(label)
 }
 
+pub fn choice_button(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: &'static str,
+    selected: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .h(px(32.0))
+        .px(px(12.0))
+        .rounded_md()
+        .border_1()
+        .border_color(if selected { theme.accent } else { theme.border })
+        .bg(if selected {
+            theme.accent_dim
+        } else {
+            theme.surface
+        })
+        .text_color(if selected {
+            theme.accent
+        } else {
+            theme.text_dim
+        })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .child(label)
+}
+
 pub fn surface(theme: &Theme) -> Div {
     div()
         .bg(theme.surface)
