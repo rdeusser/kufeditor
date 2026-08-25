@@ -21,7 +21,9 @@ pub use kufeditor_formats::{
 pub use recent::{
     DEFAULT_RECENT_FILE_LIMIT, RECENT_FILE_LIMITS, RecentFiles, normalize_recent_limit,
 };
-pub use storage::{LoadedDocument, SaveRequest, SaveToken, SavedDocument, load_path};
+pub use storage::{
+    LoadedDocument, SUPPORTED_OPEN_EXTENSIONS, SaveRequest, SaveToken, SavedDocument, load_path,
+};
 use thiserror::Error;
 
 use crate::history::{DocumentMutation, HistoryAction, HistoryEntry};

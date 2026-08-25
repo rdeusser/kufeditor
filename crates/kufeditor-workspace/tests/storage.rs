@@ -10,9 +10,9 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
 use kufeditor_formats::FormatError;
 use kufeditor_workspace::{
-    Document, DocumentEdit, DocumentID, SaveDocument, SaveNumberTarget, SkillDocument,
-    SkillTextField, TextSOXDocument, TroopDocument, TroopField, Workspace, WorkspaceError,
-    load_path,
+    Document, DocumentEdit, DocumentID, SUPPORTED_OPEN_EXTENSIONS, SaveDocument, SaveNumberTarget,
+    SkillDocument, SkillTextField, TextSOXDocument, TroopDocument, TroopField, Workspace,
+    WorkspaceError, load_path,
 };
 use tempfile::tempdir;
 
@@ -290,6 +290,11 @@ fn load_rejects_a_non_sox_file() {
     let error = load_path(path.clone()).unwrap_err();
 
     assert!(matches!(error, WorkspaceError::UnsupportedFile { path: found } if found == path));
+}
+
+#[test]
+fn supported_open_extensions_cover_both_document_families() {
+    assert_eq!(SUPPORTED_OPEN_EXTENSIONS, ["sox", "sav"]);
 }
 
 #[test]

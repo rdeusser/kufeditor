@@ -8,6 +8,11 @@ use kufeditor_formats::{SOXDocument, SaveDocument, parse_sox};
 
 use crate::{Document, DocumentID, DocumentKind, StateID, WorkspaceError};
 
+const SOX_EXTENSION: &str = "sox";
+const SAV_EXTENSION: &str = "sav";
+
+pub const SUPPORTED_OPEN_EXTENSIONS: [&str; 2] = [SOX_EXTENSION, SAV_EXTENSION];
+
 #[derive(Debug)]
 pub struct LoadedDocument {
     path: PathBuf,
@@ -105,18 +110,24 @@ pub struct SavedDocument {
 }
 
 pub fn load_path(path: PathBuf) -> Result<LoadedDocument, WorkspaceError> {
-    let extension = path.extension().and_then(|extension| extension.to_str());
-    let is_sox = extension.is_some_and(|extension| extension.eq_ignore_ascii_case("sox"));
-    let is_save = extension.is_some_and(|extension| extension.eq_ignore_ascii_case("sav"));
-    if !is_sox && !is_save {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(|extension| {
+            SUPPORTED_OPEN_EXTENSIONS
+                .iter()
+                .copied()
+                .find(|supported| extension.eq_ignore_ascii_case(supported))
+        });
+    let Some(extension) = extension else {
         return Err(WorkspaceError::UnsupportedFile { path });
-    }
+    };
 
     let bytes = fs::read(&path).map_err(|source| WorkspaceError::Read {
         path: path.clone(),
         source,
     })?;
-    let document = if is_save {
+    let document = if extension == SAV_EXTENSION {
         SaveDocument::parse(bytes)
             .map(Document::Save)
             .map_err(|source| WorkspaceError::Parse {
@@ -141,8 +152,8 @@ pub(crate) fn normalize_save_target(
     kind: DocumentKind,
 ) -> Result<PathBuf, WorkspaceError> {
     let expected = match kind {
-        DocumentKind::TroopInfo | DocumentKind::SkillInfo | DocumentKind::TextSOX => "sox",
-        DocumentKind::CrusadersSave => "sav",
+        DocumentKind::TroopInfo | DocumentKind::SkillInfo | DocumentKind::TextSOX => SOX_EXTENSION,
+        DocumentKind::CrusadersSave => SAV_EXTENSION,
     };
     let Some(actual) = path.extension() else {
         path.set_extension(expected);

@@ -1245,6 +1245,37 @@ impl AppFrame {
         SaveRows::units(&self.workspace, document, self.save_dictionary(), filter)
     }
 
+    pub(super) fn reconcile_save_presentation_after_document_change(
+        &mut self,
+        document: DocumentID,
+        cx: &mut Context<Self>,
+    ) {
+        let filter = self
+            .save_presentations
+            .get(document)
+            .map_or("", SavePresentationState::unit_filter)
+            .to_owned();
+        let Ok(rows) = self.save_unit_rows(document, &filter) else {
+            return;
+        };
+        let visibility = rows
+            .unit_visibility()
+            .unwrap_or(SaveUnitVisibility::All { unit_count: 0 });
+        let draft_active = self
+            .number_edit
+            .as_ref()
+            .is_some_and(|edit| edit.target.document() == document)
+            || self
+                .text_edit
+                .as_ref()
+                .is_some_and(|edit| edit.target.document() == document);
+        self.apply_save_presentation_transition(
+            draft_active,
+            |states, draft_active| states.reconcile_document(document, visibility, draft_active),
+            cx,
+        );
+    }
+
     const fn save_draft_active(&self) -> bool {
         self.number_edit.is_some() || self.text_edit.is_some()
     }
@@ -1476,6 +1507,7 @@ mod tests {
 
     use super::{AppFrame, SAVE_SECTIONS, UNIT_FILTERS, save_section_id, save_section_label};
     use crate::{
+        actions::{Redo, Undo},
         catalog_status::CatalogRequestError,
         notices::{Notice, NoticeSource},
         save_catalog_status::SaveCatalogKey,
@@ -1745,6 +1777,166 @@ mod tests {
             assert!(frame.workspace.is_dirty(document).unwrap());
             assert!(frame.workspace.can_undo(document).unwrap());
         });
+    }
+
+    #[gpui::test]
+    fn save_edit_filtered_choice_reconciles_the_inspected_unit_and_hidden_draft(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(2, 0, 0).with_unit_roles([3, 3]).build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        click(cx, "save-unit-filter-troops");
+        click(cx, "save-unit-master-row-0");
+        click(cx, "save-number-unit-0-troop-info-index");
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_some()));
+        draw_frame(cx, &frame);
+
+        click(cx, "save-choice:save-number-unit-0-ucd:1");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(
+                        document,
+                        SaveNumberTarget::Unit {
+                            unit: 0,
+                            field: SaveUnitField::UCD,
+                        },
+                    )
+                    .unwrap(),
+                1,
+            );
+            assert_eq!(
+                frame
+                    .save_presentations
+                    .get(document)
+                    .unwrap()
+                    .inspected_unit(),
+                1,
+            );
+            assert!(frame.number_edit.is_none());
+        });
+
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("save-unit-master-row-1").is_some());
+        assert!(
+            cx.debug_bounds("save-number-unit-1-troop-info-index")
+                .is_some()
+        );
+    }
+
+    #[gpui::test]
+    fn save_edit_undo_and_redo_actions_reconcile_filtered_units_and_redraw(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(2, 0, 0).with_unit_roles([3, 3]).build(),
+        );
+        frame.update(cx, |frame, cx| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .apply(
+                        document,
+                        DocumentEdit::SetSaveNumber {
+                            target: SaveNumberTarget::Unit {
+                                unit: 0,
+                                field: SaveUnitField::UCD,
+                            },
+                            value: 1,
+                        },
+                    )
+                    .unwrap(),
+                ApplyOutcome::Changed,
+            );
+            cx.notify();
+        });
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        click(cx, "save-unit-filter-troops");
+        assert_eq!(save_state(&frame, cx, document).inspected_unit(), 1);
+        let row_one_before_undo = cx.debug_bounds("save-unit-master-row-1").unwrap();
+
+        frame.update_in(cx, |_, window, cx| {
+            window.dispatch_action(Box::new(Undo), cx);
+        });
+        cx.run_until_parked();
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(
+                        document,
+                        SaveNumberTarget::Unit {
+                            unit: 0,
+                            field: SaveUnitField::UCD,
+                        },
+                    )
+                    .unwrap(),
+                3,
+            );
+            assert_eq!(
+                frame
+                    .save_presentations
+                    .get(document)
+                    .unwrap()
+                    .inspected_unit(),
+                1,
+            );
+        });
+        let row_one_after_undo = cx.debug_bounds("save-unit-master-row-1").unwrap();
+        assert!(row_one_after_undo.origin.y > row_one_before_undo.origin.y);
+        click(cx, "save-unit-master-row-0");
+        click(cx, "save-number-unit-0-troop-info-index");
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_some()));
+        let row_one_before_redo = cx.debug_bounds("save-unit-master-row-1").unwrap();
+
+        frame.update_in(cx, |_, window, cx| {
+            window.dispatch_action(Box::new(Redo), cx);
+        });
+        cx.run_until_parked();
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(
+                        document,
+                        SaveNumberTarget::Unit {
+                            unit: 0,
+                            field: SaveUnitField::UCD,
+                        },
+                    )
+                    .unwrap(),
+                1,
+            );
+            assert_eq!(
+                frame
+                    .save_presentations
+                    .get(document)
+                    .unwrap()
+                    .inspected_unit(),
+                1,
+            );
+            assert!(frame.number_edit.is_none());
+        });
+        let row_one_after_redo = cx.debug_bounds("save-unit-master-row-1").unwrap();
+        assert!(row_one_after_redo.origin.y < row_one_before_redo.origin.y);
+        assert_eq!(row_one_after_redo.origin.y, row_one_before_undo.origin.y);
+        assert!(
+            cx.debug_bounds("save-number-unit-1-troop-info-index")
+                .is_some()
+        );
     }
 
     #[gpui::test]

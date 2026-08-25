@@ -657,16 +657,10 @@ pub fn save_section_model(
         )?)),
         SaveSection::Units => {
             let rows = SaveRows::units(workspace, document, dictionary, state.unit_filter())?;
-            let inspected = if rows.is_empty() {
-                None
-            } else {
-                Some(unit_projection(
-                    workspace,
-                    document,
-                    state.inspected_unit(),
-                    dictionary,
-                )?)
-            };
+            let inspected = rows
+                .reconciled_unit(state.inspected_unit())
+                .map(|unit| unit_projection(workspace, document, unit, dictionary))
+                .transpose()?;
             Ok(SaveSectionModel::Units { rows, inspected })
         }
         SaveSection::Equipment => {
@@ -1738,9 +1732,9 @@ mod tests {
     use gpui::{TestAppContext, div, point, prelude::*, px, size};
     use kufeditor_game::{CatalogRole, NameDictionary, load_name_dictionary};
     use kufeditor_workspace::{
-        Document, DocumentID, SaveDocument, SaveEquipmentField, SaveEquipmentGroup,
-        SaveEquipmentSlot, SaveNumberTarget, SaveUnitField, SaveUnitGroup, Workspace,
-        WorkspaceError,
+        ApplyOutcome, Document, DocumentEdit, DocumentID, SaveDocument, SaveEquipmentField,
+        SaveEquipmentGroup, SaveEquipmentSlot, SaveNumberTarget, SaveUnitField, SaveUnitGroup,
+        Workspace, WorkspaceError,
     };
     use tempfile::TempDir;
 
@@ -2046,6 +2040,48 @@ mod tests {
             unit_row_metadata(&inspected.row),
             "Leader (0) · Skill 8 · Character -1",
         );
+    }
+
+    #[test]
+    fn save_view_units_reconcile_a_stale_filtered_inspection_before_projection() {
+        let (mut workspace, document) = workspace_with_roles_save(&[3, 3], 0, 0);
+        let mut presentations = SavePresentationStates::default();
+        presentations.select_section(document, SaveSection::Units, false);
+        presentations.set_unit_filter(
+            document,
+            "troop".to_owned(),
+            SaveUnitVisibility::Filtered(&[0, 1]),
+            false,
+        );
+        presentations.inspect_unit(document, 0, SaveUnitVisibility::Filtered(&[0, 1]), false);
+        assert_eq!(
+            workspace
+                .apply(
+                    document,
+                    DocumentEdit::SetSaveNumber {
+                        target: SaveNumberTarget::Unit {
+                            unit: 0,
+                            field: SaveUnitField::UCD,
+                        },
+                        value: 1,
+                    },
+                )
+                .unwrap(),
+            ApplyOutcome::Changed,
+        );
+
+        let SaveSectionModel::Units { rows, inspected } = save_section_model(
+            &workspace,
+            document,
+            presentations.get(document).unwrap(),
+            None,
+        )
+        .unwrap() else {
+            panic!("units state must produce the units view");
+        };
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(inspected.unwrap().row.source_index, 1);
     }
 
     #[test]

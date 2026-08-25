@@ -12,8 +12,8 @@ use gpui::{
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
     ApplyOutcome, DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
-    SaveEditor, SaveNumberTarget, SaveTextField, SaveToken, SkillTextField, TroopField, TroopGroup,
-    Workspace, WorkspaceError, load_path,
+    SUPPORTED_OPEN_EXTENSIONS, SaveEditor, SaveNumberTarget, SaveTextField, SaveToken,
+    SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError, load_path,
 };
 
 use crate::{
@@ -394,6 +394,24 @@ fn invalid_number_notice() -> Notice {
     Notice::editor_info("Enter a whole number within the allowed range")
 }
 
+fn open_prompt_copy() -> String {
+    let extensions = SUPPORTED_OPEN_EXTENSIONS
+        .iter()
+        .map(|extension| format!(".{extension}"))
+        .collect::<Vec<_>>()
+        .join(" or ");
+    format!("Choose one or more {extensions} files")
+}
+
+fn open_prompt_options() -> PathPromptOptions {
+    PathPromptOptions {
+        files: true,
+        directories: false,
+        multiple: true,
+        prompt: Some(open_prompt_copy().into()),
+    }
+}
+
 fn clear_editor_notice(notices: &mut NoticeCenter) {
     notices.clear(NoticeSource::Editor);
 }
@@ -660,7 +678,7 @@ impl AppFrame {
                 match self.workspace.apply(document, edit) {
                     Ok(outcome) => {
                         if outcome == ApplyOutcome::Changed {
-                            self.document_did_mutate();
+                            self.document_did_mutate(document, cx);
                         }
                         self.cancel_property_edit();
                         self.notices.clear(NoticeSource::Editor);
@@ -707,7 +725,13 @@ impl AppFrame {
         cx.notify();
     }
 
-    fn set_skill_type(&mut self, document: DocumentID, record: usize, choice: SkillTypeChoice) {
+    fn set_skill_type(
+        &mut self,
+        document: DocumentID,
+        record: usize,
+        choice: SkillTypeChoice,
+        cx: &mut Context<Self>,
+    ) {
         self.cancel_property_edit();
         if self.active_document != Some(document) {
             self.notices.replace(
@@ -719,7 +743,7 @@ impl AppFrame {
         match self.workspace.apply(document, choice.document_edit(record)) {
             Ok(outcome) => {
                 if outcome == ApplyOutcome::Changed {
-                    self.document_did_mutate();
+                    self.document_did_mutate(document, cx);
                 }
                 self.notices.clear(NoticeSource::Editor);
             }
@@ -772,7 +796,7 @@ impl AppFrame {
         ) {
             Ok(outcome) => {
                 if outcome == ApplyOutcome::Changed {
-                    self.document_did_mutate();
+                    self.document_did_mutate(action.document, cx);
                 }
                 self.notices.clear(NoticeSource::Editor);
             }
@@ -986,12 +1010,12 @@ impl AppFrame {
                 .notices
                 .replace(NoticeSource::Editor, invalid_number_notice()),
             NumberOutcome::Cancel => self.cancel_property_edit(),
-            NumberOutcome::Commit(value) => self.commit_number_edit(value),
+            NumberOutcome::Commit(value) => self.commit_number_edit(value, cx),
         }
         cx.notify();
     }
 
-    fn commit_number_edit(&mut self, value: i64) {
+    fn commit_number_edit(&mut self, value: i64, cx: &mut Context<Self>) {
         let Some(target_document) = self.number_edit.as_ref().map(|edit| edit.target.document())
         else {
             return;
@@ -1025,7 +1049,7 @@ impl AppFrame {
         match self.workspace.apply(document, document_edit) {
             Ok(outcome) => {
                 if outcome == ApplyOutcome::Changed {
-                    self.document_did_mutate();
+                    self.document_did_mutate(document, cx);
                 }
                 self.cancel_property_edit();
                 self.notices.clear(NoticeSource::Editor);
@@ -1045,17 +1069,8 @@ impl AppFrame {
     fn open_action(&mut self, _: &OpenFile, _: &mut Window, cx: &mut Context<Self>) {
         self.cancel_property_edit();
         let request = self.begin_open_prompt(cx);
-        let prompt = Rc::clone(&self.open_prompt_launcher).launch(
-            self,
-            request,
-            PathPromptOptions {
-                files: true,
-                directories: false,
-                multiple: true,
-                prompt: Some("Open".into()),
-            },
-            cx,
-        );
+        let prompt =
+            Rc::clone(&self.open_prompt_launcher).launch(self, request, open_prompt_options(), cx);
 
         cx.spawn(async move |entity, cx| {
             let paths = match prompt.await {
@@ -1081,7 +1096,7 @@ impl AppFrame {
         self.notices.begin(
             NoticeSource::Open,
             request.get(),
-            Notice::info("Choose one or more .sox or .sav files"),
+            Notice::info(open_prompt_copy()),
         );
         cx.notify();
         request
@@ -1326,7 +1341,7 @@ impl AppFrame {
         };
         match result {
             Ok(true) => {
-                self.document_did_mutate();
+                self.document_did_mutate(document_id, cx);
                 self.notices.clear(NoticeSource::Workspace);
             }
             Ok(false) => {}
@@ -1460,12 +1475,13 @@ impl AppFrame {
         }
     }
 
-    fn document_did_mutate(&mut self) {
+    fn document_did_mutate(&mut self, document: DocumentID, cx: &mut Context<Self>) {
         if self.close_documents == CloseDocuments::Discard {
             self.close_documents = CloseDocuments::Save;
             self.close_pending = false;
             self.close_armed = false;
         }
+        self.reconcile_save_presentation_after_document_change(document, cx);
     }
 
     fn top_bar(&self, cx: &mut Context<Self>) -> Div {
@@ -1914,7 +1930,7 @@ impl AppFrame {
                     value == Some(choice.value()),
                 )
                 .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.set_skill_type(document_id, record, choice);
+                    frame.set_skill_type(document_id, record, choice, cx);
                     cx.notify();
                 }))
                 .into_any_element()
@@ -2468,14 +2484,15 @@ mod tests {
     use kufeditor_game::Game;
     use kufeditor_workspace::{
         DiagnosticLocation, Document, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
-        SaveDocument, SaveNumberTarget, SkillDocument, SkillTextField, TextSOXDocument,
-        TroopDocument, TroopField, Workspace, WorkspaceError, load_path,
+        SUPPORTED_OPEN_EXTENSIONS, SaveDocument, SaveNumberTarget, SkillDocument, SkillTextField,
+        TextSOXDocument, TroopDocument, TroopField, Workspace, WorkspaceError, load_path,
     };
 
     use super::{
         ActiveNumberEdit, AppFrame, CloseDocuments, EditorRoute, OpenPathLoader,
         OpenPromptLauncher, OpenPromptResult, SkillTextProjection, SkillTypeChoice, TextEditTarget,
-        editor_route, invalid_number_notice, skill_text_projection, troop_diagnostic_title,
+        editor_route, invalid_number_notice, open_prompt_copy, skill_text_projection,
+        troop_diagnostic_title,
     };
     use crate::{
         actions::{OpenFile, SaveAs},
@@ -2543,6 +2560,7 @@ mod tests {
         launched: Rc<Cell<bool>>,
         request_ready: Rc<Cell<bool>>,
         notice_ready: Rc<Cell<bool>>,
+        options_ready: Rc<Cell<bool>>,
     }
 
     impl OpenPromptLauncher for PromptLaunchProbe {
@@ -2550,7 +2568,7 @@ mod tests {
             &self,
             frame: &AppFrame,
             request: RequestID,
-            _: PathPromptOptions,
+            options: PathPromptOptions,
             _: &mut Context<AppFrame>,
         ) -> Task<OpenPromptResult> {
             self.launched.set(true);
@@ -2559,7 +2577,32 @@ mod tests {
                 frame.notices.current().map(Notice::summary)
                     == Some("Choose one or more .sox or .sav files"),
             );
+            self.options_ready.set(
+                options.files
+                    && !options.directories
+                    && options.multiple
+                    && options
+                        .prompt
+                        .as_ref()
+                        .is_some_and(|prompt| prompt.contains(".sox") && prompt.contains(".sav")),
+            );
             Task::ready(OpenPromptResult::Canceled)
+        }
+    }
+
+    struct SelectedPathsPrompt {
+        paths: Vec<PathBuf>,
+    }
+
+    impl OpenPromptLauncher for SelectedPathsPrompt {
+        fn launch(
+            &self,
+            _: &AppFrame,
+            _: RequestID,
+            _: PathPromptOptions,
+            _: &mut Context<AppFrame>,
+        ) -> Task<OpenPromptResult> {
+            Task::ready(OpenPromptResult::Selected(self.paths.clone()))
         }
     }
 
@@ -2785,6 +2828,7 @@ mod tests {
         let launched = Rc::new(Cell::new(false));
         let request_ready = Rc::new(Cell::new(false));
         let notice_ready = Rc::new(Cell::new(false));
+        let options_ready = Rc::new(Cell::new(false));
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
@@ -2798,6 +2842,7 @@ mod tests {
                     launched: Rc::clone(&launched),
                     request_ready: Rc::clone(&request_ready),
                     notice_ready: Rc::clone(&notice_ready),
+                    options_ready: Rc::clone(&options_ready),
                 });
                 frame.open_action(&OpenFile, window, cx);
             })
@@ -2806,6 +2851,7 @@ mod tests {
         assert!(launched.get());
         assert!(request_ready.get());
         assert!(notice_ready.get());
+        assert!(options_ready.get());
     }
 
     #[gpui::test]
@@ -2822,6 +2868,57 @@ mod tests {
                 frame.begin_open_prompt(cx);
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.summary(), "Choose one or more .sox or .sav files");
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn open_prompt_copy_projects_the_workspace_extension_policy() {
+        let extensions = SUPPORTED_OPEN_EXTENSIONS
+            .iter()
+            .map(|extension| format!(".{extension}"))
+            .collect::<Vec<_>>()
+            .join(" or ");
+
+        assert_eq!(
+            open_prompt_copy(),
+            format!("Choose one or more {extensions} files")
+        );
+    }
+
+    #[gpui::test]
+    fn open_action_rejects_an_unsupported_path_after_picker_selection(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("TroopInfo.txt");
+        write_valid_sox(&path);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, window, cx| {
+                frame.open_prompt_launcher = Rc::new(SelectedPathsPrompt {
+                    paths: vec![path.clone()],
+                });
+                frame.open_action(&OpenFile, window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert!(frame.workspace.document_ids().is_empty());
+                assert!(frame.recent_files.paths().is_empty());
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.level(), NoticeLevel::Error);
+                assert_eq!(notice.summary(), "Opened 0 files; 1 failed");
+                assert!(notice.detail().contains(&path.display().to_string()));
+                assert!(notice.detail().contains("unsupported file"));
+                assert!(notice.detail().contains(".sox"));
+                assert!(notice.detail().contains(".sav"));
             })
             .unwrap();
     }
@@ -4018,7 +4115,7 @@ mod tests {
                     TroopField::MoveSpeed,
                     100,
                 ));
-                frame.commit_number_edit(101);
+                frame.commit_number_edit(101, cx);
 
                 assert!(frame.number_edit.is_none());
                 assert_eq!(
@@ -4934,7 +5031,7 @@ mod tests {
                     TroopField::MoveSpeed,
                     101,
                 ));
-                frame.commit_number_edit(102);
+                frame.commit_number_edit(102, cx);
                 assert!(!frame.window_should_close(window, cx));
             })
             .unwrap();
@@ -5196,7 +5293,7 @@ mod tests {
                 );
                 let before = frame.workspace.state_id(document).unwrap();
 
-                frame.commit_number_edit(100);
+                frame.commit_number_edit(100, cx);
 
                 assert!(frame.number_edit.is_none());
                 assert_eq!(frame.workspace.state_id(document).unwrap(), before);
@@ -5293,7 +5390,7 @@ mod tests {
                 );
                 let before = frame.workspace.state_id(document).unwrap();
 
-                frame.set_skill_type(document, 0, SkillTypeChoice::Combat);
+                frame.set_skill_type(document, 0, SkillTypeChoice::Combat, cx);
 
                 assert_eq!(frame.workspace.state_id(document).unwrap(), before);
                 assert!(!frame.workspace.can_undo(document).unwrap());
