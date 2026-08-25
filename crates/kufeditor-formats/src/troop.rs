@@ -221,6 +221,9 @@ impl TroopDocument {
     }
 
     pub fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) -> Result<(), FormatError> {
+        if bytes != saved.encode()? {
+            return Err(FormatError::InconsistentSoxRebase);
+        }
         self.source.rebase(&saved.source, bytes)?;
         self.source_file = saved.file.clone();
         self.trailing_bytes.clone_from(&saved.trailing_bytes);

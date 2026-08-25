@@ -134,6 +134,23 @@ fn rebase_rejects_a_saved_source_with_a_different_envelope() {
 }
 
 #[test]
+fn rebase_rejects_same_envelope_source_that_does_not_match_the_saved_snapshot() {
+    let source = troop_fixture();
+    let saved = TroopDocument::parse(source.clone()).unwrap();
+    let mut document = saved.clone();
+    let mut inconsistent = source.clone();
+    inconsistent
+        .get_mut(16..20)
+        .unwrap()
+        .copy_from_slice(&175_i32.to_le_bytes());
+
+    let error = document.rebase_source(&saved, inconsistent).unwrap_err();
+
+    assert!(matches!(error, FormatError::InconsistentSoxRebase));
+    assert_eq!(document.encode().unwrap(), source);
+}
+
+#[test]
 fn unchanged_encode_is_byte_identical() {
     let source = troop_fixture();
     let document = TroopDocument::parse(source.clone()).unwrap();
