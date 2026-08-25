@@ -29,7 +29,7 @@ pub enum CatalogFileError {
     },
 
     #[error("weapon file is not valid UTF-8: {source}")]
-    InvalidWeaponUtf8 {
+    InvalidWeaponUTF8 {
         #[source]
         source: Utf8Error,
     },
@@ -48,7 +48,7 @@ pub enum CatalogFileError {
 #[derive(Debug, Error)]
 pub enum CatalogLoadError {
     #[error("selected SOX path is not a directory: {}", path.display())]
-    InvalidSoxDirectory { path: PathBuf },
+    InvalidSOXDirectory { path: PathBuf },
 
     #[error("no usable core catalogs were loaded")]
     NoUsableCatalogs { issues: Vec<CatalogIssue> },

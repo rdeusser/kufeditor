@@ -1,27 +1,27 @@
 use kufeditor_formats::{
-    FormatError, SkillDocument, SkillTextField, TextSoxDocument, TroopDocument, TroopField,
+    FormatError, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument, TroopField,
 };
 
 use crate::WorkspaceError;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct DocumentId(pub(crate) u64);
+pub struct DocumentID(pub(crate) u64);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct StateId(pub(crate) u64);
+pub struct StateID(pub(crate) u64);
 
 #[derive(Clone, Debug)]
 pub enum Document {
     Troop(TroopDocument),
     Skill(SkillDocument),
-    TextSox(TextSoxDocument),
+    TextSOX(TextSOXDocument),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentKind {
     TroopInfo,
     SkillInfo,
-    TextSox,
+    TextSOX,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,7 +31,7 @@ pub enum DocumentEdit {
         field: TroopField,
         value: i32,
     },
-    SetSkillId {
+    SetSkillID {
         record: usize,
         value: i32,
     },
@@ -48,7 +48,7 @@ pub enum DocumentEdit {
         field: SkillTextField,
         value: String,
     },
-    SetTextSoxText {
+    SetTextSOXText {
         record: usize,
         value: String,
     },
@@ -59,13 +59,13 @@ impl Document {
         match self {
             Self::Troop(_) => DocumentKind::TroopInfo,
             Self::Skill(_) => DocumentKind::SkillInfo,
-            Self::TextSox(_) => DocumentKind::TextSox,
+            Self::TextSOX(_) => DocumentKind::TextSOX,
         }
     }
 
     pub(crate) fn apply(
         &mut self,
-        id: DocumentId,
+        id: DocumentID,
         edit: DocumentEdit,
     ) -> Result<DocumentEdit, WorkspaceError> {
         match (self, edit) {
@@ -84,9 +84,9 @@ impl Document {
                     value: previous,
                 })
             }
-            (Self::Skill(document), DocumentEdit::SetSkillId { record, value }) => {
+            (Self::Skill(document), DocumentEdit::SetSkillID { record, value }) => {
                 let previous = document.set_skill_id(record, value)?;
-                Ok(DocumentEdit::SetSkillId {
+                Ok(DocumentEdit::SetSkillID {
                     record,
                     value: previous,
                 })
@@ -120,9 +120,9 @@ impl Document {
                     value: previous,
                 })
             }
-            (Self::TextSox(document), DocumentEdit::SetTextSoxText { record, value }) => {
+            (Self::TextSOX(document), DocumentEdit::SetTextSOXText { record, value }) => {
                 let previous = document.set_text(record, value)?;
-                Ok(DocumentEdit::SetTextSoxText {
+                Ok(DocumentEdit::SetTextSOXText {
                     record,
                     value: previous,
                 })
@@ -130,12 +130,12 @@ impl Document {
             (_, DocumentEdit::SetTroopField { .. }) => Err(WorkspaceError::NotTroop(id)),
             (
                 _,
-                DocumentEdit::SetSkillId { .. }
+                DocumentEdit::SetSkillID { .. }
                 | DocumentEdit::SetSkillType { .. }
                 | DocumentEdit::SetSkillMaxLevel { .. }
                 | DocumentEdit::SetSkillText { .. },
             ) => Err(WorkspaceError::NotSkill(id)),
-            (_, DocumentEdit::SetTextSoxText { .. }) => Err(WorkspaceError::NotTextSox(id)),
+            (_, DocumentEdit::SetTextSOXText { .. }) => Err(WorkspaceError::NotTextSOX(id)),
         }
     }
 
@@ -143,7 +143,7 @@ impl Document {
         match self {
             Self::Troop(document) => document.encode(),
             Self::Skill(document) => document.encode(),
-            Self::TextSox(document) => document.encode(),
+            Self::TextSOX(document) => document.encode(),
         }
     }
 
@@ -155,8 +155,8 @@ impl Document {
         match (self, saved) {
             (Self::Troop(document), Self::Troop(saved)) => document.rebase_source(saved, bytes),
             (Self::Skill(document), Self::Skill(saved)) => document.rebase_source(saved, bytes),
-            (Self::TextSox(document), Self::TextSox(saved)) => document.rebase_source(saved, bytes),
-            _ => Err(FormatError::InconsistentSoxRebase),
+            (Self::TextSOX(document), Self::TextSOX(saved)) => document.rebase_source(saved, bytes),
+            _ => Err(FormatError::InconsistentSOXRebase),
         }
     }
 }

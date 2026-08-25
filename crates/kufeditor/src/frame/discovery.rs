@@ -14,7 +14,7 @@ use kufeditor_game::{
 use super::{AppFrame, discovery_status::DiscoveryKey};
 use crate::{
     notices::{Notice, NoticeLevel, NoticeSource},
-    state::RequestId,
+    state::RequestID,
 };
 
 pub(crate) fn game_folder_prompt_options() -> PathPromptOptions {
@@ -114,7 +114,7 @@ impl AppFrame {
         .detach();
     }
 
-    fn begin_browse_request(&mut self, game: Game) -> RequestId {
+    fn begin_browse_request(&mut self, game: Game) -> RequestID {
         let request = self.shell.begin_browse(game);
         self.notices.begin(
             NoticeSource::Browse(game),
@@ -127,7 +127,7 @@ impl AppFrame {
     fn finish_browse_prompt(
         &mut self,
         game: Game,
-        request: RequestId,
+        request: RequestID,
         result: BrowsePromptResult,
         cx: &mut Context<Self>,
     ) -> Result<(), SelectedRootError> {
@@ -184,7 +184,7 @@ impl AppFrame {
     fn finish_browse_inspection(
         &mut self,
         game: Game,
-        request: RequestId,
+        request: RequestID,
         result: Result<GameInstallation, SelectedRootError>,
         cx: &mut Context<Self>,
     ) {
@@ -507,7 +507,7 @@ mod tests {
         })
     }
 
-    fn begin_browse(frame: &mut AppFrame, game: Game) -> crate::state::RequestId {
+    fn begin_browse(frame: &mut AppFrame, game: Game) -> crate::state::RequestID {
         frame.begin_browse_request(game)
     }
 

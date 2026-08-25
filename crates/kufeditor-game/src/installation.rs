@@ -80,13 +80,13 @@ impl GameInstallation {
         let sox_path = root.join("Data/SOX");
         match metadata(&sox_path) {
             Ok(value) if value.is_dir() => Ok(Self { game, root }),
-            Ok(_) => Err(InstallationError::SoxNotDirectory {
+            Ok(_) => Err(InstallationError::SOXNotDirectory {
                 game,
                 root,
                 sox_path,
             }),
             Err(source) if source.kind() == ErrorKind::NotFound => {
-                Err(InstallationError::SoxMissing {
+                Err(InstallationError::SOXMissing {
                     game,
                     root,
                     sox_path,
@@ -111,14 +111,14 @@ pub enum InstallationError {
     RootNotDirectory { game: Game, root: PathBuf },
 
     #[error("the {game} SOX directory does not exist: {}", sox_path.display())]
-    SoxMissing {
+    SOXMissing {
         game: Game,
         root: PathBuf,
         sox_path: PathBuf,
     },
 
     #[error("the {game} SOX path is not a directory: {}", sox_path.display())]
-    SoxNotDirectory {
+    SOXNotDirectory {
         game: Game,
         root: PathBuf,
         sox_path: PathBuf,

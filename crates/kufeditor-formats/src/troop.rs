@@ -2,7 +2,7 @@ use crate::{
     diagnostic::{Diagnostic, DiagnosticField, Severity},
     error::FormatError,
     generated::sox_troop_info::{self, File, TroopInfoRecord},
-    sox::SoxSource,
+    sox::SOXSource,
 };
 
 const SOX_HEADER_SIZE: usize = 8;
@@ -80,7 +80,7 @@ impl TroopGroup {
 
 troop_fields! {
     Job => (job, "Job", Identity),
-    TypeId => (type_id, "Type ID", Identity),
+    TypeID => (type_id, "Type ID", Identity),
     MoveSpeed => (move_speed, "Move Speed", Movement),
     RotateRate => (rotate_rate, "Rotate Rate", Movement),
     MoveAcceleration => (move_acceleration, "Acceleration", Movement),
@@ -108,16 +108,16 @@ troop_fields! {
         "Maximum Unit Speed Multiplier",
         Movement
     ),
-    DefaultUnitHp => (default_unit_hp, "Default Unit HP", Formation),
+    DefaultUnitHP => (default_unit_hp, "Default Unit HP", Formation),
     FormationRandom => (formation_random, "Formation Randomness", Formation),
     DefaultUnitNumX => (default_unit_num_x, "Units Wide", Formation),
     DefaultUnitNumY => (default_unit_num_y, "Units Deep", Formation),
-    UnitHpLevelUp => (unit_hp_level_up, "HP per Level", Leveling),
-    LevelUp0SkillId => (level_up_0_skill_id, "Level Skill 1", Leveling),
+    UnitHPLevelUp => (unit_hp_level_up, "HP per Level", Leveling),
+    LevelUp0SkillID => (level_up_0_skill_id, "Level Skill 1", Leveling),
     LevelUp0Bonus => (level_up_0_bonus, "Level Skill 1 Bonus", Leveling),
-    LevelUp1SkillId => (level_up_1_skill_id, "Level Skill 2", Leveling),
+    LevelUp1SkillID => (level_up_1_skill_id, "Level Skill 2", Leveling),
     LevelUp1Bonus => (level_up_1_bonus, "Level Skill 2 Bonus", Leveling),
-    LevelUp2SkillId => (level_up_2_skill_id, "Level Skill 3", Leveling),
+    LevelUp2SkillID => (level_up_2_skill_id, "Level Skill 3", Leveling),
     LevelUp2Bonus => (level_up_2_bonus, "Level Skill 3 Bonus", Leveling),
     DamageDistribution => (damage_distribution, "Damage Distribution", Combat),
 }
@@ -137,7 +137,7 @@ const RESISTANCE_FIELDS: [TroopField; 10] = [
 
 #[derive(Clone, Debug)]
 pub struct TroopDocument {
-    source: SoxSource,
+    source: SOXSource,
     source_file: File,
     file: File,
     trailing_bytes: Vec<u8>,
@@ -145,10 +145,10 @@ pub struct TroopDocument {
 
 impl TroopDocument {
     pub fn parse(bytes: Vec<u8>) -> Result<Self, FormatError> {
-        Self::from_source(SoxSource::parse(bytes)?)
+        Self::from_source(SOXSource::parse(bytes)?)
     }
 
-    pub(crate) fn from_source(source: SoxSource) -> Result<Self, FormatError> {
+    pub(crate) fn from_source(source: SOXSource) -> Result<Self, FormatError> {
         let decoded = source.decoded();
         preflight_record_count(decoded)?;
         let mut offset = 0;
@@ -206,7 +206,7 @@ impl TroopDocument {
                 diagnostics.push(Diagnostic {
                     severity: Severity::Error,
                     record: record_index,
-                    field: DiagnosticField::Troop(TroopField::DefaultUnitHp),
+                    field: DiagnosticField::Troop(TroopField::DefaultUnitHP),
                     message: "Default unit HP must be greater than zero",
                 });
             }
@@ -230,7 +230,7 @@ impl TroopDocument {
 
     pub fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) -> Result<(), FormatError> {
         if bytes != saved.encode()? {
-            return Err(FormatError::InconsistentSoxRebase);
+            return Err(FormatError::InconsistentSOXRebase);
         }
         self.source.rebase(&saved.source, bytes)?;
         self.source_file = saved.file.clone();

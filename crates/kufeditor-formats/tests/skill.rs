@@ -353,7 +353,7 @@ fn invalid_utf8_stays_unchanged_when_another_field_is_edited() {
         .unwrap_err();
     assert!(matches!(
         projection_error,
-        FormatError::SkillUtf8 {
+        FormatError::SkillUTF8 {
             record: 0,
             field: SkillTextField::LocalizationKey,
             ..
@@ -365,7 +365,7 @@ fn invalid_utf8_stays_unchanged_when_another_field_is_edited() {
         .unwrap_err();
     assert!(matches!(
         replacement_error,
-        FormatError::SkillUtf8 {
+        FormatError::SkillUTF8 {
             record: 0,
             field: SkillTextField::LocalizationKey,
             ..
@@ -454,7 +454,7 @@ fn record_range_errors_include_the_requested_field() {
         FormatError::RecordOutOfRange {
             record: 1,
             record_count: 1,
-            field: DiagnosticField::Skill(SkillField::SkillId),
+            field: DiagnosticField::Skill(SkillField::SkillID),
         }
     ));
 

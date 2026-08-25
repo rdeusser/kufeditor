@@ -3,7 +3,7 @@
     reason = "synthetic fixtures use lengths that fit their wire fields"
 )]
 
-use kufeditor_formats::{FormatError, SoxDocument, parse_sox};
+use kufeditor_formats::{FormatError, SOXDocument, parse_sox};
 
 fn troop_fixture() -> Vec<u8> {
     let mut bytes = vec![0_u8; 8 + 148 + 64];
@@ -68,42 +68,42 @@ fn ascii_hex(bytes: &[u8]) -> Vec<u8> {
 fn detects_raw_troop_info() {
     let document = parse_sox(troop_fixture()).unwrap();
 
-    assert!(matches!(document, SoxDocument::Troop(_)));
+    assert!(matches!(document, SOXDocument::Troop(_)));
 }
 
 #[test]
 fn detects_ascii_hex_troop_info() {
     let document = parse_sox(ascii_hex(&troop_fixture())).unwrap();
 
-    assert!(matches!(document, SoxDocument::Troop(_)));
+    assert!(matches!(document, SOXDocument::Troop(_)));
 }
 
 #[test]
 fn detects_raw_skill_info() {
     let document = parse_sox(skill_fixture()).unwrap();
 
-    assert!(matches!(document, SoxDocument::Skill(_)));
+    assert!(matches!(document, SOXDocument::Skill(_)));
 }
 
 #[test]
 fn detects_ascii_hex_skill_info() {
     let document = parse_sox(ascii_hex(&skill_fixture())).unwrap();
 
-    assert!(matches!(document, SoxDocument::Skill(_)));
+    assert!(matches!(document, SOXDocument::Skill(_)));
 }
 
 #[test]
 fn detects_raw_text_sox() {
     let document = parse_sox(text_fixture()).unwrap();
 
-    assert!(matches!(document, SoxDocument::Text(_)));
+    assert!(matches!(document, SOXDocument::Text(_)));
 }
 
 #[test]
 fn detects_ascii_hex_text_sox() {
     let document = parse_sox(ascii_hex(&text_fixture())).unwrap();
 
-    assert!(matches!(document, SoxDocument::Text(_)));
+    assert!(matches!(document, SOXDocument::Text(_)));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn rejects_a_sox_marker_without_a_supported_body() {
 
     let error = parse_sox(bytes).unwrap_err();
 
-    assert!(matches!(error, FormatError::UnsupportedSox));
+    assert!(matches!(error, FormatError::UnsupportedSOX));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn rejects_text_shaped_payload_with_a_nul_byte() {
 
     let error = parse_sox(bytes).unwrap_err();
 
-    assert!(matches!(error, FormatError::UnsupportedSox));
+    assert!(matches!(error, FormatError::UnsupportedSOX));
 }
 
 #[test]
@@ -137,6 +137,6 @@ fn malformed_ascii_hex_candidate_keeps_the_encoding_error() {
 
     assert!(matches!(
         error,
-        FormatError::InvalidAsciiHexByte { index: 16 }
+        FormatError::InvalidASCIIHexByte { index: 16 }
     ));
 }

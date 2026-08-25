@@ -1,27 +1,27 @@
 use std::collections::HashMap;
 
 use kufeditor_game::Game;
-use kufeditor_workspace::DocumentId;
+use kufeditor_workspace::DocumentID;
 
 #[derive(Debug, Default)]
 pub struct RecordSelections {
-    records: HashMap<DocumentId, usize>,
+    records: HashMap<DocumentID, usize>,
 }
 
 impl RecordSelections {
-    pub fn selected(&self, document: DocumentId) -> usize {
+    pub fn selected(&self, document: DocumentID) -> usize {
         self.records.get(&document).copied().unwrap_or(0)
     }
 
-    pub fn select(&mut self, document: DocumentId, record: usize) {
+    pub fn select(&mut self, document: DocumentID, record: usize) {
         self.records.insert(document, record);
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RequestId(u64);
+pub struct RequestID(u64);
 
-impl RequestId {
+impl RequestID {
     pub const fn get(self) -> u64 {
         self.0
     }
@@ -95,11 +95,11 @@ pub struct ShellState {
     area: Area,
     game: Game,
     next_request_id: u64,
-    active_open_request: Option<RequestId>,
-    active_catalog_request: Option<RequestId>,
-    active_crusaders_browse_request: Option<RequestId>,
-    active_heroes_browse_request: Option<RequestId>,
-    active_discovery_request: Option<RequestId>,
+    active_open_request: Option<RequestID>,
+    active_catalog_request: Option<RequestID>,
+    active_crusaders_browse_request: Option<RequestID>,
+    active_heroes_browse_request: Option<RequestID>,
+    active_discovery_request: Option<RequestID>,
 }
 
 impl ShellState {
@@ -126,25 +126,25 @@ impl ShellState {
         self.game = game;
     }
 
-    pub fn begin_open(&mut self) -> RequestId {
+    pub fn begin_open(&mut self) -> RequestID {
         self.next_request_id += 1;
-        let request = RequestId(self.next_request_id);
+        let request = RequestID(self.next_request_id);
         self.active_open_request = Some(request);
         request
     }
 
-    pub fn accepts_open(&self, request: RequestId) -> bool {
+    pub fn accepts_open(&self, request: RequestID) -> bool {
         self.active_open_request == Some(request)
     }
 
-    pub fn begin_catalog(&mut self) -> RequestId {
+    pub fn begin_catalog(&mut self) -> RequestID {
         self.next_request_id += 1;
-        let request = RequestId(self.next_request_id);
+        let request = RequestID(self.next_request_id);
         self.active_catalog_request = Some(request);
         request
     }
 
-    pub fn accepts_catalog(&self, request: RequestId) -> bool {
+    pub fn accepts_catalog(&self, request: RequestID) -> bool {
         self.active_catalog_request == Some(request)
     }
 
@@ -152,9 +152,9 @@ impl ShellState {
         self.active_catalog_request = None;
     }
 
-    pub fn begin_browse(&mut self, game: Game) -> RequestId {
+    pub fn begin_browse(&mut self, game: Game) -> RequestID {
         self.next_request_id += 1;
-        let request = RequestId(self.next_request_id);
+        let request = RequestID(self.next_request_id);
         match game {
             Game::Crusaders => self.active_crusaders_browse_request = Some(request),
             Game::Heroes => self.active_heroes_browse_request = Some(request),
@@ -162,7 +162,7 @@ impl ShellState {
         request
     }
 
-    pub fn accepts_browse(&self, game: Game, request: RequestId) -> bool {
+    pub fn accepts_browse(&self, game: Game, request: RequestID) -> bool {
         (match game {
             Game::Crusaders => self.active_crusaders_browse_request,
             Game::Heroes => self.active_heroes_browse_request,
@@ -176,14 +176,14 @@ impl ShellState {
         }
     }
 
-    pub fn begin_discovery(&mut self) -> RequestId {
+    pub fn begin_discovery(&mut self) -> RequestID {
         self.next_request_id += 1;
-        let request = RequestId(self.next_request_id);
+        let request = RequestID(self.next_request_id);
         self.active_discovery_request = Some(request);
         request
     }
 
-    pub fn accepts_discovery(&self, request: RequestId) -> bool {
+    pub fn accepts_discovery(&self, request: RequestID) -> bool {
         self.active_discovery_request == Some(request)
     }
 

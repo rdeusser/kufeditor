@@ -4,9 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use kufeditor_formats::{SoxDocument, parse_sox};
+use kufeditor_formats::{SOXDocument, parse_sox};
 
-use crate::{Document, DocumentId, StateId, WorkspaceError};
+use crate::{Document, DocumentID, StateID, WorkspaceError};
 
 #[derive(Debug)]
 pub struct LoadedDocument {
@@ -33,15 +33,15 @@ pub struct SaveToken(pub(crate) u64);
 
 #[derive(Debug)]
 pub struct SaveRequest {
-    pub(crate) document_id: DocumentId,
+    pub(crate) document_id: DocumentID,
     pub(crate) token: SaveToken,
     pub(crate) path: PathBuf,
-    pub(crate) state: StateId,
+    pub(crate) state: StateID,
     pub(crate) snapshot: Document,
 }
 
 impl SaveRequest {
-    pub fn document_id(&self) -> DocumentId {
+    pub fn document_id(&self) -> DocumentID {
         self.document_id
     }
 
@@ -96,10 +96,10 @@ impl SaveRequest {
 
 #[derive(Debug)]
 pub struct SavedDocument {
-    pub(crate) document_id: DocumentId,
+    pub(crate) document_id: DocumentID,
     pub(crate) token: SaveToken,
     pub(crate) path: PathBuf,
-    pub(crate) state: StateId,
+    pub(crate) state: StateID,
     pub(crate) snapshot: Document,
     pub(crate) bytes: Vec<u8>,
 }
@@ -122,9 +122,9 @@ pub fn load_path(path: PathBuf) -> Result<LoadedDocument, WorkspaceError> {
         source,
     })?;
     let document = match document {
-        SoxDocument::Troop(document) => Document::Troop(document),
-        SoxDocument::Skill(document) => Document::Skill(document),
-        SoxDocument::Text(document) => Document::TextSox(document),
+        SOXDocument::Troop(document) => Document::Troop(document),
+        SOXDocument::Skill(document) => Document::Skill(document),
+        SOXDocument::Text(document) => Document::TextSOX(document),
     };
     Ok(LoadedDocument { path, document })
 }

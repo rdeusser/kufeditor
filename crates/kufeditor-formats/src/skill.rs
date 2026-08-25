@@ -2,7 +2,7 @@ use crate::{
     diagnostic::{Diagnostic, DiagnosticField, Severity},
     error::FormatError,
     generated::sox_skill_info::{self, File, SkillInfoRecord},
-    sox::SoxSource,
+    sox::SOXSource,
 };
 
 const SOX_HEADER_SIZE: usize = 8;
@@ -11,7 +11,7 @@ const MIN_SKILL_RECORD_SIZE: usize = 4 + 2 + 2 + 4 + 4;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SkillField {
-    SkillId,
+    SkillID,
     LocalizationKey,
     IconPath,
     SkillType,
@@ -21,7 +21,7 @@ pub enum SkillField {
 impl SkillField {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::SkillId => "Skill ID",
+            Self::SkillID => "Skill ID",
             Self::LocalizationKey => "Localization Key",
             Self::IconPath => "Icon Path",
             Self::SkillType => "Skill Type",
@@ -71,7 +71,7 @@ impl std::fmt::Display for SkillTextField {
 
 #[derive(Clone, Debug)]
 pub struct SkillDocument {
-    source: SoxSource,
+    source: SOXSource,
     source_file: File,
     file: File,
     trailing_bytes: Vec<u8>,
@@ -79,10 +79,10 @@ pub struct SkillDocument {
 
 impl SkillDocument {
     pub fn parse(bytes: Vec<u8>) -> Result<Self, FormatError> {
-        Self::from_source(SoxSource::parse(bytes)?)
+        Self::from_source(SOXSource::parse(bytes)?)
     }
 
-    pub(crate) fn from_source(source: SoxSource) -> Result<Self, FormatError> {
+    pub(crate) fn from_source(source: SOXSource) -> Result<Self, FormatError> {
         let decoded = source.decoded();
         preflight_record_count(decoded)?;
         let mut offset = 0;
@@ -107,12 +107,12 @@ impl SkillDocument {
     }
 
     pub fn skill_id(&self, record: usize) -> Result<i32, FormatError> {
-        self.record(record, SkillField::SkillId)
+        self.record(record, SkillField::SkillID)
             .map(|record| record.skill_id)
     }
 
     pub fn set_skill_id(&mut self, record: usize, value: i32) -> Result<i32, FormatError> {
-        self.record_mut(record, SkillField::SkillId)
+        self.record_mut(record, SkillField::SkillID)
             .map(|record| std::mem::replace(&mut record.skill_id, value))
     }
 
@@ -138,7 +138,7 @@ impl SkillDocument {
 
     pub fn text(&self, record: usize, field: SkillTextField) -> Result<&str, FormatError> {
         let value = field.read(self.record(record, field.as_field())?);
-        std::str::from_utf8(value).map_err(|source| FormatError::SkillUtf8 {
+        std::str::from_utf8(value).map_err(|source| FormatError::SkillUTF8 {
             record,
             field,
             source,
@@ -153,7 +153,7 @@ impl SkillDocument {
     ) -> Result<String, FormatError> {
         let record_value = self.record_mut(record, field.as_field())?;
         let previous = std::str::from_utf8(field.read(record_value))
-            .map_err(|source| FormatError::SkillUtf8 {
+            .map_err(|source| FormatError::SkillUTF8 {
                 record,
                 field,
                 source,
@@ -217,7 +217,7 @@ impl SkillDocument {
 
     pub fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) -> Result<(), FormatError> {
         if bytes != saved.encode()? {
-            return Err(FormatError::InconsistentSoxRebase);
+            return Err(FormatError::InconsistentSOXRebase);
         }
         self.source.rebase(&saved.source, bytes)?;
         self.source_file = saved.file.clone();

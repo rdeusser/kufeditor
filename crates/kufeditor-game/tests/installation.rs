@@ -84,7 +84,7 @@ fn installation_inspection_reports_missing_sox_directory() {
     let error = GameInstallation::inspect(Game::Crusaders, &root).unwrap_err();
 
     match error {
-        InstallationError::SoxMissing {
+        InstallationError::SOXMissing {
             game: Game::Crusaders,
             root: actual_root,
             sox_path,
@@ -92,7 +92,7 @@ fn installation_inspection_reports_missing_sox_directory() {
             assert_eq!(actual_root, root);
             assert_eq!(sox_path, expected_sox);
         }
-        other => panic!("expected SoxMissing, got {other:?}"),
+        other => panic!("expected SOXMissing, got {other:?}"),
     }
 }
 
@@ -107,7 +107,7 @@ fn installation_inspection_reports_file_sox_path() {
     let error = GameInstallation::inspect(Game::Heroes, &root).unwrap_err();
 
     match error {
-        InstallationError::SoxNotDirectory {
+        InstallationError::SOXNotDirectory {
             game: Game::Heroes,
             root: actual_root,
             sox_path,
@@ -115,7 +115,7 @@ fn installation_inspection_reports_file_sox_path() {
             assert_eq!(actual_root, root);
             assert_eq!(sox_path, sox);
         }
-        other => panic!("expected SoxNotDirectory, got {other:?}"),
+        other => panic!("expected SOXNotDirectory, got {other:?}"),
     }
 }
 

@@ -6,11 +6,11 @@ use std::{
 
 use kufeditor_game::{CatalogLoadError, Game, InstallationError};
 
-use crate::state::RequestId;
+use crate::state::RequestID;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CatalogKey {
-    request: RequestId,
+    request: RequestID,
     game: Game,
     root: PathBuf,
 }
@@ -40,7 +40,7 @@ pub(crate) struct CatalogSession<T, E> {
 }
 
 impl CatalogKey {
-    pub(crate) fn new(request: RequestId, game: Game, root: impl Into<PathBuf>) -> Self {
+    pub(crate) fn new(request: RequestID, game: Game, root: impl Into<PathBuf>) -> Self {
         Self {
             request,
             game,
@@ -48,7 +48,7 @@ impl CatalogKey {
         }
     }
 
-    pub(crate) const fn request(&self) -> RequestId {
+    pub(crate) const fn request(&self) -> RequestID {
         self.request
     }
 

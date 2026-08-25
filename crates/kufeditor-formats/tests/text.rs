@@ -4,7 +4,7 @@
 )]
 
 use kufeditor_formats::{
-    DiagnosticField, FormatError, Severity, TextSoxDocument, TextSoxField, TextSoxParseError,
+    DiagnosticField, FormatError, Severity, TextSOXDocument, TextSOXField, TextSOXParseError,
 };
 
 fn text_fixture(records: &[(u32, &[u8])], tail: &[u8]) -> Vec<u8> {
@@ -39,16 +39,16 @@ fn ascii_hex(bytes: &[u8], mixed_case: bool) -> Vec<u8> {
     encoded
 }
 
-fn parse_error(bytes: Vec<u8>) -> (usize, TextSoxParseError) {
-    match TextSoxDocument::parse(bytes).unwrap_err() {
-        FormatError::TextSoxParse { offset, source } => (offset, source),
+fn parse_error(bytes: Vec<u8>) -> (usize, TextSOXParseError) {
+    match TextSOXDocument::parse(bytes).unwrap_err() {
+        FormatError::TextSOXParse { offset, source } => (offset, source),
         error => panic!("expected text SOX parse error, got {error:?}"),
     }
 }
 
 #[test]
 fn parses_a_record_with_its_stored_index_and_initial_byte_budget() {
-    let document = TextSoxDocument::parse(text_fixture(&[(42, b"Hello")], b"TAIL")).unwrap();
+    let document = TextSOXDocument::parse(text_fixture(&[(42, b"Hello")], b"TAIL")).unwrap();
 
     assert_eq!(document.record_count(), 1);
     assert_eq!(document.record_index(0).unwrap(), 42);
@@ -58,7 +58,7 @@ fn parses_a_record_with_its_stored_index_and_initial_byte_budget() {
 
 #[test]
 fn preserves_sparse_out_of_order_stored_indices() {
-    let document = TextSoxDocument::parse(text_fixture(
+    let document = TextSOXDocument::parse(text_fixture(
         &[(900, b"Alpha"), (2, b"Beta"), (50_000, b"Gamma")],
         b"",
     ))
@@ -72,7 +72,7 @@ fn preserves_sparse_out_of_order_stored_indices() {
 #[test]
 fn unchanged_raw_document_encodes_to_the_exact_original_bytes_including_the_tail() {
     let source = text_fixture(&[(4, b"Alpha"), (9, b"Beta")], &[0xde, 0xad, 0xbe, 0xef]);
-    let document = TextSoxDocument::parse(source.clone()).unwrap();
+    let document = TextSOXDocument::parse(source.clone()).unwrap();
 
     assert_eq!(document.encode().unwrap(), source);
 }
@@ -81,7 +81,7 @@ fn unchanged_raw_document_encodes_to_the_exact_original_bytes_including_the_tail
 fn unchanged_mixed_case_ascii_hex_document_encodes_to_the_exact_original_bytes() {
     let raw = text_fixture(&[(12, b"Alpha")], b"TAIL");
     let source = ascii_hex(&raw, true);
-    let document = TextSoxDocument::parse(source.clone()).unwrap();
+    let document = TextSOXDocument::parse(source.clone()).unwrap();
 
     assert!(source.iter().any(u8::is_ascii_lowercase));
     assert_eq!(document.encode().unwrap(), source);
@@ -97,7 +97,7 @@ fn rejects_a_marker_other_than_100() {
 
     assert_eq!(
         parse_error(source),
-        (0, TextSoxParseError::InvalidMarker { marker: 99 })
+        (0, TextSOXParseError::InvalidMarker { marker: 99 })
     );
 }
 
@@ -112,11 +112,11 @@ fn rejects_zero_and_excessive_record_counts() {
 
     assert_eq!(
         parse_error(zero),
-        (4, TextSoxParseError::InvalidRecordCount { count: 0 })
+        (4, TextSOXParseError::InvalidRecordCount { count: 0 })
     );
     assert_eq!(
         parse_error(excessive),
-        (4, TextSoxParseError::InvalidRecordCount { count: 10_001 })
+        (4, TextSOXParseError::InvalidRecordCount { count: 10_001 })
     );
 }
 
@@ -132,7 +132,7 @@ fn rejects_an_impossible_record_count_before_allocating_record_storage() {
         parse_error(source),
         (
             8,
-            TextSoxParseError::ImpossibleRecordCount {
+            TextSOXParseError::ImpossibleRecordCount {
                 count: 10_000,
                 maximum: 0,
             },
@@ -144,7 +144,7 @@ fn rejects_an_impossible_record_count_before_allocating_record_storage() {
 fn rejects_a_short_header() {
     assert_eq!(
         parse_error(vec![100, 0, 0]),
-        (3, TextSoxParseError::TruncatedHeader { actual: 3 })
+        (3, TextSOXParseError::TruncatedHeader { actual: 3 })
     );
 }
 
@@ -161,7 +161,7 @@ fn rejects_a_truncated_record_header() {
         parse_error(source),
         (
             8,
-            TextSoxParseError::TruncatedRecordHeader {
+            TextSOXParseError::TruncatedRecordHeader {
                 record: 0,
                 remaining: 5,
             },
@@ -173,7 +173,7 @@ fn rejects_a_truncated_record_header() {
 fn rejects_empty_text() {
     assert_eq!(
         parse_error(text_fixture(&[(1, b"")], b"")),
-        (14, TextSoxParseError::EmptyText { record: 0 })
+        (14, TextSOXParseError::EmptyText { record: 0 })
     );
 }
 
@@ -192,7 +192,7 @@ fn rejects_a_truncated_text_payload() {
         parse_error(source),
         (
             14,
-            TextSoxParseError::TruncatedText {
+            TextSOXParseError::TruncatedText {
                 record: 0,
                 length: 5,
                 remaining: 4,
@@ -207,7 +207,7 @@ fn rejects_a_text_byte_outside_the_supported_ascii_set() {
         parse_error(text_fixture(&[(1, b"A\x1fB")], b"")),
         (
             15,
-            TextSoxParseError::InvalidTextByte {
+            TextSOXParseError::InvalidTextByte {
                 record: 0,
                 index: 1,
                 byte: 0x1f,
@@ -219,7 +219,7 @@ fn rejects_a_text_byte_outside_the_supported_ascii_set() {
 #[test]
 fn edits_within_the_original_byte_budget_and_preserves_indices_and_tail() {
     let source = text_fixture(&[(900, b"Alpha"), (2, b"Bravo")], b"TAIL");
-    let mut document = TextSoxDocument::parse(source).unwrap();
+    let mut document = TextSOXDocument::parse(source).unwrap();
 
     assert_eq!(document.set_text(0, "A".to_owned()).unwrap(), "Alpha");
     assert_eq!(document.set_text(1, "12345".to_owned()).unwrap(), "Bravo");
@@ -229,7 +229,7 @@ fn edits_within_the_original_byte_budget_and_preserves_indices_and_tail() {
         encoded,
         text_fixture(&[(900, b"A"), (2, b"12345")], b"TAIL")
     );
-    let reparsed = TextSoxDocument::parse(encoded).unwrap();
+    let reparsed = TextSOXDocument::parse(encoded).unwrap();
     assert_eq!(reparsed.record_index(0).unwrap(), 900);
     assert_eq!(reparsed.record_index(1).unwrap(), 2);
     assert_eq!(reparsed.text(0).unwrap(), "A");
@@ -239,7 +239,7 @@ fn edits_within_the_original_byte_budget_and_preserves_indices_and_tail() {
 #[test]
 fn edited_ascii_hex_document_uses_uppercase_hexadecimal_and_reparses() {
     let raw = text_fixture(&[(0, b"Alpha")], b"TAIL");
-    let mut document = TextSoxDocument::parse(ascii_hex(&raw, true)).unwrap();
+    let mut document = TextSOXDocument::parse(ascii_hex(&raw, true)).unwrap();
 
     document.set_text(0, "Bravo".to_owned()).unwrap();
     let encoded = document.encode().unwrap();
@@ -250,7 +250,7 @@ fn edited_ascii_hex_document_uses_uppercase_hexadecimal_and_reparses() {
     );
     assert!(encoded.iter().all(|byte| !byte.is_ascii_lowercase()));
     assert_eq!(
-        TextSoxDocument::parse(encoded).unwrap().text(0).unwrap(),
+        TextSOXDocument::parse(encoded).unwrap().text(0).unwrap(),
         "Bravo"
     );
 }
@@ -258,15 +258,15 @@ fn edited_ascii_hex_document_uses_uppercase_hexadecimal_and_reparses() {
 #[test]
 fn rejects_invalid_edits_without_mutating_the_text_or_encoded_bytes() {
     let source = text_fixture(&[(0, b"Alpha")], b"TAIL");
-    let mut document = TextSoxDocument::parse(source.clone()).unwrap();
+    let mut document = TextSOXDocument::parse(source.clone()).unwrap();
 
     assert!(matches!(
         document.set_text(0, String::new()).unwrap_err(),
-        FormatError::TextSoxEmptyText { record: 0 }
+        FormatError::TextSOXEmptyText { record: 0 }
     ));
     assert!(matches!(
         document.set_text(0, "123456".to_owned()).unwrap_err(),
-        FormatError::TextSoxTooLong {
+        FormatError::TextSOXTooLong {
             record: 0,
             length: 6,
             maximum: 5,
@@ -274,7 +274,7 @@ fn rejects_invalid_edits_without_mutating_the_text_or_encoded_bytes() {
     ));
     assert!(matches!(
         document.set_text(0, "é".to_owned()).unwrap_err(),
-        FormatError::TextSoxInvalidTextByte {
+        FormatError::TextSOXInvalidTextByte {
             record: 0,
             index: 0,
             byte: 0xc3,
@@ -286,8 +286,8 @@ fn rejects_invalid_edits_without_mutating_the_text_or_encoded_bytes() {
 
 #[test]
 fn reports_duplicate_stored_indices_and_ignores_sparse_unique_indices() {
-    let duplicate = TextSoxDocument::parse(text_fixture(&[(4, b"A"), (4, b"B")], b"")).unwrap();
-    let unique = TextSoxDocument::parse(text_fixture(&[(4, b"A"), (99, b"B")], b"")).unwrap();
+    let duplicate = TextSOXDocument::parse(text_fixture(&[(4, b"A"), (4, b"B")], b"")).unwrap();
+    let unique = TextSOXDocument::parse(text_fixture(&[(4, b"A"), (99, b"B")], b"")).unwrap();
 
     assert_eq!(
         duplicate.diagnostics(),
@@ -295,13 +295,13 @@ fn reports_duplicate_stored_indices_and_ignores_sparse_unique_indices() {
             kufeditor_formats::Diagnostic {
                 severity: Severity::Warning,
                 record: 0,
-                field: DiagnosticField::TextSox(TextSoxField::Index),
+                field: DiagnosticField::TextSOX(TextSOXField::Index),
                 message: "Stored index is duplicated",
             },
             kufeditor_formats::Diagnostic {
                 severity: Severity::Warning,
                 record: 1,
-                field: DiagnosticField::TextSox(TextSoxField::Index),
+                field: DiagnosticField::TextSOX(TextSOXField::Index),
                 message: "Stored index is duplicated",
             },
         ]
@@ -311,14 +311,14 @@ fn reports_duplicate_stored_indices_and_ignores_sparse_unique_indices() {
 
 #[test]
 fn out_of_range_projections_name_the_text_sox_field() {
-    let document = TextSoxDocument::parse(text_fixture(&[(0, b"A")], b"")).unwrap();
+    let document = TextSOXDocument::parse(text_fixture(&[(0, b"A")], b"")).unwrap();
 
     assert!(matches!(
         document.record_index(1).unwrap_err(),
         FormatError::RecordOutOfRange {
             record: 1,
             record_count: 1,
-            field: DiagnosticField::TextSox(TextSoxField::Index),
+            field: DiagnosticField::TextSOX(TextSOXField::Index),
         }
     ));
     assert!(matches!(
@@ -326,7 +326,7 @@ fn out_of_range_projections_name_the_text_sox_field() {
         FormatError::RecordOutOfRange {
             record: 1,
             record_count: 1,
-            field: DiagnosticField::TextSox(TextSoxField::Text),
+            field: DiagnosticField::TextSOX(TextSOXField::Text),
         }
     ));
 }
@@ -334,15 +334,15 @@ fn out_of_range_projections_name_the_text_sox_field() {
 #[test]
 fn rebase_accepts_only_the_exact_saved_snapshot_and_retains_the_initial_budget() {
     let source = text_fixture(&[(7, b"abcdefgh")], b"TAIL");
-    let mut saved = TextSoxDocument::parse(source.clone()).unwrap();
+    let mut saved = TextSOXDocument::parse(source.clone()).unwrap();
     saved.set_text(0, "xyz".to_owned()).unwrap();
     let saved_bytes = saved.encode().unwrap();
-    let mut live = TextSoxDocument::parse(source).unwrap();
+    let mut live = TextSOXDocument::parse(source).unwrap();
 
     assert!(matches!(
         live.rebase_source(&saved, b"not the saved snapshot".to_vec())
             .unwrap_err(),
-        FormatError::InconsistentSoxRebase
+        FormatError::InconsistentSOXRebase
     ));
     assert_eq!(live.text(0).unwrap(), "abcdefgh");
 

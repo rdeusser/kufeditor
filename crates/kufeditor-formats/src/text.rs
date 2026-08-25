@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Diagnostic, DiagnosticField, FormatError, Severity, TextSoxParseError, sox::SoxSource,
+    Diagnostic, DiagnosticField, FormatError, Severity, TextSOXParseError, sox::SOXSource,
 };
 
 const HEADER_SIZE: usize = 8;
@@ -11,12 +11,12 @@ const MARKER: u32 = 100;
 const MAX_RECORD_COUNT: u32 = 10_000;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum TextSoxField {
+pub enum TextSOXField {
     Index,
     Text,
 }
 
-impl TextSoxField {
+impl TextSOXField {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Index => "Index",
@@ -26,32 +26,32 @@ impl TextSoxField {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct TextSoxRecord {
+struct TextSOXRecord {
     index: u32,
     text: String,
 }
 
 struct ParsedRecords {
-    records: Vec<TextSoxRecord>,
+    records: Vec<TextSOXRecord>,
     initial_budgets: Vec<u16>,
     source_tail: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
-pub struct TextSoxDocument {
-    source: SoxSource,
-    source_records: Vec<TextSoxRecord>,
-    records: Vec<TextSoxRecord>,
+pub struct TextSOXDocument {
+    source: SOXSource,
+    source_records: Vec<TextSOXRecord>,
+    records: Vec<TextSOXRecord>,
     source_tail: Vec<u8>,
     initial_budgets: Vec<u16>,
 }
 
-impl TextSoxDocument {
+impl TextSOXDocument {
     pub fn parse(bytes: Vec<u8>) -> Result<Self, FormatError> {
-        Self::from_source(SoxSource::parse(bytes)?)
+        Self::from_source(SOXSource::parse(bytes)?)
     }
 
-    pub(crate) fn from_source(source: SoxSource) -> Result<Self, FormatError> {
+    pub(crate) fn from_source(source: SOXSource) -> Result<Self, FormatError> {
         let ParsedRecords {
             records,
             initial_budgets,
@@ -71,7 +71,7 @@ impl TextSoxDocument {
     }
 
     pub fn record_index(&self, record: usize) -> Result<u32, FormatError> {
-        self.record(record, TextSoxField::Index)
+        self.record(record, TextSOXField::Index)
             .map(|record| record.index)
     }
 
@@ -79,18 +79,18 @@ impl TextSoxDocument {
         self.initial_budgets
             .get(record)
             .copied()
-            .ok_or_else(|| self.record_error(record, TextSoxField::Text))
+            .ok_or_else(|| self.record_error(record, TextSOXField::Text))
     }
 
     pub fn text(&self, record: usize) -> Result<&str, FormatError> {
-        self.record(record, TextSoxField::Text)
+        self.record(record, TextSOXField::Text)
             .map(|record| record.text.as_str())
     }
 
     pub fn set_text(&mut self, record: usize, value: String) -> Result<String, FormatError> {
         let maximum = self.max_length(record)?;
         validate_text(record, &value, maximum)?;
-        self.record_mut(record, TextSoxField::Text)
+        self.record_mut(record, TextSOXField::Text)
             .map(|record| std::mem::replace(&mut record.text, value))
     }
 
@@ -107,7 +107,7 @@ impl TextSoxDocument {
             .map(|(record, _)| Diagnostic {
                 severity: Severity::Warning,
                 record,
-                field: DiagnosticField::TextSox(TextSoxField::Index),
+                field: DiagnosticField::TextSOX(TextSOXField::Index),
                 message: "Stored index is duplicated",
             })
             .collect()
@@ -120,7 +120,7 @@ impl TextSoxDocument {
 
         let mut encoded = Vec::with_capacity(self.source.decoded().len());
         encoded.extend_from_slice(&MARKER.to_le_bytes());
-        let count = u32::try_from(self.records.len()).map_err(|_| FormatError::TextSoxTooLong {
+        let count = u32::try_from(self.records.len()).map_err(|_| FormatError::TextSOXTooLong {
             record: self.records.len(),
             length: self.records.len(),
             maximum: u16::MAX,
@@ -128,7 +128,7 @@ impl TextSoxDocument {
         encoded.extend_from_slice(&count.to_le_bytes());
         for (record_index, record) in self.records.iter().enumerate() {
             let length =
-                u16::try_from(record.text.len()).map_err(|_| FormatError::TextSoxTooLong {
+                u16::try_from(record.text.len()).map_err(|_| FormatError::TextSOXTooLong {
                     record: record_index,
                     length: record.text.len(),
                     maximum: u16::MAX,
@@ -143,7 +143,7 @@ impl TextSoxDocument {
 
     pub fn rebase_source(&mut self, saved: &Self, bytes: Vec<u8>) -> Result<(), FormatError> {
         if bytes != saved.encode()? {
-            return Err(FormatError::InconsistentSoxRebase);
+            return Err(FormatError::InconsistentSOXRebase);
         }
 
         self.source.rebase(&saved.source, bytes)?;
@@ -152,7 +152,7 @@ impl TextSoxDocument {
         Ok(())
     }
 
-    fn record(&self, record: usize, field: TextSoxField) -> Result<&TextSoxRecord, FormatError> {
+    fn record(&self, record: usize, field: TextSOXField) -> Result<&TextSOXRecord, FormatError> {
         self.records
             .get(record)
             .ok_or_else(|| self.record_error(record, field))
@@ -161,23 +161,23 @@ impl TextSoxDocument {
     fn record_mut(
         &mut self,
         record: usize,
-        field: TextSoxField,
-    ) -> Result<&mut TextSoxRecord, FormatError> {
+        field: TextSOXField,
+    ) -> Result<&mut TextSOXRecord, FormatError> {
         let record_count = self.records.len();
         self.records
             .get_mut(record)
             .ok_or(FormatError::RecordOutOfRange {
                 record,
                 record_count,
-                field: DiagnosticField::TextSox(field),
+                field: DiagnosticField::TextSOX(field),
             })
     }
 
-    fn record_error(&self, record: usize, field: TextSoxField) -> FormatError {
+    fn record_error(&self, record: usize, field: TextSOXField) -> FormatError {
         FormatError::RecordOutOfRange {
             record,
             record_count: self.records.len(),
-            field: DiagnosticField::TextSox(field),
+            field: DiagnosticField::TextSOX(field),
         }
     }
 }
@@ -209,7 +209,7 @@ fn parse_record_count(decoded: &[u8]) -> Result<u32, FormatError> {
     let header = decoded.get(..HEADER_SIZE).ok_or_else(|| {
         parse_error(
             decoded.len(),
-            TextSoxParseError::TruncatedHeader {
+            TextSOXParseError::TruncatedHeader {
                 actual: decoded.len(),
             },
         )
@@ -217,19 +217,19 @@ fn parse_record_count(decoded: &[u8]) -> Result<u32, FormatError> {
     let marker = read_u32(header.get(..4).ok_or_else(|| {
         parse_error(
             0,
-            TextSoxParseError::TruncatedHeader {
+            TextSOXParseError::TruncatedHeader {
                 actual: header.len(),
             },
         )
     })?);
     if marker != MARKER {
-        return Err(parse_error(0, TextSoxParseError::InvalidMarker { marker }));
+        return Err(parse_error(0, TextSOXParseError::InvalidMarker { marker }));
     }
 
     let count = read_u32(header.get(4..).ok_or_else(|| {
         parse_error(
             4,
-            TextSoxParseError::TruncatedHeader {
+            TextSOXParseError::TruncatedHeader {
                 actual: header.len(),
             },
         )
@@ -237,7 +237,7 @@ fn parse_record_count(decoded: &[u8]) -> Result<u32, FormatError> {
     if !(1..=MAX_RECORD_COUNT).contains(&count) {
         return Err(parse_error(
             4,
-            TextSoxParseError::InvalidRecordCount { count },
+            TextSOXParseError::InvalidRecordCount { count },
         ));
     }
     Ok(count)
@@ -251,7 +251,7 @@ fn preflight_record_count(decoded: &[u8], count: u32) -> Result<usize, FormatErr
             .ok_or_else(|| {
                 parse_error(
                     HEADER_SIZE,
-                    TextSoxParseError::TruncatedRecordHeader {
+                    TextSOXParseError::TruncatedRecordHeader {
                         record: 0,
                         remaining,
                     },
@@ -260,7 +260,7 @@ fn preflight_record_count(decoded: &[u8], count: u32) -> Result<usize, FormatErr
         if read_u16(header.get(4..).ok_or_else(|| {
             parse_error(
                 HEADER_SIZE,
-                TextSoxParseError::TruncatedRecordHeader {
+                TextSOXParseError::TruncatedRecordHeader {
                     record: 0,
                     remaining,
                 },
@@ -269,7 +269,7 @@ fn preflight_record_count(decoded: &[u8], count: u32) -> Result<usize, FormatErr
         {
             return Err(parse_error(
                 HEADER_SIZE + RECORD_HEADER_SIZE,
-                TextSoxParseError::EmptyText { record: 0 },
+                TextSOXParseError::EmptyText { record: 0 },
             ));
         }
     }
@@ -278,7 +278,7 @@ fn preflight_record_count(decoded: &[u8], count: u32) -> Result<usize, FormatErr
     if u128::from(count) > maximum as u128 {
         return Err(parse_error(
             HEADER_SIZE,
-            TextSoxParseError::ImpossibleRecordCount { count, maximum },
+            TextSOXParseError::ImpossibleRecordCount { count, maximum },
         ));
     }
     Ok(usize::try_from(count).unwrap_or(maximum))
@@ -288,12 +288,12 @@ fn parse_record(
     decoded: &[u8],
     record: usize,
     offset: &mut usize,
-) -> Result<(TextSoxRecord, u16), FormatError> {
+) -> Result<(TextSOXRecord, u16), FormatError> {
     let record_bytes = decoded.get(*offset..).unwrap_or_default();
     let header = record_bytes.get(..RECORD_HEADER_SIZE).ok_or_else(|| {
         parse_error(
             *offset,
-            TextSoxParseError::TruncatedRecordHeader {
+            TextSOXParseError::TruncatedRecordHeader {
                 record,
                 remaining: record_bytes.len(),
             },
@@ -302,7 +302,7 @@ fn parse_record(
     let index = read_u32(header.get(..4).ok_or_else(|| {
         parse_error(
             *offset,
-            TextSoxParseError::TruncatedRecordHeader {
+            TextSOXParseError::TruncatedRecordHeader {
                 record,
                 remaining: record_bytes.len(),
             },
@@ -311,7 +311,7 @@ fn parse_record(
     let length = read_u16(header.get(4..).ok_or_else(|| {
         parse_error(
             *offset,
-            TextSoxParseError::TruncatedRecordHeader {
+            TextSOXParseError::TruncatedRecordHeader {
                 record,
                 remaining: record_bytes.len(),
             },
@@ -321,12 +321,12 @@ fn parse_record(
     if length == 0 {
         return Err(parse_error(
             *offset,
-            TextSoxParseError::EmptyText { record },
+            TextSOXParseError::EmptyText { record },
         ));
     }
 
     let text = parse_text(decoded, record, length, offset)?;
-    Ok((TextSoxRecord { index, text }, length))
+    Ok((TextSOXRecord { index, text }, length))
 }
 
 fn parse_text(
@@ -340,7 +340,7 @@ fn parse_text(
     let text_bytes = remaining.get(..text_length).ok_or_else(|| {
         parse_error(
             *offset,
-            TextSoxParseError::TruncatedText {
+            TextSOXParseError::TruncatedText {
                 record,
                 length,
                 remaining: remaining.len(),
@@ -351,7 +351,7 @@ fn parse_text(
         if !is_allowed_text_byte(byte) {
             return Err(parse_error(
                 *offset + index,
-                TextSoxParseError::InvalidTextByte {
+                TextSOXParseError::InvalidTextByte {
                     record,
                     index,
                     byte,
@@ -363,7 +363,7 @@ fn parse_text(
         let index = error.valid_up_to();
         parse_error(
             *offset + index,
-            TextSoxParseError::InvalidTextByte {
+            TextSOXParseError::InvalidTextByte {
                 record,
                 index,
                 byte: text_bytes.get(index).copied().unwrap_or_default(),
@@ -374,8 +374,8 @@ fn parse_text(
     Ok(text.to_owned())
 }
 
-fn parse_error(offset: usize, source: TextSoxParseError) -> FormatError {
-    FormatError::TextSoxParse { offset, source }
+fn parse_error(offset: usize, source: TextSOXParseError) -> FormatError {
+    FormatError::TextSOXParse { offset, source }
 }
 
 fn read_u16(bytes: &[u8]) -> u16 {
@@ -394,10 +394,10 @@ fn read_u32(bytes: &[u8]) -> u32 {
 
 fn validate_text(record: usize, value: &str, maximum: u16) -> Result<(), FormatError> {
     if value.is_empty() {
-        return Err(FormatError::TextSoxEmptyText { record });
+        return Err(FormatError::TextSOXEmptyText { record });
     }
     if value.len() > usize::from(maximum) {
-        return Err(FormatError::TextSoxTooLong {
+        return Err(FormatError::TextSOXTooLong {
             record,
             length: value.len(),
             maximum,
@@ -405,7 +405,7 @@ fn validate_text(record: usize, value: &str, maximum: u16) -> Result<(), FormatE
     }
     for (index, &byte) in value.as_bytes().iter().enumerate() {
         if !is_allowed_text_byte(byte) {
-            return Err(FormatError::TextSoxInvalidTextByte {
+            return Err(FormatError::TextSOXInvalidTextByte {
                 record,
                 index,
                 byte,

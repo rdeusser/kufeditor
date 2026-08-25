@@ -10,9 +10,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use document::{Document, DocumentEdit, DocumentId, DocumentKind, StateId};
+pub use document::{Document, DocumentEdit, DocumentID, DocumentKind, StateID};
 pub use kufeditor_formats::{
-    Diagnostic, Severity, SkillDocument, SkillTextField, TextSoxDocument, TextSoxField,
+    Diagnostic, Severity, SkillDocument, SkillTextField, TextSOXDocument, TextSOXField,
     TroopDocument, TroopField, TroopGroup,
 };
 pub use recent::{
@@ -26,16 +26,16 @@ use crate::history::HistoryEntry;
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("document {0:?} is not open")]
-    UnknownDocument(DocumentId),
+    UnknownDocument(DocumentID),
 
     #[error("document {0:?} is not a TroopInfo document")]
-    NotTroop(DocumentId),
+    NotTroop(DocumentID),
 
     #[error("document {0:?} is not a SkillInfo document")]
-    NotSkill(DocumentId),
+    NotSkill(DocumentID),
 
     #[error("document {0:?} is not a text SOX document")]
-    NotTextSox(DocumentId),
+    NotTextSOX(DocumentID),
 
     #[error(transparent)]
     Format(#[from] kufeditor_formats::FormatError),
@@ -72,11 +72,11 @@ pub enum WorkspaceError {
     },
 
     #[error("document {0:?} already has a save in progress")]
-    SaveInProgress(DocumentId),
+    SaveInProgress(DocumentID),
 
     #[error("save completion {token:?} does not match document {document:?}")]
     StaleSave {
-        document: DocumentId,
+        document: DocumentID,
         token: SaveToken,
     },
 }
@@ -85,8 +85,8 @@ pub enum WorkspaceError {
 struct Session {
     path: PathBuf,
     document: Document,
-    current_state: StateId,
-    saved_state: StateId,
+    current_state: StateID,
+    saved_state: StateID,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
     save_in_flight: Option<SaveToken>,
@@ -94,8 +94,8 @@ struct Session {
 
 #[derive(Debug)]
 pub struct Workspace {
-    sessions: HashMap<DocumentId, Session>,
-    open_order: Vec<DocumentId>,
+    sessions: HashMap<DocumentID, Session>,
+    open_order: Vec<DocumentID>,
     next_document: u64,
     next_state: u64,
     next_save: u64,
@@ -112,7 +112,7 @@ impl Workspace {
         }
     }
 
-    pub fn open_loaded(&mut self, path: PathBuf, document: Document) -> DocumentId {
+    pub fn open_loaded(&mut self, path: PathBuf, document: Document) -> DocumentID {
         let id = self.allocate_document();
         let state = self.allocate_state();
         self.sessions.insert(
@@ -131,18 +131,18 @@ impl Workspace {
         id
     }
 
-    pub fn document_ids(&self) -> &[DocumentId] {
+    pub fn document_ids(&self) -> &[DocumentID] {
         &self.open_order
     }
 
-    pub fn insert_loaded(&mut self, loaded: LoadedDocument) -> DocumentId {
+    pub fn insert_loaded(&mut self, loaded: LoadedDocument) -> DocumentID {
         let (path, document) = loaded.into_parts();
         self.open_loaded(path, document)
     }
 
     pub fn prepare_save(
         &mut self,
-        id: DocumentId,
+        id: DocumentID,
         target: Option<PathBuf>,
     ) -> Result<SaveRequest, WorkspaceError> {
         let (path, state, snapshot) = {
@@ -187,7 +187,7 @@ impl Workspace {
 
     pub fn finish_save_failure(
         &mut self,
-        id: DocumentId,
+        id: DocumentID,
         token: SaveToken,
     ) -> Result<(), WorkspaceError> {
         let session = self.session_mut(id)?;
@@ -201,7 +201,7 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn apply(&mut self, id: DocumentId, edit: DocumentEdit) -> Result<(), WorkspaceError> {
+    pub fn apply(&mut self, id: DocumentID, edit: DocumentEdit) -> Result<(), WorkspaceError> {
         let (before, inverse) = {
             let session = self.session_mut(id)?;
             let before = session.current_state;
@@ -221,7 +221,7 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn undo(&mut self, id: DocumentId) -> Result<bool, WorkspaceError> {
+    pub fn undo(&mut self, id: DocumentID) -> Result<bool, WorkspaceError> {
         let session = self.session_mut(id)?;
         let Some(entry) = session.undo.pop() else {
             return Ok(false);
@@ -237,7 +237,7 @@ impl Workspace {
         Ok(true)
     }
 
-    pub fn redo(&mut self, id: DocumentId) -> Result<bool, WorkspaceError> {
+    pub fn redo(&mut self, id: DocumentID) -> Result<bool, WorkspaceError> {
         let session = self.session_mut(id)?;
         let Some(entry) = session.redo.pop() else {
             return Ok(false);
@@ -253,33 +253,33 @@ impl Workspace {
         Ok(true)
     }
 
-    pub fn can_undo(&self, id: DocumentId) -> Result<bool, WorkspaceError> {
+    pub fn can_undo(&self, id: DocumentID) -> Result<bool, WorkspaceError> {
         self.session(id).map(|session| !session.undo.is_empty())
     }
 
-    pub fn can_redo(&self, id: DocumentId) -> Result<bool, WorkspaceError> {
+    pub fn can_redo(&self, id: DocumentID) -> Result<bool, WorkspaceError> {
         self.session(id).map(|session| !session.redo.is_empty())
     }
 
-    pub fn is_dirty(&self, id: DocumentId) -> Result<bool, WorkspaceError> {
+    pub fn is_dirty(&self, id: DocumentID) -> Result<bool, WorkspaceError> {
         self.session(id)
             .map(|session| session.current_state != session.saved_state)
     }
 
-    pub fn save_in_progress(&self, id: DocumentId) -> Result<bool, WorkspaceError> {
+    pub fn save_in_progress(&self, id: DocumentID) -> Result<bool, WorkspaceError> {
         self.session(id)
             .map(|session| session.save_in_flight.is_some())
     }
 
-    pub fn state_id(&self, id: DocumentId) -> Result<StateId, WorkspaceError> {
+    pub fn state_id(&self, id: DocumentID) -> Result<StateID, WorkspaceError> {
         self.session(id).map(|session| session.current_state)
     }
 
-    pub fn path(&self, id: DocumentId) -> Result<&Path, WorkspaceError> {
+    pub fn path(&self, id: DocumentID) -> Result<&Path, WorkspaceError> {
         self.session(id).map(|session| session.path.as_path())
     }
 
-    pub fn title(&self, id: DocumentId) -> Result<String, WorkspaceError> {
+    pub fn title(&self, id: DocumentID) -> Result<String, WorkspaceError> {
         self.session(id).map(|session| {
             session
                 .path
@@ -290,126 +290,126 @@ impl Workspace {
         })
     }
 
-    pub fn document_kind(&self, id: DocumentId) -> Result<DocumentKind, WorkspaceError> {
+    pub fn document_kind(&self, id: DocumentID) -> Result<DocumentKind, WorkspaceError> {
         self.session(id).map(|session| session.document.kind())
     }
 
-    pub fn record_count(&self, id: DocumentId) -> Result<usize, WorkspaceError> {
+    pub fn record_count(&self, id: DocumentID) -> Result<usize, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => Ok(document.record_count()),
             Document::Skill(document) => Ok(document.record_count()),
-            Document::TextSox(document) => Ok(document.record_count()),
+            Document::TextSOX(document) => Ok(document.record_count()),
         }
     }
 
     pub fn troop_value(
         &self,
-        id: DocumentId,
+        id: DocumentID,
         record: usize,
         field: TroopField,
     ) -> Result<i32, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => document.value(record, field).map_err(Into::into),
-            Document::Skill(_) | Document::TextSox(_) => Err(WorkspaceError::NotTroop(id)),
+            Document::Skill(_) | Document::TextSOX(_) => Err(WorkspaceError::NotTroop(id)),
         }
     }
 
-    pub fn skill_id(&self, id: DocumentId, record: usize) -> Result<i32, WorkspaceError> {
+    pub fn skill_id(&self, id: DocumentID, record: usize) -> Result<i32, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.skill_id(record).map_err(Into::into),
-            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
-    pub fn skill_type(&self, id: DocumentId, record: usize) -> Result<u32, WorkspaceError> {
+    pub fn skill_type(&self, id: DocumentID, record: usize) -> Result<u32, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.skill_type(record).map_err(Into::into),
-            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
-    pub fn skill_max_level(&self, id: DocumentId, record: usize) -> Result<u32, WorkspaceError> {
+    pub fn skill_max_level(&self, id: DocumentID, record: usize) -> Result<u32, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.max_level(record).map_err(Into::into),
-            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
     pub fn skill_text(
         &self,
-        id: DocumentId,
+        id: DocumentID,
         record: usize,
         field: SkillTextField,
     ) -> Result<&str, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Skill(document) => document.text(record, field).map_err(Into::into),
-            Document::Troop(_) | Document::TextSox(_) => Err(WorkspaceError::NotSkill(id)),
+            Document::Troop(_) | Document::TextSOX(_) => Err(WorkspaceError::NotSkill(id)),
         }
     }
 
-    pub fn text_sox_index(&self, id: DocumentId, record: usize) -> Result<u32, WorkspaceError> {
+    pub fn text_sox_index(&self, id: DocumentID, record: usize) -> Result<u32, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
-            Document::TextSox(document) => document.record_index(record).map_err(Into::into),
-            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSox(id)),
+            Document::TextSOX(document) => document.record_index(record).map_err(Into::into),
+            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSOX(id)),
         }
     }
 
     pub fn text_sox_max_length(
         &self,
-        id: DocumentId,
+        id: DocumentID,
         record: usize,
     ) -> Result<u16, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
-            Document::TextSox(document) => document.max_length(record).map_err(Into::into),
-            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSox(id)),
+            Document::TextSOX(document) => document.max_length(record).map_err(Into::into),
+            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSOX(id)),
         }
     }
 
-    pub fn text_sox_text(&self, id: DocumentId, record: usize) -> Result<&str, WorkspaceError> {
+    pub fn text_sox_text(&self, id: DocumentID, record: usize) -> Result<&str, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
-            Document::TextSox(document) => document.text(record).map_err(Into::into),
-            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSox(id)),
+            Document::TextSOX(document) => document.text(record).map_err(Into::into),
+            Document::Troop(_) | Document::Skill(_) => Err(WorkspaceError::NotTextSOX(id)),
         }
     }
 
-    pub fn diagnostics(&self, id: DocumentId) -> Result<Vec<Diagnostic>, WorkspaceError> {
+    pub fn diagnostics(&self, id: DocumentID) -> Result<Vec<Diagnostic>, WorkspaceError> {
         let session = self.session(id)?;
         match &session.document {
             Document::Troop(document) => Ok(document.diagnostics()),
             Document::Skill(document) => Ok(document.diagnostics()),
-            Document::TextSox(document) => Ok(document.diagnostics()),
+            Document::TextSOX(document) => Ok(document.diagnostics()),
         }
     }
 
-    fn session(&self, id: DocumentId) -> Result<&Session, WorkspaceError> {
+    fn session(&self, id: DocumentID) -> Result<&Session, WorkspaceError> {
         self.sessions
             .get(&id)
             .ok_or(WorkspaceError::UnknownDocument(id))
     }
 
-    fn session_mut(&mut self, id: DocumentId) -> Result<&mut Session, WorkspaceError> {
+    fn session_mut(&mut self, id: DocumentID) -> Result<&mut Session, WorkspaceError> {
         self.sessions
             .get_mut(&id)
             .ok_or(WorkspaceError::UnknownDocument(id))
     }
 
-    fn allocate_document(&mut self) -> DocumentId {
-        let id = DocumentId(self.next_document);
+    fn allocate_document(&mut self) -> DocumentID {
+        let id = DocumentID(self.next_document);
         self.next_document += 1;
         id
     }
 
-    fn allocate_state(&mut self) -> StateId {
-        let id = StateId(self.next_state);
+    fn allocate_state(&mut self) -> StateID {
+        let id = StateID(self.next_state);
         self.next_state += 1;
         id
     }

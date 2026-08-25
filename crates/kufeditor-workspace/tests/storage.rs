@@ -7,7 +7,7 @@ use std::{fs, path::PathBuf};
 
 use kufeditor_formats::FormatError;
 use kufeditor_workspace::{
-    Document, DocumentEdit, SkillDocument, SkillTextField, TextSoxDocument, TroopDocument,
+    Document, DocumentEdit, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument,
     TroopField, Workspace, WorkspaceError, load_path,
 };
 use tempfile::tempdir;
@@ -38,7 +38,7 @@ fn troop_fixture() -> Vec<u8> {
     bytes
 }
 
-fn workspace_with_troop() -> (Workspace, kufeditor_workspace::DocumentId) {
+fn workspace_with_troop() -> (Workspace, kufeditor_workspace::DocumentID) {
     let document = TroopDocument::parse(troop_fixture()).unwrap();
     let mut workspace = Workspace::new();
     let id = workspace.open_loaded(PathBuf::from("TroopInfo.sox"), Document::Troop(document));
@@ -93,7 +93,7 @@ const fn hex_value(byte: u8) -> u8 {
     }
 }
 
-fn workspace_with_skill() -> (Workspace, kufeditor_workspace::DocumentId) {
+fn workspace_with_skill() -> (Workspace, kufeditor_workspace::DocumentID) {
     let document = SkillDocument::parse(skill_fixture(&[])).unwrap();
     let mut workspace = Workspace::new();
     let id = workspace.open_loaded(PathBuf::from("SkillInfo.sox"), Document::Skill(document));
@@ -114,12 +114,12 @@ fn text_sox_fixture(trailing: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn workspace_with_text_sox() -> (Workspace, kufeditor_workspace::DocumentId) {
-    let document = TextSoxDocument::parse(text_sox_fixture(&[])).unwrap();
+fn workspace_with_text_sox() -> (Workspace, kufeditor_workspace::DocumentID) {
+    let document = TextSOXDocument::parse(text_sox_fixture(&[])).unwrap();
     let mut workspace = Workspace::new();
     let id = workspace.open_loaded(
         PathBuf::from("StringTable.sox"),
-        Document::TextSox(document),
+        Document::TextSOX(document),
     );
     (workspace, id)
 }
@@ -256,7 +256,7 @@ fn supported_extension_with_unknown_sox_content_is_typed() {
         error,
         WorkspaceError::Parse {
             path: found,
-            source: FormatError::UnsupportedSox,
+            source: FormatError::UnsupportedSOX,
         } if found == path
     ));
 }
@@ -345,7 +345,7 @@ fn load_detects_raw_and_ascii_hex_text_sox() {
         fs::write(&path, bytes).unwrap();
 
         let loaded = load_path(path).unwrap();
-        let Document::TextSox(document) = loaded.document() else {
+        let Document::TextSOX(document) = loaded.document() else {
             panic!("text SOX was detected as a named schema");
         };
         assert_eq!(document.record_count(), 2);
@@ -365,7 +365,7 @@ fn text_sox_save_as_is_reparsable_and_marks_the_snapshot_clean() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "Omega".to_owned(),
             },
@@ -382,7 +382,7 @@ fn text_sox_save_as_is_reparsable_and_marks_the_snapshot_clean() {
     assert_eq!(workspace.path(id).unwrap(), target);
     assert!(!workspace.is_dirty(id).unwrap());
     let loaded = load_path(target).unwrap();
-    let Document::TextSox(document) = loaded.document() else {
+    let Document::TextSOX(document) = loaded.document() else {
         panic!("saved text SOX was detected as a named schema");
     };
     assert_eq!(document.text(0).unwrap(), "Omega");
@@ -404,7 +404,7 @@ fn edited_ascii_hex_text_sox_is_uppercase_and_preserves_indices_and_tail() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "Omega".to_owned(),
             },
@@ -422,7 +422,7 @@ fn edited_ascii_hex_text_sox_is_uppercase_and_preserves_indices_and_tail() {
     );
     assert!(decode_ascii_hex(&encoded).ends_with(&tail));
     let loaded = load_path(path).unwrap();
-    let Document::TextSox(document) = loaded.document() else {
+    let Document::TextSOX(document) = loaded.document() else {
         panic!("saved text SOX was detected as a named schema");
     };
     assert_eq!(document.record_index(0).unwrap(), 41);
@@ -439,7 +439,7 @@ fn an_edit_after_a_text_sox_save_started_remains_dirty() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "First".to_owned(),
             },
@@ -449,7 +449,7 @@ fn an_edit_after_a_text_sox_save_started_remains_dirty() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "Later".to_owned(),
             },
@@ -461,7 +461,7 @@ fn an_edit_after_a_text_sox_save_started_remains_dirty() {
     assert!(workspace.is_dirty(id).unwrap());
     assert_eq!(workspace.text_sox_text(id, 0).unwrap(), "Later");
     let loaded = load_path(target).unwrap();
-    let Document::TextSox(document) = loaded.document() else {
+    let Document::TextSOX(document) = loaded.document() else {
         panic!("saved text SOX was detected as a named schema");
     };
     assert_eq!(document.text(0).unwrap(), "First");
@@ -475,7 +475,7 @@ fn text_sox_shortening_save_preserves_the_initial_session_budget() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "One".to_owned(),
             },

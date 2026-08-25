@@ -1,6 +1,6 @@
 use kufeditor_game::{DiscoveryError, DiscoveryReport, Game, GamePaths};
 
-use crate::state::RequestId;
+use crate::state::RequestID;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct RootRevisions {
@@ -26,14 +26,14 @@ impl RootRevisions {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct DiscoveryKey {
-    request: RequestId,
+    request: RequestID,
     revisions: RootRevisions,
     crusaders_was_none: bool,
     heroes_was_none: bool,
 }
 
 impl DiscoveryKey {
-    pub(crate) fn new(request: RequestId, revisions: RootRevisions, paths: &GamePaths) -> Self {
+    pub(crate) fn new(request: RequestID, revisions: RootRevisions, paths: &GamePaths) -> Self {
         Self {
             request,
             revisions,
@@ -42,7 +42,7 @@ impl DiscoveryKey {
         }
     }
 
-    pub(crate) const fn request(&self) -> RequestId {
+    pub(crate) const fn request(&self) -> RequestID {
         self.request
     }
 

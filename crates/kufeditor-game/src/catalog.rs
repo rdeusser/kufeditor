@@ -5,7 +5,7 @@ use std::{
 };
 
 use kufeditor_formats::{
-    FormatError, SchemaDocument, SoxSchema, SoxStringTableDocument, SoxStringTableLayout,
+    FormatError, SOXSchema, SOXStringTableDocument, SOXStringTableLayout, SchemaDocument,
 };
 
 use crate::{CatalogFileError, CatalogIssue, CatalogLoadError};
@@ -103,7 +103,7 @@ pub(crate) struct RawWeaponVariant {
 
 pub(crate) fn load_catalog_data(sox_directory: &Path) -> Result<RawCatalogData, CatalogLoadError> {
     if !sox_directory.is_dir() {
-        return Err(CatalogLoadError::InvalidSoxDirectory {
+        return Err(CatalogLoadError::InvalidSOXDirectory {
             path: sox_directory.to_path_buf(),
         });
     }
@@ -175,7 +175,7 @@ fn load_indexed_role(
     path: &Path,
     issues: &mut Vec<CatalogIssue>,
 ) -> Vec<RawIndexedRecord> {
-    load_string_table(role, path, SoxStringTableLayout::Indexed)
+    load_string_table(role, path, SOXStringTableLayout::Indexed)
         .and_then(|document| project_indexed(role, path, &document))
         .unwrap_or_else(|error| {
             issues.push(error);
@@ -188,7 +188,7 @@ fn load_sequential_role(
     path: &Path,
     issues: &mut Vec<CatalogIssue>,
 ) -> Vec<Vec<u8>> {
-    load_string_table(role, path, SoxStringTableLayout::Sequential)
+    load_string_table(role, path, SOXStringTableLayout::Sequential)
         .and_then(|document| project_sequential(role, path, &document))
         .unwrap_or_else(|error| {
             issues.push(error);
@@ -198,7 +198,7 @@ fn load_sequential_role(
 
 fn load_item_attributes(path: &Path, issues: &mut Vec<CatalogIssue>) -> Vec<RawItemAttribute> {
     let role = CatalogRole::ItemAttributes;
-    load_string_table(role, path, SoxStringTableLayout::IndexedPair)
+    load_string_table(role, path, SOXStringTableLayout::IndexedPair)
         .and_then(|document| project_item_attributes(path, &document))
         .unwrap_or_else(|error| {
             issues.push(error);
@@ -211,7 +211,7 @@ fn load_item_type_prefixes(
     issues: &mut Vec<CatalogIssue>,
 ) -> Vec<RawItemTypePrefixes> {
     let role = CatalogRole::ItemTypePrefixes;
-    load_string_table(role, path, SoxStringTableLayout::IndexedTriple)
+    load_string_table(role, path, SOXStringTableLayout::IndexedTriple)
         .and_then(|document| project_item_type_prefixes(path, &document))
         .unwrap_or_else(|error| {
             issues.push(error);
@@ -222,16 +222,16 @@ fn load_item_type_prefixes(
 fn load_string_table(
     role: CatalogRole,
     path: &Path,
-    layout: SoxStringTableLayout,
-) -> Result<SoxStringTableDocument, CatalogIssue> {
+    layout: SOXStringTableLayout,
+) -> Result<SOXStringTableDocument, CatalogIssue> {
     let bytes = read_catalog(role, path)?;
-    SoxStringTableDocument::parse(layout, bytes).map_err(|source| format_issue(role, path, source))
+    SOXStringTableDocument::parse(layout, bytes).map_err(|source| format_issue(role, path, source))
 }
 
 fn project_indexed(
     role: CatalogRole,
     path: &Path,
-    document: &SoxStringTableDocument,
+    document: &SOXStringTableDocument,
 ) -> Result<Vec<RawIndexedRecord>, CatalogIssue> {
     let mut records = Vec::with_capacity(document.record_count());
     for record in 0..document.record_count() {
@@ -254,7 +254,7 @@ fn project_indexed(
 fn project_sequential(
     role: CatalogRole,
     path: &Path,
-    document: &SoxStringTableDocument,
+    document: &SOXStringTableDocument,
 ) -> Result<Vec<Vec<u8>>, CatalogIssue> {
     let mut records = Vec::with_capacity(document.record_count());
     for record in 0..document.record_count() {
@@ -268,7 +268,7 @@ fn project_sequential(
 
 fn project_item_attributes(
     path: &Path,
-    document: &SoxStringTableDocument,
+    document: &SOXStringTableDocument,
 ) -> Result<Vec<RawItemAttribute>, CatalogIssue> {
     let role = CatalogRole::ItemAttributes;
     let mut records = Vec::with_capacity(document.record_count());
@@ -295,7 +295,7 @@ fn project_item_attributes(
 
 fn project_item_type_prefixes(
     path: &Path,
-    document: &SoxStringTableDocument,
+    document: &SOXStringTableDocument,
 ) -> Result<Vec<RawItemTypePrefixes>, CatalogIssue> {
     let role = CatalogRole::ItemTypePrefixes;
     let mut records = Vec::with_capacity(document.record_count());
@@ -326,7 +326,7 @@ fn load_special_names(path: &Path, issues: &mut Vec<CatalogIssue>) -> Vec<RawSpe
     let role = CatalogRole::SpecialNameKeys;
     let result = read_catalog(role, path)
         .and_then(|bytes| {
-            SchemaDocument::parse(SoxSchema::SpecialNames, bytes)
+            SchemaDocument::parse(SOXSchema::SpecialNames, bytes)
                 .map_err(|source| format_issue(role, path, source))
         })
         .map(|document| {
@@ -354,7 +354,7 @@ fn load_weapon_names(path: &Path, issues: &mut Vec<CatalogIssue>) -> Vec<Vec<Raw
         let text = std::str::from_utf8(&bytes).map_err(|source| CatalogIssue {
             role,
             path: path.to_path_buf(),
-            error: CatalogFileError::InvalidWeaponUtf8 { source },
+            error: CatalogFileError::InvalidWeaponUTF8 { source },
         })?;
         parse_weapon_names(text, path)
     });
@@ -753,7 +753,7 @@ mod tests {
         assert_eq!(utf8_issue.path, weapon_path);
         assert!(matches!(
             utf8_issue.error,
-            CatalogFileError::InvalidWeaponUtf8 { .. }
+            CatalogFileError::InvalidWeaponUTF8 { .. }
         ));
 
         let syntax_cases = [
@@ -854,7 +854,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CatalogLoadError::InvalidSoxDirectory { path } if path == file_path
+            CatalogLoadError::InvalidSOXDirectory { path } if path == file_path
         ));
     }
 

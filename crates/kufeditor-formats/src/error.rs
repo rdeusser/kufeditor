@@ -9,15 +9,15 @@ use crate::{
         sox_special_names, sox_troop_info, sox_unit_uv_info, sox_unit_uvid, sox_worldmap_char_info,
         sox_worldmap_troop_info,
     },
-    schema::SoxSchema,
+    schema::SOXSchema,
     skill::SkillTextField,
-    string_table::SoxStringTableLayout,
+    string_table::SOXStringTableLayout,
 };
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
-pub enum GeneratedSoxError {
+pub enum GeneratedSOXError {
     #[error("unexpected end of input at offset {offset}: need {needed} bytes, have {remaining}")]
-    UnexpectedEof {
+    UnexpectedEOF {
         offset: usize,
         needed: usize,
         remaining: usize,
@@ -79,14 +79,14 @@ pub enum GeneratedSoxError {
 macro_rules! impl_generated_sox_error {
     ($($module:ident),+ $(,)?) => {
         $(
-            impl From<$module::Error> for GeneratedSoxError {
+            impl From<$module::Error> for GeneratedSOXError {
                 fn from(error: $module::Error) -> Self {
                     match error {
                         $module::Error::UnexpectedEof {
                             offset,
                             needed,
                             remaining,
-                        } => Self::UnexpectedEof {
+                        } => Self::UnexpectedEOF {
                             offset,
                             needed,
                             remaining,
@@ -171,7 +171,7 @@ impl_generated_sox_error!(
 );
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
-pub enum TextSoxParseError {
+pub enum TextSOXParseError {
     #[error("text SOX header is truncated")]
     TruncatedHeader { actual: usize },
 
@@ -223,7 +223,7 @@ pub enum StringTableParseError {
     },
 
     #[error("stored ID for record {record} is truncated: {remaining} bytes remain")]
-    TruncatedStoredId { record: usize, remaining: usize },
+    TruncatedStoredID { record: usize, remaining: usize },
 
     #[error("length for record {record} field {field} is truncated: {remaining} bytes remain")]
     TruncatedFieldLength {
@@ -268,20 +268,20 @@ pub struct SkillCleaveError(#[from] sox_skill_info::Error);
 #[derive(Debug, Error)]
 pub enum FormatError {
     #[error("SOX input is neither a TroopInfo, SkillInfo, nor text SOX document")]
-    UnsupportedSox,
+    UnsupportedSOX,
 
     #[error("ASCII-hex SOX input has an odd length of {length} bytes")]
-    OddAsciiHexLength { length: usize },
+    OddASCIIHexLength { length: usize },
 
     #[error("ASCII-hex SOX input has a non-hexadecimal byte at index {index}")]
-    InvalidAsciiHexByte { index: usize },
+    InvalidASCIIHexByte { index: usize },
 
     #[error("saved SOX source image has an inconsistent encoding envelope")]
-    InconsistentSoxRebase,
+    InconsistentSOXRebase,
 
     #[error("failed to parse {layout} string table at offset {offset}: {source}")]
     StringTableParse {
-        layout: SoxStringTableLayout,
+        layout: SOXStringTableLayout,
         offset: usize,
         #[source]
         source: StringTableParseError,
@@ -289,14 +289,14 @@ pub enum FormatError {
 
     #[error("failed to encode {layout} string table: {source}")]
     StringTableEncode {
-        layout: SoxStringTableLayout,
+        layout: SOXStringTableLayout,
         #[source]
         source: StringTableEncodeError,
     },
 
     #[error("{layout} string-table record {record} is outside the record count {record_count}")]
     StringTableRecordOutOfRange {
-        layout: SoxStringTableLayout,
+        layout: SOXStringTableLayout,
         record: usize,
         record_count: usize,
     },
@@ -305,7 +305,7 @@ pub enum FormatError {
         "{layout} string-table record {record} field {field} is outside the field count {field_count}"
     )]
     StringTableFieldOutOfRange {
-        layout: SoxStringTableLayout,
+        layout: SOXStringTableLayout,
         record: usize,
         field: usize,
         field_count: usize,
@@ -313,38 +313,38 @@ pub enum FormatError {
 
     #[error("failed to parse {schema} at offset {offset}: {source}")]
     SchemaParse {
-        schema: SoxSchema,
+        schema: SOXSchema,
         offset: usize,
         #[source]
-        source: GeneratedSoxError,
+        source: GeneratedSOXError,
     },
 
     #[error("failed to encode {schema}: {source}")]
     SchemaEncode {
-        schema: SoxSchema,
+        schema: SOXSchema,
         #[source]
-        source: GeneratedSoxError,
+        source: GeneratedSOXError,
     },
 
     #[error("failed to parse text SOX at offset {offset}: {source}")]
-    TextSoxParse {
+    TextSOXParse {
         offset: usize,
         #[source]
-        source: TextSoxParseError,
+        source: TextSOXParseError,
     },
 
     #[error("text SOX record {record} is empty")]
-    TextSoxEmptyText { record: usize },
+    TextSOXEmptyText { record: usize },
 
     #[error("text SOX record {record} exceeds its byte budget")]
-    TextSoxTooLong {
+    TextSOXTooLong {
         record: usize,
         length: usize,
         maximum: u16,
     },
 
     #[error("text SOX record {record} contains an unsupported byte")]
-    TextSoxInvalidTextByte {
+    TextSOXInvalidTextByte {
         record: usize,
         index: usize,
         byte: u8,
@@ -378,7 +378,7 @@ pub enum FormatError {
     },
 
     #[error("SkillInfo record {record} field {field} is not valid UTF-8: {source}")]
-    SkillUtf8 {
+    SkillUTF8 {
         record: usize,
         field: SkillTextField,
         #[source]

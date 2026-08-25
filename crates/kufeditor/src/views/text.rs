@@ -362,7 +362,7 @@ fn column_heading(theme: &Theme, label: &'static str) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use kufeditor_workspace::{TextSoxDocument, TextSoxField};
+    use kufeditor_workspace::{TextSOXDocument, TextSOXField};
 
     use super::{diagnostic_item, diagnostic_title, entry_metadata, preview};
 
@@ -391,7 +391,7 @@ mod tests {
             bytes.extend_from_slice(&u16::try_from(text.len()).unwrap().to_le_bytes());
             bytes.extend_from_slice(text);
         }
-        let document = TextSoxDocument::parse(bytes).unwrap();
+        let document = TextSOXDocument::parse(bytes).unwrap();
         let diagnostic = document.diagnostics().remove(0);
 
         assert_eq!(
@@ -399,7 +399,7 @@ mod tests {
             "Wire 9001 · Index"
         );
         assert_eq!(
-            diagnostic_title(9001, TextSoxField::Text.label()),
+            diagnostic_title(9001, TextSOXField::Text.label()),
             "Wire 9001 · Text"
         );
     }

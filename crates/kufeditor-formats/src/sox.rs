@@ -1,40 +1,40 @@
-use crate::{FormatError, SkillDocument, TextSoxDocument, TroopDocument};
+use crate::{FormatError, SkillDocument, TextSOXDocument, TroopDocument};
 
 #[derive(Clone, Debug)]
-pub enum SoxDocument {
+pub enum SOXDocument {
     Troop(TroopDocument),
     Skill(SkillDocument),
-    Text(TextSoxDocument),
+    Text(TextSOXDocument),
 }
 
-pub fn parse_sox(bytes: Vec<u8>) -> Result<SoxDocument, FormatError> {
-    let source = SoxSource::parse(bytes)?;
+pub fn parse_sox(bytes: Vec<u8>) -> Result<SOXDocument, FormatError> {
+    let source = SOXSource::parse(bytes)?;
     if let Ok(document) = TroopDocument::from_source(source.clone()) {
-        return Ok(SoxDocument::Troop(document));
+        return Ok(SOXDocument::Troop(document));
     }
     if let Ok(document) = SkillDocument::from_source(source.clone()) {
-        return Ok(SoxDocument::Skill(document));
+        return Ok(SOXDocument::Skill(document));
     }
-    if let Ok(document) = TextSoxDocument::from_source(source) {
-        return Ok(SoxDocument::Text(document));
+    if let Ok(document) = TextSOXDocument::from_source(source) {
+        return Ok(SOXDocument::Text(document));
     }
-    Err(FormatError::UnsupportedSox)
+    Err(FormatError::UnsupportedSOX)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SoxEnvelope {
+enum SOXEnvelope {
     Raw,
-    AsciiHex,
+    ASCIIHex,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SoxSource {
+pub(crate) struct SOXSource {
     original: Vec<u8>,
     decoded: Vec<u8>,
-    envelope: SoxEnvelope,
+    envelope: SOXEnvelope,
 }
 
-impl SoxSource {
+impl SOXSource {
     pub(crate) fn parse(original: Vec<u8>) -> Result<Self, FormatError> {
         Self::parse_with_marker(original, 100)
     }
@@ -44,9 +44,9 @@ impl SoxSource {
         expected_marker: u32,
     ) -> Result<Self, FormatError> {
         let envelope = if is_ascii_hex_candidate(&original, expected_marker) {
-            SoxEnvelope::AsciiHex
+            SOXEnvelope::ASCIIHex
         } else {
-            SoxEnvelope::Raw
+            SOXEnvelope::Raw
         };
         let decoded = decode_with_envelope(&original, envelope)?;
 
@@ -67,15 +67,15 @@ impl SoxSource {
 
     pub(crate) fn apply_envelope(&self, decoded: &[u8]) -> Vec<u8> {
         match self.envelope {
-            SoxEnvelope::Raw => decoded.to_vec(),
-            SoxEnvelope::AsciiHex => encode_ascii_hex(decoded),
+            SOXEnvelope::Raw => decoded.to_vec(),
+            SOXEnvelope::ASCIIHex => encode_ascii_hex(decoded),
         }
     }
 
     pub(crate) fn rebase(&mut self, saved: &Self, original: Vec<u8>) -> Result<(), FormatError> {
-        if is_ascii_hex_candidate(&original, 100) != matches!(saved.envelope, SoxEnvelope::AsciiHex)
+        if is_ascii_hex_candidate(&original, 100) != matches!(saved.envelope, SOXEnvelope::ASCIIHex)
         {
-            return Err(FormatError::InconsistentSoxRebase);
+            return Err(FormatError::InconsistentSOXRebase);
         }
 
         let decoded = decode_with_envelope(&original, saved.envelope)?;
@@ -88,10 +88,10 @@ impl SoxSource {
     }
 }
 
-fn decode_with_envelope(bytes: &[u8], envelope: SoxEnvelope) -> Result<Vec<u8>, FormatError> {
+fn decode_with_envelope(bytes: &[u8], envelope: SOXEnvelope) -> Result<Vec<u8>, FormatError> {
     match envelope {
-        SoxEnvelope::Raw => Ok(bytes.to_vec()),
-        SoxEnvelope::AsciiHex => decode_ascii_hex(bytes),
+        SOXEnvelope::Raw => Ok(bytes.to_vec()),
+        SOXEnvelope::ASCIIHex => decode_ascii_hex(bytes),
     }
 }
 
@@ -112,7 +112,7 @@ fn is_ascii_hex_candidate(bytes: &[u8], expected_marker: u32) -> bool {
 fn decode_ascii_hex(encoded: &[u8]) -> Result<Vec<u8>, FormatError> {
     let (pairs, remainder) = encoded.as_chunks::<2>();
     if !remainder.is_empty() {
-        return Err(FormatError::OddAsciiHexLength {
+        return Err(FormatError::OddASCIIHexLength {
             length: encoded.len(),
         });
     }
@@ -120,9 +120,9 @@ fn decode_ascii_hex(encoded: &[u8]) -> Result<Vec<u8>, FormatError> {
     let mut decoded = Vec::with_capacity(pairs.len());
     for (pair_index, &[high_byte, low_byte]) in pairs.iter().enumerate() {
         let index = pair_index * 2;
-        let high = hex_value(high_byte).ok_or(FormatError::InvalidAsciiHexByte { index })?;
+        let high = hex_value(high_byte).ok_or(FormatError::InvalidASCIIHexByte { index })?;
         let low =
-            hex_value(low_byte).ok_or(FormatError::InvalidAsciiHexByte { index: index + 1 })?;
+            hex_value(low_byte).ok_or(FormatError::InvalidASCIIHexByte { index: index + 1 })?;
         decoded.push((high << 4) | low);
     }
     Ok(decoded)
@@ -160,41 +160,41 @@ const fn hex_value(byte: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FormatError, SoxSource};
+    use super::{FormatError, SOXSource};
 
     #[test]
     fn parses_raw_source_for_expected_marker_two() {
         let original = vec![2, 0, 0, 0, 9];
 
-        let source = SoxSource::parse_with_marker(original.clone(), 2).unwrap();
+        let source = SOXSource::parse_with_marker(original.clone(), 2).unwrap();
 
         assert_eq!(source.decoded(), original);
     }
 
     #[test]
     fn decodes_mixed_case_ascii_hex_for_expected_marker_two() {
-        let source = SoxSource::parse_with_marker(b"0200000000000000aB".to_vec(), 2).unwrap();
+        let source = SOXSource::parse_with_marker(b"0200000000000000aB".to_vec(), 2).unwrap();
 
         assert_eq!(source.decoded(), [2, 0, 0, 0, 0, 0, 0, 0, 0xab]);
     }
 
     #[test]
     fn expected_marker_ascii_hex_keeps_odd_length_error() {
-        let error = SoxSource::parse_with_marker(b"0200000000000000A".to_vec(), 2).unwrap_err();
+        let error = SOXSource::parse_with_marker(b"0200000000000000A".to_vec(), 2).unwrap_err();
 
         assert!(matches!(
             error,
-            FormatError::OddAsciiHexLength { length: 17 }
+            FormatError::OddASCIIHexLength { length: 17 }
         ));
     }
 
     #[test]
     fn expected_marker_ascii_hex_keeps_invalid_byte_error() {
-        let error = SoxSource::parse_with_marker(b"0200000000000000Z0".to_vec(), 2).unwrap_err();
+        let error = SOXSource::parse_with_marker(b"0200000000000000Z0".to_vec(), 2).unwrap_err();
 
         assert!(matches!(
             error,
-            FormatError::InvalidAsciiHexByte { index: 16 }
+            FormatError::InvalidASCIIHexByte { index: 16 }
         ));
     }
 
@@ -202,7 +202,7 @@ mod tests {
     fn different_marker_prefix_stays_raw() {
         let original = b"6400000000000000".to_vec();
 
-        let source = SoxSource::parse_with_marker(original.clone(), 2).unwrap();
+        let source = SOXSource::parse_with_marker(original.clone(), 2).unwrap();
 
         assert_eq!(source.decoded(), original);
     }
@@ -211,7 +211,7 @@ mod tests {
     fn partial_marker_match_stays_raw_for_automatic_detection() {
         let original = b"6400010000000000".to_vec();
 
-        let source = SoxSource::parse(original.clone()).unwrap();
+        let source = SOXSource::parse(original.clone()).unwrap();
 
         assert_eq!(source.decoded(), original);
         assert_eq!(source.original_bytes(), original);
@@ -221,7 +221,7 @@ mod tests {
     fn non_hex_byte_inside_marker_prefix_stays_raw() {
         let original = b"64G0000000000000".to_vec();
 
-        let source = SoxSource::parse(original.clone()).unwrap();
+        let source = SOXSource::parse(original.clone()).unwrap();
 
         assert_eq!(source.decoded(), original);
         assert_eq!(source.original_bytes(), original);

@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use kufeditor_formats::{
-    FormatError, GeneratedSoxError, SchemaDocument, SoxDocument, SoxSchema, SpecialNameRef,
+    FormatError, GeneratedSOXError, SOXDocument, SOXSchema, SchemaDocument, SpecialNameRef,
     parse_sox,
 };
 
@@ -23,33 +23,33 @@ const SPECIAL_NAMES_FOOTER: &[u8; 64] =
 
 #[test]
 fn registry_contains_each_named_schema_once() {
-    let schemas: HashSet<_> = SoxSchema::ALL.into_iter().collect();
+    let schemas: HashSet<_> = SOXSchema::ALL.into_iter().collect();
 
-    assert_eq!(SoxSchema::ALL.len(), 18);
+    assert_eq!(SOXSchema::ALL.len(), 18);
     assert_eq!(schemas.len(), 18);
 }
 
 #[test]
 fn schemas_expose_canonical_stems_markers_and_display_names() {
     let cases = [
-        (SoxSchema::AbilityByJob, "AbilityByJob", 100),
-        (SoxSchema::AbilityInfo, "AbilityInfo", 100),
-        (SoxSchema::CharInfo, "CharInfo", 100),
-        (SoxSchema::CustomRandomTable, "KUF2CustomRandomTable", 100),
-        (SoxSchema::ItemAttInfo, "ItemAttInfo", 100),
-        (SoxSchema::ItemTypeInfo, "ItemTypeInfo", 2),
-        (SoxSchema::JobInfo, "JobInfo", 100),
-        (SoxSchema::LeaderGeneration, "LeaderGeneration", 100),
-        (SoxSchema::LibraryInfo, "LibraryInfo", 100),
-        (SoxSchema::ResistInfo, "ResistInfo", 100),
-        (SoxSchema::SkillInfo, "SkillInfo", 100),
-        (SoxSchema::SkillPointTable, "SkillPointTable", 100),
-        (SoxSchema::SpecialNames, "SpecialNames", 100),
-        (SoxSchema::TroopInfo, "TroopInfo", 100),
-        (SoxSchema::UnitUvInfo, "UnitUVInfo", 100),
-        (SoxSchema::UnitUvid, "UnitUVID", 100),
-        (SoxSchema::WorldmapCharInfo, "WorldMap_CharInfo", 100),
-        (SoxSchema::WorldmapTroopInfo, "WorldMap_TroopInfo", 100),
+        (SOXSchema::AbilityByJob, "AbilityByJob", 100),
+        (SOXSchema::AbilityInfo, "AbilityInfo", 100),
+        (SOXSchema::CharInfo, "CharInfo", 100),
+        (SOXSchema::CustomRandomTable, "KUF2CustomRandomTable", 100),
+        (SOXSchema::ItemAttInfo, "ItemAttInfo", 100),
+        (SOXSchema::ItemTypeInfo, "ItemTypeInfo", 2),
+        (SOXSchema::JobInfo, "JobInfo", 100),
+        (SOXSchema::LeaderGeneration, "LeaderGeneration", 100),
+        (SOXSchema::LibraryInfo, "LibraryInfo", 100),
+        (SOXSchema::ResistInfo, "ResistInfo", 100),
+        (SOXSchema::SkillInfo, "SkillInfo", 100),
+        (SOXSchema::SkillPointTable, "SkillPointTable", 100),
+        (SOXSchema::SpecialNames, "SpecialNames", 100),
+        (SOXSchema::TroopInfo, "TroopInfo", 100),
+        (SOXSchema::UnitUVInfo, "UnitUVInfo", 100),
+        (SOXSchema::UnitUVID, "UnitUVID", 100),
+        (SOXSchema::WorldmapCharInfo, "WorldMap_CharInfo", 100),
+        (SOXSchema::WorldmapTroopInfo, "WorldMap_TroopInfo", 100),
     ];
 
     for (schema, stem, marker) in cases {
@@ -60,35 +60,35 @@ fn schemas_expose_canonical_stems_markers_and_display_names() {
 }
 
 struct SchemaFixture {
-    schema: SoxSchema,
+    schema: SOXSchema,
     bytes: Vec<u8>,
     record_count: usize,
 }
 
 fn schema_fixtures() -> Vec<SchemaFixture> {
     [
-        (SoxSchema::AbilityByJob, standard_fixture(24), 1),
-        (SoxSchema::AbilityInfo, standard_fixture(64), 1),
-        (SoxSchema::CharInfo, standard_fixture(136), 1),
+        (SOXSchema::AbilityByJob, standard_fixture(24), 1),
+        (SOXSchema::AbilityInfo, standard_fixture(64), 1),
+        (SOXSchema::CharInfo, standard_fixture(136), 1),
         (
-            SoxSchema::CustomRandomTable,
+            SOXSchema::CustomRandomTable,
             custom_random_table_fixture(),
             9,
         ),
-        (SoxSchema::ItemAttInfo, standard_fixture(12), 1),
-        (SoxSchema::ItemTypeInfo, item_type_info_fixture(), 1),
-        (SoxSchema::JobInfo, standard_fixture(72), 1),
-        (SoxSchema::LeaderGeneration, standard_fixture(72), 1),
-        (SoxSchema::LibraryInfo, standard_fixture(6), 1),
-        (SoxSchema::ResistInfo, standard_fixture(12), 1),
-        (SoxSchema::SkillInfo, standard_fixture(16), 1),
-        (SoxSchema::SkillPointTable, standard_fixture(8), 1),
-        (SoxSchema::SpecialNames, standard_fixture(4), 1),
-        (SoxSchema::TroopInfo, standard_fixture(148), 1),
-        (SoxSchema::UnitUvInfo, standard_fixture(36), 1),
-        (SoxSchema::UnitUvid, standard_fixture(72), 1),
-        (SoxSchema::WorldmapCharInfo, standard_fixture(28), 1),
-        (SoxSchema::WorldmapTroopInfo, standard_fixture(28), 1),
+        (SOXSchema::ItemAttInfo, standard_fixture(12), 1),
+        (SOXSchema::ItemTypeInfo, item_type_info_fixture(), 1),
+        (SOXSchema::JobInfo, standard_fixture(72), 1),
+        (SOXSchema::LeaderGeneration, standard_fixture(72), 1),
+        (SOXSchema::LibraryInfo, standard_fixture(6), 1),
+        (SOXSchema::ResistInfo, standard_fixture(12), 1),
+        (SOXSchema::SkillInfo, standard_fixture(16), 1),
+        (SOXSchema::SkillPointTable, standard_fixture(8), 1),
+        (SOXSchema::SpecialNames, standard_fixture(4), 1),
+        (SOXSchema::TroopInfo, standard_fixture(148), 1),
+        (SOXSchema::UnitUVInfo, standard_fixture(36), 1),
+        (SOXSchema::UnitUVID, standard_fixture(72), 1),
+        (SOXSchema::WorldmapCharInfo, standard_fixture(28), 1),
+        (SOXSchema::WorldmapTroopInfo, standard_fixture(28), 1),
     ]
     .into_iter()
     .map(|(schema, bytes, record_count)| SchemaFixture {
@@ -189,7 +189,7 @@ fn special_names_fixture() -> Vec<u8> {
 fn special_name_projects_literal_records_and_preserves_raw_source() {
     let bytes = special_names_fixture();
 
-    let document = SchemaDocument::parse(SoxSchema::SpecialNames, bytes.clone()).unwrap();
+    let document = SchemaDocument::parse(SOXSchema::SpecialNames, bytes.clone()).unwrap();
 
     assert_eq!(
         document.special_name(0),
@@ -212,9 +212,9 @@ fn special_name_projects_literal_records_and_preserves_raw_source() {
 #[test]
 fn special_name_is_none_for_wrong_schema_or_record() {
     let special_names =
-        SchemaDocument::parse(SoxSchema::SpecialNames, special_names_fixture()).unwrap();
+        SchemaDocument::parse(SOXSchema::SpecialNames, special_names_fixture()).unwrap();
     let ability_by_job =
-        SchemaDocument::parse(SoxSchema::AbilityByJob, standard_fixture(24)).unwrap();
+        SchemaDocument::parse(SOXSchema::AbilityByJob, standard_fixture(24)).unwrap();
 
     assert_eq!(special_names.special_name(2), None);
     assert_eq!(ability_by_job.special_name(0), None);
@@ -226,7 +226,7 @@ fn special_name_preserves_mixed_case_ascii_hex_source_and_canonicalizes_case() {
     let encoded = mixed_case_ascii_hex(&raw);
     assert!(encoded.iter().any(u8::is_ascii_lowercase));
 
-    let document = SchemaDocument::parse(SoxSchema::SpecialNames, encoded.clone()).unwrap();
+    let document = SchemaDocument::parse(SOXSchema::SpecialNames, encoded.clone()).unwrap();
     let canonical = document.canonical_encode().unwrap();
 
     assert_eq!(document.encode(), encoded);
@@ -252,7 +252,7 @@ fn mixed_case_standard_ascii_hex_preserves_exact_source() {
     *raw.get_mut(8).unwrap() = 0xab;
     let encoded = mixed_case_ascii_hex(&raw);
 
-    let document = SchemaDocument::parse(SoxSchema::AbilityByJob, encoded.clone()).unwrap();
+    let document = SchemaDocument::parse(SOXSchema::AbilityByJob, encoded.clone()).unwrap();
 
     assert_eq!(document.encode(), encoded);
     assert_eq!(document.canonical_encode().unwrap(), ascii_hex(&raw));
@@ -264,7 +264,7 @@ fn mixed_case_marker_two_ascii_hex_preserves_exact_source() {
     *raw.get_mut(8).unwrap() = 0xab;
     let encoded = mixed_case_ascii_hex(&raw);
 
-    let document = SchemaDocument::parse(SoxSchema::ItemTypeInfo, encoded.clone()).unwrap();
+    let document = SchemaDocument::parse(SOXSchema::ItemTypeInfo, encoded.clone()).unwrap();
 
     assert_eq!(document.encode(), encoded);
     assert_eq!(document.canonical_encode().unwrap(), ascii_hex(&raw));
@@ -275,7 +275,7 @@ fn canonical_ascii_hex_uses_only_uppercase_hexadecimal_digits() {
     let mut raw = standard_fixture(24);
     *raw.get_mut(8).unwrap() = 0xab;
     let document =
-        SchemaDocument::parse(SoxSchema::AbilityByJob, mixed_case_ascii_hex(&raw)).unwrap();
+        SchemaDocument::parse(SOXSchema::AbilityByJob, mixed_case_ascii_hex(&raw)).unwrap();
 
     let canonical = document.canonical_encode().unwrap();
 
@@ -288,7 +288,7 @@ fn standard_schema_preserves_bytes_after_the_footer() {
     let mut bytes = standard_fixture(24);
     bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
 
-    let document = SchemaDocument::parse(SoxSchema::AbilityByJob, bytes.clone()).unwrap();
+    let document = SchemaDocument::parse(SOXSchema::AbilityByJob, bytes.clone()).unwrap();
 
     assert_eq!(document.encode(), bytes);
     assert_eq!(document.canonical_encode().unwrap(), bytes);
@@ -299,7 +299,7 @@ fn item_type_info_preserves_bytes_after_the_generated_range() {
     let mut bytes = item_type_info_fixture();
     bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
 
-    let document = SchemaDocument::parse(SoxSchema::ItemTypeInfo, bytes.clone()).unwrap();
+    let document = SchemaDocument::parse(SOXSchema::ItemTypeInfo, bytes.clone()).unwrap();
 
     assert_eq!(document.encode(), bytes);
     assert_eq!(document.canonical_encode().unwrap(), bytes);
@@ -309,7 +309,7 @@ fn item_type_info_preserves_bytes_after_the_generated_range() {
 fn fixed_custom_random_table_ignores_the_header_count() {
     let bytes = custom_random_table_fixture();
 
-    let document = SchemaDocument::parse(SoxSchema::CustomRandomTable, bytes.clone()).unwrap();
+    let document = SchemaDocument::parse(SOXSchema::CustomRandomTable, bytes.clone()).unwrap();
 
     assert_eq!(document.record_count(), 9);
     assert_eq!(document.canonical_encode().unwrap(), bytes);
@@ -320,13 +320,13 @@ fn truncated_custom_random_table_stops_at_the_fixed_layout_preflight() {
     let mut bytes = custom_random_table_fixture();
     bytes.pop();
 
-    let error = SchemaDocument::parse(SoxSchema::CustomRandomTable, bytes).unwrap_err();
+    let error = SchemaDocument::parse(SOXSchema::CustomRandomTable, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::SchemaParse {
-            schema: SoxSchema::CustomRandomTable,
-            source: GeneratedSoxError::UnexpectedEof { .. },
+            schema: SOXSchema::CustomRandomTable,
+            source: GeneratedSOXError::UnexpectedEOF { .. },
             ..
         }
     ));
@@ -340,14 +340,14 @@ fn wrong_marker_is_a_schema_aware_parse_error() {
         .unwrap()
         .copy_from_slice(&2_u32.to_le_bytes());
 
-    let error = SchemaDocument::parse(SoxSchema::AbilityByJob, bytes).unwrap_err();
+    let error = SchemaDocument::parse(SOXSchema::AbilityByJob, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::SchemaParse {
-            schema: SoxSchema::AbilityByJob,
+            schema: SOXSchema::AbilityByJob,
             offset: 4,
-            source: GeneratedSoxError::Validation {
+            source: GeneratedSOXError::Validation {
                 id: "marker.check",
                 field: "marker",
                 ..
@@ -363,14 +363,14 @@ fn impossible_record_count_stops_at_the_handwritten_preflight() {
     push_u32(&mut bytes, u32::MAX);
     push_footer(&mut bytes);
 
-    let error = SchemaDocument::parse(SoxSchema::AbilityByJob, bytes).unwrap_err();
+    let error = SchemaDocument::parse(SOXSchema::AbilityByJob, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::SchemaParse {
-            schema: SoxSchema::AbilityByJob,
+            schema: SOXSchema::AbilityByJob,
             offset: 8,
-            source: GeneratedSoxError::InvalidLength {
+            source: GeneratedSOXError::InvalidLength {
                 field: "records",
                 value,
             },
@@ -381,23 +381,23 @@ fn impossible_record_count_stops_at_the_handwritten_preflight() {
 #[test]
 fn header_driven_preflights_reject_two_records_with_one_minimum_body() {
     let cases = [
-        (SoxSchema::AbilityByJob, 100, 24, 64),
-        (SoxSchema::AbilityInfo, 100, 64, 64),
-        (SoxSchema::CharInfo, 100, 136, 64),
-        (SoxSchema::ItemAttInfo, 100, 12, 64),
-        (SoxSchema::ItemTypeInfo, 2, 178, 0),
-        (SoxSchema::JobInfo, 100, 72, 64),
-        (SoxSchema::LeaderGeneration, 100, 72, 64),
-        (SoxSchema::LibraryInfo, 100, 6, 64),
-        (SoxSchema::ResistInfo, 100, 12, 64),
-        (SoxSchema::SkillInfo, 100, 16, 64),
-        (SoxSchema::SkillPointTable, 100, 8, 64),
-        (SoxSchema::SpecialNames, 100, 4, 64),
-        (SoxSchema::TroopInfo, 100, 148, 64),
-        (SoxSchema::UnitUvInfo, 100, 36, 64),
-        (SoxSchema::UnitUvid, 100, 72, 64),
-        (SoxSchema::WorldmapCharInfo, 100, 28, 64),
-        (SoxSchema::WorldmapTroopInfo, 100, 28, 64),
+        (SOXSchema::AbilityByJob, 100, 24, 64),
+        (SOXSchema::AbilityInfo, 100, 64, 64),
+        (SOXSchema::CharInfo, 100, 136, 64),
+        (SOXSchema::ItemAttInfo, 100, 12, 64),
+        (SOXSchema::ItemTypeInfo, 2, 178, 0),
+        (SOXSchema::JobInfo, 100, 72, 64),
+        (SOXSchema::LeaderGeneration, 100, 72, 64),
+        (SOXSchema::LibraryInfo, 100, 6, 64),
+        (SOXSchema::ResistInfo, 100, 12, 64),
+        (SOXSchema::SkillInfo, 100, 16, 64),
+        (SOXSchema::SkillPointTable, 100, 8, 64),
+        (SOXSchema::SpecialNames, 100, 4, 64),
+        (SOXSchema::TroopInfo, 100, 148, 64),
+        (SOXSchema::UnitUVInfo, 100, 36, 64),
+        (SOXSchema::UnitUVID, 100, 72, 64),
+        (SOXSchema::WorldmapCharInfo, 100, 28, 64),
+        (SOXSchema::WorldmapTroopInfo, 100, 28, 64),
     ];
 
     for (schema, marker, minimum_record_bytes, footer_bytes) in cases {
@@ -419,7 +419,7 @@ fn header_driven_preflights_reject_two_records_with_one_minimum_body() {
                 FormatError::SchemaParse {
                     schema: actual_schema,
                     offset: 8,
-                    source: GeneratedSoxError::InvalidLength {
+                    source: GeneratedSOXError::InvalidLength {
                         field: "records",
                         value: 2,
                     },
@@ -433,28 +433,28 @@ fn header_driven_preflights_reject_two_records_with_one_minimum_body() {
 #[test]
 fn odd_ascii_hex_length_remains_typed() {
     let error = SchemaDocument::parse(
-        SoxSchema::ItemTypeInfo,
+        SOXSchema::ItemTypeInfo,
         b"020000000100000000000000000000000".to_vec(),
     )
     .unwrap_err();
 
     assert!(matches!(
         error,
-        FormatError::OddAsciiHexLength { length: 33 }
+        FormatError::OddASCIIHexLength { length: 33 }
     ));
 }
 
 #[test]
 fn invalid_ascii_hex_byte_remains_typed() {
     let error = SchemaDocument::parse(
-        SoxSchema::ItemTypeInfo,
+        SOXSchema::ItemTypeInfo,
         b"0200000001000000Z00000000000000000".to_vec(),
     )
     .unwrap_err();
 
     assert!(matches!(
         error,
-        FormatError::InvalidAsciiHexByte { index: 16 }
+        FormatError::InvalidASCIIHexByte { index: 16 }
     ));
 }
 
@@ -464,7 +464,7 @@ fn automatic_detection_still_returns_only_the_three_existing_document_kinds() {
     let skill = parse_sox(standard_fixture(16)).unwrap();
     let text = parse_sox(text_fixture()).unwrap();
 
-    assert!(matches!(troop, SoxDocument::Troop(_)));
-    assert!(matches!(skill, SoxDocument::Skill(_)));
-    assert!(matches!(text, SoxDocument::Text(_)));
+    assert!(matches!(troop, SOXDocument::Troop(_)));
+    assert!(matches!(skill, SOXDocument::Skill(_)));
+    assert!(matches!(text, SOXDocument::Text(_)));
 }

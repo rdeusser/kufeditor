@@ -11,7 +11,7 @@ use gpui::{
 };
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
-    DocumentEdit, DocumentId, DocumentKind, LoadedDocument, SaveToken, SkillTextField, TroopField,
+    DocumentEdit, DocumentID, DocumentKind, LoadedDocument, SaveToken, SkillTextField, TroopField,
     TroopGroup, Workspace, WorkspaceError, load_path,
 };
 
@@ -22,7 +22,7 @@ use crate::{
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
-    state::{Area, ClosePolicy, RecordSelections, RequestId, ShellState, navigation_projection},
+    state::{Area, ClosePolicy, RecordSelections, RequestID, ShellState, navigation_projection},
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
     views,
@@ -51,7 +51,7 @@ struct ActiveNumberEdit {
 }
 
 impl ActiveNumberEdit {
-    fn troop_field(document: DocumentId, record: usize, field: TroopField, value: i32) -> Self {
+    fn troop_field(document: DocumentID, record: usize, field: TroopField, value: i32) -> Self {
         Self {
             target: NumberEditTarget::TroopField {
                 document,
@@ -62,14 +62,14 @@ impl ActiveNumberEdit {
         }
     }
 
-    fn skill_id(document: DocumentId, record: usize, value: i32) -> Self {
+    fn skill_id(document: DocumentID, record: usize, value: i32) -> Self {
         Self {
-            target: NumberEditTarget::SkillId { document, record },
+            target: NumberEditTarget::SkillID { document, record },
             editor: NumberEdit::new(i64::from(value), i64::from(i32::MIN), i64::from(i32::MAX)),
         }
     }
 
-    fn skill_max_level(document: DocumentId, record: usize, value: u32) -> Self {
+    fn skill_max_level(document: DocumentID, record: usize, value: u32) -> Self {
         Self {
             target: NumberEditTarget::SkillMaxLevel { document, record },
             editor: NumberEdit::new(i64::from(value), 1, 65_535),
@@ -80,25 +80,25 @@ impl ActiveNumberEdit {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NumberEditTarget {
     TroopField {
-        document: DocumentId,
+        document: DocumentID,
         record: usize,
         field: TroopField,
     },
-    SkillId {
-        document: DocumentId,
+    SkillID {
+        document: DocumentID,
         record: usize,
     },
     SkillMaxLevel {
-        document: DocumentId,
+        document: DocumentID,
         record: usize,
     },
 }
 
 impl NumberEditTarget {
-    fn document(&self) -> DocumentId {
+    fn document(&self) -> DocumentID {
         match self {
             Self::TroopField { document, .. }
-            | Self::SkillId { document, .. }
+            | Self::SkillID { document, .. }
             | Self::SkillMaxLevel { document, .. } => *document,
         }
     }
@@ -106,11 +106,11 @@ impl NumberEditTarget {
     const fn format_name(self) -> &'static str {
         match self {
             Self::TroopField { .. } => "TroopInfo",
-            Self::SkillId { .. } | Self::SkillMaxLevel { .. } => "SkillInfo",
+            Self::SkillID { .. } | Self::SkillMaxLevel { .. } => "SkillInfo",
         }
     }
 
-    fn is_troop_field(&self, document: DocumentId, record: usize, field: TroopField) -> bool {
+    fn is_troop_field(&self, document: DocumentID, record: usize, field: TroopField) -> bool {
         matches!(
             self,
             Self::TroopField {
@@ -121,17 +121,17 @@ impl NumberEditTarget {
         )
     }
 
-    fn is_skill_id(&self, document: DocumentId, record: usize) -> bool {
+    fn is_skill_id(&self, document: DocumentID, record: usize) -> bool {
         matches!(
             self,
-            Self::SkillId {
+            Self::SkillID {
                 document: target_document,
                 record: target_record,
             } if *target_document == document && *target_record == record
         )
     }
 
-    fn is_skill_max_level(&self, document: DocumentId, record: usize) -> bool {
+    fn is_skill_max_level(&self, document: DocumentID, record: usize) -> bool {
         matches!(
             self,
             Self::SkillMaxLevel {
@@ -144,7 +144,7 @@ impl NumberEditTarget {
     fn document_edit(
         &self,
         value: i64,
-    ) -> Result<(DocumentId, DocumentEdit), std::num::TryFromIntError> {
+    ) -> Result<(DocumentID, DocumentEdit), std::num::TryFromIntError> {
         match *self {
             Self::TroopField {
                 document,
@@ -158,9 +158,9 @@ impl NumberEditTarget {
                     value: i32::try_from(value)?,
                 },
             )),
-            Self::SkillId { document, record } => Ok((
+            Self::SkillID { document, record } => Ok((
                 document,
-                DocumentEdit::SetSkillId {
+                DocumentEdit::SetSkillID {
                     record,
                     value: i32::try_from(value)?,
                 },
@@ -210,18 +210,18 @@ impl SkillTypeChoice {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TextEditTarget {
     Skill {
-        document: DocumentId,
+        document: DocumentID,
         record: usize,
         field: SkillTextField,
     },
-    TextSox {
-        document: DocumentId,
+    TextSOX {
+        document: DocumentID,
         record: usize,
     },
 }
 
 impl TextEditTarget {
-    const fn skill(document: DocumentId, record: usize, field: SkillTextField) -> Self {
+    const fn skill(document: DocumentID, record: usize, field: SkillTextField) -> Self {
         Self::Skill {
             document,
             record,
@@ -229,31 +229,31 @@ impl TextEditTarget {
         }
     }
 
-    const fn text_sox(document: DocumentId, record: usize) -> Self {
-        Self::TextSox { document, record }
+    const fn text_sox(document: DocumentID, record: usize) -> Self {
+        Self::TextSOX { document, record }
     }
 
-    const fn document(self) -> DocumentId {
+    const fn document(self) -> DocumentID {
         match self {
-            Self::Skill { document, .. } | Self::TextSox { document, .. } => document,
+            Self::Skill { document, .. } | Self::TextSOX { document, .. } => document,
         }
     }
 
     const fn format_name(self) -> &'static str {
         match self {
             Self::Skill { .. } => "SkillInfo",
-            Self::TextSox { .. } => "text SOX",
+            Self::TextSOX { .. } => "text SOX",
         }
     }
 
     const fn label(self) -> &'static str {
         match self {
             Self::Skill { field, .. } => field.label(),
-            Self::TextSox { .. } => "Text",
+            Self::TextSOX { .. } => "Text",
         }
     }
 
-    fn document_edit(self, value: String) -> (DocumentId, DocumentEdit) {
+    fn document_edit(self, value: String) -> (DocumentID, DocumentEdit) {
         match self {
             Self::Skill {
                 document,
@@ -267,8 +267,8 @@ impl TextEditTarget {
                     value,
                 },
             ),
-            Self::TextSox { document, record } => {
-                (document, DocumentEdit::SetTextSoxText { record, value })
+            Self::TextSOX { document, record } => {
+                (document, DocumentEdit::SetTextSOXText { record, value })
             }
         }
     }
@@ -283,14 +283,14 @@ struct ActiveTextEdit {
 enum EditorRoute {
     Troop,
     Skill,
-    TextSox,
+    TextSOX,
 }
 
 const fn editor_route(kind: DocumentKind) -> EditorRoute {
     match kind {
         DocumentKind::TroopInfo => EditorRoute::Troop,
         DocumentKind::SkillInfo => EditorRoute::Skill,
-        DocumentKind::TextSox => EditorRoute::TextSox,
+        DocumentKind::TextSOX => EditorRoute::TextSOX,
     }
 }
 
@@ -305,7 +305,7 @@ enum SkillTextProjection {
 
 fn skill_text_projection(
     workspace: &Workspace,
-    document: DocumentId,
+    document: DocumentID,
     record: usize,
     field: SkillTextField,
 ) -> SkillTextProjection {
@@ -349,7 +349,7 @@ trait OpenPromptLauncher {
     fn launch(
         &self,
         frame: &AppFrame,
-        request: RequestId,
+        request: RequestID,
         options: PathPromptOptions,
         cx: &mut Context<AppFrame>,
     ) -> Task<OpenPromptResult>;
@@ -361,7 +361,7 @@ impl OpenPromptLauncher for PlatformOpenPromptLauncher {
     fn launch(
         &self,
         _: &AppFrame,
-        _: RequestId,
+        _: RequestID,
         options: PathPromptOptions,
         cx: &mut Context<AppFrame>,
     ) -> Task<OpenPromptResult> {
@@ -408,7 +408,7 @@ pub struct AppFrame {
     pub(crate) shell: ShellState,
     theme: Theme,
     focus: FocusHandle,
-    active_document: Option<DocumentId>,
+    active_document: Option<DocumentID>,
     selections: RecordSelections,
     number_edit: Option<ActiveNumberEdit>,
     text_edit: Option<ActiveTextEdit>,
@@ -501,12 +501,12 @@ impl AppFrame {
         self.number_edit = Some(edit);
     }
 
-    fn activate_document(&mut self, document: DocumentId) {
+    fn activate_document(&mut self, document: DocumentID) {
         self.cancel_property_edit();
         self.active_document = Some(document);
     }
 
-    fn select_record(&mut self, document: DocumentId, record: usize) {
+    fn select_record(&mut self, document: DocumentID, record: usize) {
         self.cancel_property_edit();
         self.active_document = Some(document);
         self.selections.select(document, record);
@@ -578,7 +578,7 @@ impl AppFrame {
                     }
                     Err(error) => {
                         let summary = match target {
-                            TextEditTarget::TextSox { document, record } => self
+                            TextEditTarget::TextSOX { document, record } => self
                                 .workspace
                                 .text_sox_max_length(document, record)
                                 .map_or_else(
@@ -603,7 +603,7 @@ impl AppFrame {
         cx.notify();
     }
 
-    fn set_skill_type(&mut self, document: DocumentId, record: usize, choice: SkillTypeChoice) {
+    fn set_skill_type(&mut self, document: DocumentID, record: usize, choice: SkillTypeChoice) {
         self.cancel_property_edit();
         if self.active_document != Some(document) {
             self.notices.replace(
@@ -916,7 +916,7 @@ impl AppFrame {
         .detach();
     }
 
-    fn begin_open_prompt(&mut self, cx: &mut Context<Self>) -> RequestId {
+    fn begin_open_prompt(&mut self, cx: &mut Context<Self>) -> RequestID {
         let request = self.shell.begin_open();
         self.notices.begin(
             NoticeSource::Open,
@@ -939,7 +939,7 @@ impl AppFrame {
         self.open_paths(request, vec![path], cx);
     }
 
-    fn open_paths(&mut self, request: RequestId, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+    fn open_paths(&mut self, request: RequestID, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         if !self.shell.accepts_open(request) {
             return;
         }
@@ -963,7 +963,7 @@ impl AppFrame {
 
     fn finish_open_paths(
         &mut self,
-        request: RequestId,
+        request: RequestID,
         batch: Vec<(PathBuf, Result<LoadedDocument, WorkspaceError>)>,
         cx: &mut Context<Self>,
     ) {
@@ -1117,7 +1117,7 @@ impl AppFrame {
     fn finish_save_as_prompt(
         &mut self,
         notice_identity: u64,
-        document_id: DocumentId,
+        document_id: DocumentID,
         result: SaveAsPromptResult,
         cx: &mut Context<Self>,
     ) {
@@ -1182,7 +1182,7 @@ impl AppFrame {
 
     fn start_save(
         &mut self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         target: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -1197,7 +1197,7 @@ impl AppFrame {
 
     fn start_save_request(
         &mut self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         target: Option<PathBuf>,
         notice_identity: u64,
         cx: &mut Context<Self>,
@@ -1236,7 +1236,7 @@ impl AppFrame {
 
     fn finish_save_result(
         &mut self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         token: SaveToken,
         notice_identity: u64,
         result: Result<kufeditor_workspace::SavedDocument, kufeditor_workspace::WorkspaceError>,
@@ -1574,11 +1574,11 @@ impl AppFrame {
         }
     }
 
-    fn document_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+    fn document_editor(&self, document_id: DocumentID, cx: &mut Context<Self>) -> Div {
         match self.workspace.document_kind(document_id).map(editor_route) {
             Ok(EditorRoute::Troop) => self.troop_editor(document_id, cx),
             Ok(EditorRoute::Skill) => self.skill_editor(document_id, cx),
-            Ok(EditorRoute::TextSox) => self.text_sox_editor(document_id, cx),
+            Ok(EditorRoute::TextSOX) => self.text_sox_editor(document_id, cx),
             Err(error) => div()
                 .size_full()
                 .p(px(28.0))
@@ -1587,7 +1587,7 @@ impl AppFrame {
         }
     }
 
-    fn skill_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+    fn skill_editor(&self, document_id: DocumentID, cx: &mut Context<Self>) -> Div {
         let record_count = match self.workspace.record_count(document_id) {
             Ok(count) => count,
             Err(error) => {
@@ -1622,7 +1622,7 @@ impl AppFrame {
 
     fn skill_records(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record_count: usize,
         selected: usize,
         cx: &mut Context<Self>,
@@ -1645,7 +1645,7 @@ impl AppFrame {
             .collect()
     }
 
-    fn skill_group(&self, document_id: DocumentId, record: usize, cx: &mut Context<Self>) -> Div {
+    fn skill_group(&self, document_id: DocumentID, record: usize, cx: &mut Context<Self>) -> Div {
         let fields = vec![
             self.skill_id_field(document_id, record, cx),
             self.skill_text_field(document_id, record, SkillTextField::LocalizationKey, 1, cx),
@@ -1662,7 +1662,7 @@ impl AppFrame {
 
     fn skill_id_field(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1701,7 +1701,7 @@ impl AppFrame {
 
     fn skill_text_field(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record: usize,
         field: SkillTextField,
         index: usize,
@@ -1737,7 +1737,7 @@ impl AppFrame {
 
     fn skill_type_field(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1764,7 +1764,7 @@ impl AppFrame {
 
     fn skill_max_level_field(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1805,7 +1805,7 @@ impl AppFrame {
         }
     }
 
-    fn skill_diagnostics(&self, document_id: DocumentId) -> Vec<AnyElement> {
+    fn skill_diagnostics(&self, document_id: DocumentID) -> Vec<AnyElement> {
         let diagnostics = self.workspace.diagnostics(document_id).unwrap_or_default();
         if diagnostics.is_empty() {
             return vec![views::skill::no_diagnostics(&self.theme).into_any_element()];
@@ -1820,7 +1820,7 @@ impl AppFrame {
             .collect()
     }
 
-    fn text_sox_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+    fn text_sox_editor(&self, document_id: DocumentID, cx: &mut Context<Self>) -> Div {
         let record_count = match self.workspace.record_count(document_id) {
             Ok(count) => count,
             Err(error) => {
@@ -1850,7 +1850,7 @@ impl AppFrame {
 
     fn text_sox_records(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record_count: usize,
         selected: usize,
         cx: &mut Context<Self>,
@@ -1885,7 +1885,7 @@ impl AppFrame {
 
     fn text_sox_property_group(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record: usize,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -1923,7 +1923,7 @@ impl AppFrame {
         views::text::property_group(&self.theme, wire_index, maximum, text_field)
     }
 
-    fn text_sox_diagnostics(&self, document_id: DocumentId) -> Vec<AnyElement> {
+    fn text_sox_diagnostics(&self, document_id: DocumentID) -> Vec<AnyElement> {
         let diagnostics = self.workspace.diagnostics(document_id).unwrap_or_default();
         if diagnostics.is_empty() {
             return vec![views::text::no_diagnostics(&self.theme).into_any_element()];
@@ -1942,7 +1942,7 @@ impl AppFrame {
             .collect()
     }
 
-    fn troop_editor(&self, document_id: DocumentId, cx: &mut Context<Self>) -> Div {
+    fn troop_editor(&self, document_id: DocumentID, cx: &mut Context<Self>) -> Div {
         let record_count = match self.workspace.record_count(document_id) {
             Ok(count) => count,
             Err(error) => {
@@ -1974,7 +1974,7 @@ impl AppFrame {
 
     fn troop_records(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record_count: usize,
         selected: usize,
         cx: &mut Context<Self>,
@@ -1999,7 +1999,7 @@ impl AppFrame {
 
     fn troop_groups(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record: usize,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -2033,7 +2033,7 @@ impl AppFrame {
 
     fn troop_field(
         &self,
-        document_id: DocumentId,
+        document_id: DocumentID,
         record: usize,
         field: TroopField,
         index: usize,
@@ -2078,7 +2078,7 @@ impl AppFrame {
         }
     }
 
-    fn troop_diagnostics(&self, document_id: DocumentId) -> Vec<AnyElement> {
+    fn troop_diagnostics(&self, document_id: DocumentID) -> Vec<AnyElement> {
         let diagnostics = self.workspace.diagnostics(document_id).unwrap_or_default();
         if diagnostics.is_empty() {
             return vec![views::troop::no_diagnostics(&self.theme).into_any_element()];
@@ -2191,7 +2191,7 @@ fn action_button<A: Action>(
 fn set_open_notice(
     entity: &WeakEntity<AppFrame>,
     cx: &mut AsyncApp,
-    request: RequestId,
+    request: RequestID,
     notice: Option<Notice>,
 ) {
     let _ = entity.update(cx, move |frame, cx| {
@@ -2308,8 +2308,8 @@ mod tests {
     };
     use kufeditor_game::Game;
     use kufeditor_workspace::{
-        Document, DocumentEdit, DocumentId, DocumentKind, LoadedDocument, SkillDocument,
-        SkillTextField, TextSoxDocument, TroopDocument, TroopField, Workspace, WorkspaceError,
+        Document, DocumentEdit, DocumentID, DocumentKind, LoadedDocument, SkillDocument,
+        SkillTextField, TextSOXDocument, TroopDocument, TroopField, Workspace, WorkspaceError,
         load_path,
     };
 
@@ -2324,7 +2324,7 @@ mod tests {
         frame::discovery_status::DiscoveryStatus,
         notices::{Notice, NoticeLevel, NoticeSource},
         settings::SettingsStartup,
-        state::{Area, RecordSelections, RequestId, navigation_projection},
+        state::{Area, RecordSelections, RequestID, navigation_projection},
         text_input::{TextInputEvent, bind as bind_text_input},
     };
 
@@ -2381,7 +2381,7 @@ mod tests {
         fn launch(
             &self,
             frame: &AppFrame,
-            request: RequestId,
+            request: RequestID,
             _: PathPromptOptions,
             _: &mut Context<AppFrame>,
         ) -> Task<OpenPromptResult> {
@@ -2473,7 +2473,7 @@ mod tests {
         );
     }
 
-    fn open_troop(frame: &mut AppFrame, path: &str, move_speed: i32) -> DocumentId {
+    fn open_troop(frame: &mut AppFrame, path: &str, move_speed: i32) -> DocumentID {
         let mut bytes = vec![0_u8; 8 + 148 + 64];
         bytes
             .get_mut(0..4)
@@ -2513,7 +2513,7 @@ mod tests {
         SkillDocument::parse(bytes).unwrap()
     }
 
-    fn open_skill(frame: &mut AppFrame, path: &str, record_count: usize) -> DocumentId {
+    fn open_skill(frame: &mut AppFrame, path: &str, record_count: usize) -> DocumentID {
         frame.workspace.open_loaded(
             PathBuf::from(path),
             Document::Skill(skill_document(
@@ -2524,7 +2524,7 @@ mod tests {
         )
     }
 
-    fn text_sox_document(records: &[(u32, &str)]) -> TextSoxDocument {
+    fn text_sox_document(records: &[(u32, &str)]) -> TextSOXDocument {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&100_u32.to_le_bytes());
         bytes.extend_from_slice(&u32::try_from(records.len()).unwrap().to_le_bytes());
@@ -2533,13 +2533,13 @@ mod tests {
             bytes.extend_from_slice(&u16::try_from(text.len()).unwrap().to_le_bytes());
             bytes.extend_from_slice(text.as_bytes());
         }
-        TextSoxDocument::parse(bytes).unwrap()
+        TextSOXDocument::parse(bytes).unwrap()
     }
 
-    fn open_text_sox(frame: &mut AppFrame, path: &str, records: &[(u32, &str)]) -> DocumentId {
+    fn open_text_sox(frame: &mut AppFrame, path: &str, records: &[(u32, &str)]) -> DocumentID {
         frame.workspace.open_loaded(
             PathBuf::from(path),
-            Document::TextSox(text_sox_document(records)),
+            Document::TextSOX(text_sox_document(records)),
         )
     }
 
@@ -2547,7 +2547,7 @@ mod tests {
     fn text_sox_routing_keeps_all_document_routes_distinct() {
         assert_eq!(editor_route(DocumentKind::SkillInfo), EditorRoute::Skill);
         assert_eq!(editor_route(DocumentKind::TroopInfo), EditorRoute::Troop);
-        assert_eq!(editor_route(DocumentKind::TextSox), EditorRoute::TextSox);
+        assert_eq!(editor_route(DocumentKind::TextSOX), EditorRoute::TextSOX);
     }
 
     #[gpui::test]
@@ -3008,7 +3008,7 @@ mod tests {
             skill_id.target.document_edit(i64::from(i32::MIN)).unwrap(),
             (
                 document,
-                DocumentEdit::SetSkillId {
+                DocumentEdit::SetSkillID {
                     record: 0,
                     value: i32::MIN,
                 },
@@ -3079,7 +3079,7 @@ mod tests {
         let mut workspace = Workspace::new();
         let document = workspace.open_loaded(
             PathBuf::from("StringTable.sox"),
-            Document::TextSox(text_sox_document(&[(9001, "Alpha")])),
+            Document::TextSOX(text_sox_document(&[(9001, "Alpha")])),
         );
         let target = TextEditTarget::text_sox(document, 3);
 
@@ -3087,7 +3087,7 @@ mod tests {
             target.document_edit("Omega".to_owned()),
             (
                 document,
-                DocumentEdit::SetTextSoxText {
+                DocumentEdit::SetTextSOXText {
                     record: 3,
                     value: "Omega".to_owned(),
                 },
@@ -3104,7 +3104,7 @@ mod tests {
         );
         let text_document = workspace.open_loaded(
             PathBuf::from("StringTable.sox"),
-            Document::TextSox(text_sox_document(&[(9001, "Alpha")])),
+            Document::TextSOX(text_sox_document(&[(9001, "Alpha")])),
         );
         let skill = TextEditTarget::skill(skill_document, 1, SkillTextField::LocalizationKey);
         let text = TextEditTarget::text_sox(text_document, 2);
@@ -3160,11 +3160,11 @@ mod tests {
         let mut workspace = Workspace::new();
         let first = workspace.open_loaded(
             PathBuf::from("first.sox"),
-            Document::TextSox(text_sox_document(&[(1, "one"), (2, "two"), (3, "three")])),
+            Document::TextSOX(text_sox_document(&[(1, "one"), (2, "two"), (3, "three")])),
         );
         let second = workspace.open_loaded(
             PathBuf::from("second.sox"),
-            Document::TextSox(text_sox_document(&[(4, "four"), (5, "five")])),
+            Document::TextSOX(text_sox_document(&[(4, "four"), (5, "five")])),
         );
         let mut selections = RecordSelections::default();
 

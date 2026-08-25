@@ -6,7 +6,7 @@ use std::{env, path::PathBuf};
     reason = "the pure path tests construct platforms not compiled on this host"
 )]
 enum SettingsPlatform {
-    MacOs,
+    MacOS,
     Windows,
     Unix,
 }
@@ -26,7 +26,7 @@ pub(crate) fn settings_path() -> PathBuf {
     };
 
     #[cfg(target_os = "macos")]
-    let platform = SettingsPlatform::MacOs;
+    let platform = SettingsPlatform::MacOS;
     #[cfg(target_os = "windows")]
     let platform = SettingsPlatform::Windows;
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -37,7 +37,7 @@ pub(crate) fn settings_path() -> PathBuf {
 
 fn settings_path_for(platform: SettingsPlatform, directories: &SettingsDirectories) -> PathBuf {
     let base = match platform {
-        SettingsPlatform::MacOs => directories
+        SettingsPlatform::MacOS => directories
             .home
             .as_deref()
             .filter(|path| !path.as_os_str().is_empty())
@@ -81,7 +81,7 @@ mod tests {
         };
 
         assert_eq!(
-            settings_path_for(SettingsPlatform::MacOs, &directories),
+            settings_path_for(SettingsPlatform::MacOS, &directories),
             PathBuf::from("/Users/alice/Library/Application Support/kufeditor/settings.json")
         );
     }
@@ -133,7 +133,7 @@ mod tests {
         let directories = SettingsDirectories::default();
 
         for platform in [
-            SettingsPlatform::MacOs,
+            SettingsPlatform::MacOS,
             SettingsPlatform::Windows,
             SettingsPlatform::Unix,
         ] {

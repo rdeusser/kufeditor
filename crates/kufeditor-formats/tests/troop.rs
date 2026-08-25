@@ -102,7 +102,7 @@ fn ascii_hex_odd_length_returns_a_typed_error() {
 
     assert!(matches!(
         error,
-        FormatError::OddAsciiHexLength { length: 17 }
+        FormatError::OddASCIIHexLength { length: 17 }
     ));
 }
 
@@ -112,7 +112,7 @@ fn ascii_hex_non_hex_byte_after_a_valid_prefix_returns_a_typed_error() {
 
     assert!(matches!(
         error,
-        FormatError::InvalidAsciiHexByte { index: 16 }
+        FormatError::InvalidASCIIHexByte { index: 16 }
     ));
 }
 
@@ -130,7 +130,7 @@ fn rebase_rejects_a_saved_source_with_a_different_envelope() {
 
     let error = document.rebase_source(&saved, troop_fixture()).unwrap_err();
 
-    assert!(matches!(error, FormatError::InconsistentSoxRebase));
+    assert!(matches!(error, FormatError::InconsistentSOXRebase));
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn rebase_rejects_same_envelope_source_that_does_not_match_the_saved_snapshot() 
 
     let error = document.rebase_source(&saved, inconsistent).unwrap_err();
 
-    assert!(matches!(error, FormatError::InconsistentSoxRebase));
+    assert!(matches!(error, FormatError::InconsistentSOXRebase));
     assert_eq!(document.encode().unwrap(), source);
 }
 
@@ -179,7 +179,7 @@ fn edit_round_trip_preserves_footer_and_tail() {
 fn invalid_resistance_and_hp_are_diagnostics() {
     let mut document = TroopDocument::parse(troop_fixture()).unwrap();
     document.set_value(0, TroopField::ResistMelee, 501).unwrap();
-    document.set_value(0, TroopField::DefaultUnitHp, 0).unwrap();
+    document.set_value(0, TroopField::DefaultUnitHP, 0).unwrap();
 
     let diagnostics = document.diagnostics();
     assert!(

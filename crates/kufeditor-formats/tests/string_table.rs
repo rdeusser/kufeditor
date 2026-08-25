@@ -4,12 +4,12 @@
 )]
 
 use kufeditor_formats::{
-    FormatError, SoxDocument, SoxStringTableDocument, SoxStringTableLayout, StringTableParseError,
+    FormatError, SOXDocument, SOXStringTableDocument, SOXStringTableLayout, StringTableParseError,
     parse_sox,
 };
 
 struct LayoutFixture {
-    layout: SoxStringTableLayout,
+    layout: SOXStringTableLayout,
     bytes: Vec<u8>,
     ids: Vec<Option<u32>>,
     fields: Vec<Vec<Vec<u8>>>,
@@ -25,7 +25,7 @@ fn sequential_fixture() -> LayoutFixture {
     push_trailing(&mut bytes);
 
     LayoutFixture {
-        layout: SoxStringTableLayout::Sequential,
+        layout: SOXStringTableLayout::Sequential,
         bytes,
         ids: vec![None, None],
         fields: vec![vec![Vec::new()], vec![b"Alpha\xAB".to_vec()]],
@@ -44,7 +44,7 @@ fn indexed_fixture() -> LayoutFixture {
     push_trailing(&mut bytes);
 
     LayoutFixture {
-        layout: SoxStringTableLayout::Indexed,
+        layout: SOXStringTableLayout::Indexed,
         bytes,
         ids: vec![Some(3), Some(4_096)],
         fields: vec![vec![Vec::new()], vec![b"Beta".to_vec()]],
@@ -66,7 +66,7 @@ fn indexed_pair_fixture() -> LayoutFixture {
     push_trailing(&mut bytes);
 
     LayoutFixture {
-        layout: SoxStringTableLayout::IndexedPair,
+        layout: SOXStringTableLayout::IndexedPair,
         bytes,
         ids: vec![Some(7), Some(4_096)],
         fields: vec![
@@ -95,7 +95,7 @@ fn indexed_triple_fixture() -> LayoutFixture {
     push_trailing(&mut bytes);
 
     LayoutFixture {
-        layout: SoxStringTableLayout::IndexedTriple,
+        layout: SOXStringTableLayout::IndexedTriple,
         bytes,
         ids: vec![Some(11), Some(4_096)],
         fields: vec![
@@ -153,7 +153,7 @@ fn mixed_case_ascii_hex(bytes: &[u8]) -> Vec<u8> {
 fn literal_layouts_parse_with_exact_records_fields_and_writes() {
     for fixture in layout_fixtures() {
         let document =
-            SoxStringTableDocument::parse(fixture.layout, fixture.bytes.clone()).unwrap();
+            SOXStringTableDocument::parse(fixture.layout, fixture.bytes.clone()).unwrap();
 
         assert_eq!(document.layout(), fixture.layout);
         assert_eq!(document.record_count(), fixture.fields.len());
@@ -187,10 +187,10 @@ fn literal_layouts_parse_with_exact_records_fields_and_writes() {
 #[test]
 fn layout_display_labels_are_stable() {
     let cases = [
-        (SoxStringTableLayout::Sequential, "Sequential"),
-        (SoxStringTableLayout::Indexed, "Indexed"),
-        (SoxStringTableLayout::IndexedPair, "IndexedPair"),
-        (SoxStringTableLayout::IndexedTriple, "IndexedTriple"),
+        (SOXStringTableLayout::Sequential, "Sequential"),
+        (SOXStringTableLayout::Indexed, "Indexed"),
+        (SOXStringTableLayout::IndexedPair, "IndexedPair"),
+        (SOXStringTableLayout::IndexedTriple, "IndexedTriple"),
     ];
 
     for (layout, label) in cases {
@@ -203,7 +203,7 @@ fn mixed_case_ascii_hex_preserves_exact_source_and_canonicalizes_uppercase() {
     let fixture = sequential_fixture();
     let encoded = mixed_case_ascii_hex(&fixture.bytes);
 
-    let document = SoxStringTableDocument::parse(fixture.layout, encoded.clone()).unwrap();
+    let document = SOXStringTableDocument::parse(fixture.layout, encoded.clone()).unwrap();
 
     assert_eq!(document.encode(), encoded);
     assert_eq!(
@@ -228,12 +228,12 @@ fn wrong_marker_is_a_layout_aware_parse_error() {
         .copy_from_slice(&2_u32.to_le_bytes());
 
     let error =
-        SoxStringTableDocument::parse(SoxStringTableLayout::IndexedPair, bytes).unwrap_err();
+        SOXStringTableDocument::parse(SOXStringTableLayout::IndexedPair, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::StringTableParse {
-            layout: SoxStringTableLayout::IndexedPair,
+            layout: SOXStringTableLayout::IndexedPair,
             offset: 0,
             source: StringTableParseError::InvalidMarker { marker: 2 },
         }
@@ -242,36 +242,36 @@ fn wrong_marker_is_a_layout_aware_parse_error() {
 
 #[test]
 fn odd_ascii_hex_length_remains_typed() {
-    let error = SoxStringTableDocument::parse(
-        SoxStringTableLayout::Sequential,
+    let error = SOXStringTableDocument::parse(
+        SOXStringTableLayout::Sequential,
         b"6400000001000000A".to_vec(),
     )
     .unwrap_err();
 
     assert!(matches!(
         error,
-        FormatError::OddAsciiHexLength { length: 17 }
+        FormatError::OddASCIIHexLength { length: 17 }
     ));
 }
 
 #[test]
 fn invalid_ascii_hex_byte_remains_typed() {
-    let error = SoxStringTableDocument::parse(
-        SoxStringTableLayout::Sequential,
+    let error = SOXStringTableDocument::parse(
+        SOXStringTableLayout::Sequential,
         b"6400000001000000Z0".to_vec(),
     )
     .unwrap_err();
 
     assert!(matches!(
         error,
-        FormatError::InvalidAsciiHexByte { index: 16 }
+        FormatError::InvalidASCIIHexByte { index: 16 }
     ));
 }
 
 #[test]
 fn truncated_header_remains_typed() {
-    let error = SoxStringTableDocument::parse(
-        SoxStringTableLayout::Sequential,
+    let error = SOXStringTableDocument::parse(
+        SOXStringTableLayout::Sequential,
         vec![100, 0, 0, 0, 1, 0, 0],
     )
     .unwrap_err();
@@ -279,7 +279,7 @@ fn truncated_header_remains_typed() {
     assert!(matches!(
         error,
         FormatError::StringTableParse {
-            layout: SoxStringTableLayout::Sequential,
+            layout: SOXStringTableLayout::Sequential,
             offset: 7,
             source: StringTableParseError::TruncatedHeader { actual: 7 },
         }
@@ -296,14 +296,14 @@ fn truncated_stored_id_remains_typed() {
     bytes.extend_from_slice(b"First");
     bytes.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
 
-    let error = SoxStringTableDocument::parse(SoxStringTableLayout::Indexed, bytes).unwrap_err();
+    let error = SOXStringTableDocument::parse(SOXStringTableLayout::Indexed, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::StringTableParse {
-            layout: SoxStringTableLayout::Indexed,
+            layout: SOXStringTableLayout::Indexed,
             offset: 19,
-            source: StringTableParseError::TruncatedStoredId {
+            source: StringTableParseError::TruncatedStoredID {
                 record: 1,
                 remaining: 3,
             },
@@ -320,12 +320,12 @@ fn truncated_field_length_remains_typed() {
     bytes.extend_from_slice(b"One");
     bytes.push(0xff);
 
-    let error = SoxStringTableDocument::parse(SoxStringTableLayout::Sequential, bytes).unwrap_err();
+    let error = SOXStringTableDocument::parse(SOXStringTableLayout::Sequential, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::StringTableParse {
-            layout: SoxStringTableLayout::Sequential,
+            layout: SOXStringTableLayout::Sequential,
             offset: 13,
             source: StringTableParseError::TruncatedFieldLength {
                 record: 1,
@@ -347,12 +347,12 @@ fn truncated_field_payload_reports_the_full_context() {
     bytes.push(b'X');
 
     let error =
-        SoxStringTableDocument::parse(SoxStringTableLayout::IndexedPair, bytes).unwrap_err();
+        SOXStringTableDocument::parse(SOXStringTableLayout::IndexedPair, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::StringTableParse {
-            layout: SoxStringTableLayout::IndexedPair,
+            layout: SOXStringTableLayout::IndexedPair,
             offset: 16,
             source: StringTableParseError::TruncatedFieldPayload {
                 record: 0,
@@ -373,12 +373,12 @@ fn impossible_record_count_stops_at_the_handwritten_preflight() {
     let remaining = bytes.len() - 8;
 
     let error =
-        SoxStringTableDocument::parse(SoxStringTableLayout::IndexedTriple, bytes).unwrap_err();
+        SOXStringTableDocument::parse(SOXStringTableLayout::IndexedTriple, bytes).unwrap_err();
 
     assert!(matches!(
         error,
         FormatError::StringTableParse {
-            layout: SoxStringTableLayout::IndexedTriple,
+            layout: SOXStringTableLayout::IndexedTriple,
             offset: 8,
             source: StringTableParseError::ImpossibleRecordCount {
                 count: u32::MAX,
@@ -392,10 +392,10 @@ fn impossible_record_count_stops_at_the_handwritten_preflight() {
 #[test]
 fn each_layout_rejects_one_byte_less_than_its_minimum_body() {
     let cases = [
-        (SoxStringTableLayout::Sequential, 2_usize),
-        (SoxStringTableLayout::Indexed, 6),
-        (SoxStringTableLayout::IndexedPair, 8),
-        (SoxStringTableLayout::IndexedTriple, 10),
+        (SOXStringTableLayout::Sequential, 2_usize),
+        (SOXStringTableLayout::Indexed, 6),
+        (SOXStringTableLayout::IndexedPair, 8),
+        (SOXStringTableLayout::IndexedTriple, 10),
     ];
 
     for (layout, minimum_record_size) in cases {
@@ -405,7 +405,7 @@ fn each_layout_rejects_one_byte_less_than_its_minimum_body() {
         let remaining = minimum_record_size * 2 - 1;
         bytes.resize(bytes.len() + remaining, 0);
 
-        let error = SoxStringTableDocument::parse(layout, bytes).unwrap_err();
+        let error = SOXStringTableDocument::parse(layout, bytes).unwrap_err();
 
         assert!(
             matches!(
@@ -430,12 +430,12 @@ fn each_layout_rejects_one_byte_less_than_its_minimum_body() {
 #[test]
 fn record_and_field_access_errors_report_valid_counts() {
     let fixture = indexed_pair_fixture();
-    let document = SoxStringTableDocument::parse(fixture.layout, fixture.bytes.clone()).unwrap();
+    let document = SOXStringTableDocument::parse(fixture.layout, fixture.bytes.clone()).unwrap();
 
     assert!(matches!(
         document.record_id(2).unwrap_err(),
         FormatError::StringTableRecordOutOfRange {
-            layout: SoxStringTableLayout::IndexedPair,
+            layout: SOXStringTableLayout::IndexedPair,
             record: 2,
             record_count: 2,
         }
@@ -443,7 +443,7 @@ fn record_and_field_access_errors_report_valid_counts() {
     assert!(matches!(
         document.field(2, 0).unwrap_err(),
         FormatError::StringTableRecordOutOfRange {
-            layout: SoxStringTableLayout::IndexedPair,
+            layout: SOXStringTableLayout::IndexedPair,
             record: 2,
             record_count: 2,
         }
@@ -451,7 +451,7 @@ fn record_and_field_access_errors_report_valid_counts() {
     assert!(matches!(
         document.field(0, 2).unwrap_err(),
         FormatError::StringTableFieldOutOfRange {
-            layout: SoxStringTableLayout::IndexedPair,
+            layout: SOXStringTableLayout::IndexedPair,
             record: 0,
             field: 2,
             field_count: 2,
@@ -498,11 +498,11 @@ fn text_fixture() -> Vec<u8> {
     bytes
 }
 
-fn existing_document_kind(document: &SoxDocument) -> &'static str {
+fn existing_document_kind(document: &SOXDocument) -> &'static str {
     match document {
-        SoxDocument::Troop(_) => "TroopInfo",
-        SoxDocument::Skill(_) => "SkillInfo",
-        SoxDocument::Text(_) => "text SOX",
+        SOXDocument::Troop(_) => "TroopInfo",
+        SOXDocument::Skill(_) => "SkillInfo",
+        SOXDocument::Text(_) => "text SOX",
     }
 }
 
@@ -517,5 +517,5 @@ fn automatic_detection_still_has_only_the_three_existing_document_kinds() {
     assert_eq!(existing_document_kind(&text), "text SOX");
 
     let error = parse_sox(sequential_fixture().bytes).unwrap_err();
-    assert!(matches!(error, FormatError::UnsupportedSox));
+    assert!(matches!(error, FormatError::UnsupportedSOX));
 }

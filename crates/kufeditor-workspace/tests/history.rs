@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use kufeditor_formats::{DiagnosticField, FormatError};
 use kufeditor_workspace::{
-    Document, DocumentEdit, DocumentKind, SkillDocument, SkillTextField, TextSoxDocument,
-    TextSoxField, TroopDocument, TroopField, Workspace, WorkspaceError,
+    Document, DocumentEdit, DocumentKind, SkillDocument, SkillTextField, TextSOXDocument,
+    TextSOXField, TroopDocument, TroopField, Workspace, WorkspaceError,
 };
 
 fn troop_fixture() -> Vec<u8> {
@@ -36,7 +36,7 @@ fn troop_fixture() -> Vec<u8> {
     bytes
 }
 
-fn workspace_with_troop() -> (Workspace, kufeditor_workspace::DocumentId) {
+fn workspace_with_troop() -> (Workspace, kufeditor_workspace::DocumentID) {
     let document = TroopDocument::parse(troop_fixture()).unwrap();
     let mut workspace = Workspace::new();
     let id = workspace.open_loaded(PathBuf::from("TroopInfo.sox"), Document::Troop(document));
@@ -62,7 +62,7 @@ fn push_skill_text(bytes: &mut Vec<u8>, value: &[u8]) {
     bytes.extend_from_slice(value);
 }
 
-fn workspace_with_skill() -> (Workspace, kufeditor_workspace::DocumentId) {
+fn workspace_with_skill() -> (Workspace, kufeditor_workspace::DocumentID) {
     let document =
         SkillDocument::parse(skill_fixture(b"@(S_Elemental)", b"IL_SKL_Elem.tga")).unwrap();
     let mut workspace = Workspace::new();
@@ -84,12 +84,12 @@ fn text_sox_fixture() -> Vec<u8> {
     bytes
 }
 
-fn workspace_with_text_sox() -> (Workspace, kufeditor_workspace::DocumentId) {
-    let document = TextSoxDocument::parse(text_sox_fixture()).unwrap();
+fn workspace_with_text_sox() -> (Workspace, kufeditor_workspace::DocumentID) {
+    let document = TextSOXDocument::parse(text_sox_fixture()).unwrap();
     let mut workspace = Workspace::new();
     let id = workspace.open_loaded(
         PathBuf::from("StringTable.sox"),
-        Document::TextSox(document),
+        Document::TextSOX(document),
     );
     (workspace, id)
 }
@@ -230,7 +230,7 @@ fn skill_numeric_edits_have_exact_undo_and_redo() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetSkillId {
+            DocumentEdit::SetSkillID {
                 record: 0,
                 value: 8,
             },
@@ -391,7 +391,7 @@ fn wrong_kind_edits_are_state_neutral() {
     let troop_error = troop_workspace
         .apply(
             troop_id,
-            DocumentEdit::SetSkillId {
+            DocumentEdit::SetSkillID {
                 record: 0,
                 value: 8,
             },
@@ -427,7 +427,7 @@ fn invalid_skill_text_projection_stays_typed() {
 
     assert!(matches!(
         error,
-        WorkspaceError::Format(FormatError::SkillUtf8 {
+        WorkspaceError::Format(FormatError::SkillUTF8 {
             record: 0,
             field: SkillTextField::LocalizationKey,
             ..
@@ -439,7 +439,7 @@ fn invalid_skill_text_projection_stays_typed() {
 fn text_sox_kind_count_and_projections_return_wire_values() {
     let (workspace, id) = workspace_with_text_sox();
 
-    assert_eq!(workspace.document_kind(id).unwrap(), DocumentKind::TextSox);
+    assert_eq!(workspace.document_kind(id).unwrap(), DocumentKind::TextSOX);
     assert_eq!(workspace.record_count(id).unwrap(), 2);
     assert_eq!(workspace.text_sox_index(id, 0).unwrap(), 41);
     assert_eq!(workspace.text_sox_max_length(id, 0).unwrap(), 5);
@@ -457,7 +457,7 @@ fn text_sox_owned_text_edit_has_exact_undo_and_redo() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "Omega".to_owned(),
             },
@@ -482,7 +482,7 @@ fn editing_text_sox_after_undo_discards_the_redo_branch() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "Omega".to_owned(),
             },
@@ -492,7 +492,7 @@ fn editing_text_sox_after_undo_discards_the_redo_branch() {
     workspace
         .apply(
             id,
-            DocumentEdit::SetTextSoxText {
+            DocumentEdit::SetTextSOXText {
                 record: 0,
                 value: "Gamma".to_owned(),
             },
@@ -509,12 +509,12 @@ fn invalid_text_sox_edits_create_no_state_or_history() {
         (
             0,
             String::new(),
-            FormatError::TextSoxEmptyText { record: 0 },
+            FormatError::TextSOXEmptyText { record: 0 },
         ),
         (
             0,
             "Café".to_owned(),
-            FormatError::TextSoxInvalidTextByte {
+            FormatError::TextSOXInvalidTextByte {
                 record: 0,
                 index: 3,
                 byte: 0xc3,
@@ -523,7 +523,7 @@ fn invalid_text_sox_edits_create_no_state_or_history() {
         (
             0,
             "Longer".to_owned(),
-            FormatError::TextSoxTooLong {
+            FormatError::TextSOXTooLong {
                 record: 0,
                 length: 6,
                 maximum: 5,
@@ -535,7 +535,7 @@ fn invalid_text_sox_edits_create_no_state_or_history() {
             FormatError::RecordOutOfRange {
                 record: 2,
                 record_count: 2,
-                field: DiagnosticField::TextSox(TextSoxField::Text),
+                field: DiagnosticField::TextSOX(TextSOXField::Text),
             },
         ),
     ];
@@ -545,7 +545,7 @@ fn invalid_text_sox_edits_create_no_state_or_history() {
         let saved_state = workspace.state_id(id).unwrap();
 
         let error = workspace
-            .apply(id, DocumentEdit::SetTextSoxText { record, value })
+            .apply(id, DocumentEdit::SetTextSOXText { record, value })
             .unwrap_err();
 
         assert_eq!(
@@ -562,7 +562,7 @@ fn invalid_text_sox_edits_create_no_state_or_history() {
 
 #[test]
 fn wrong_kind_text_sox_edits_are_state_neutral() {
-    let text_edit = DocumentEdit::SetTextSoxText {
+    let text_edit = DocumentEdit::SetTextSOXText {
         record: 0,
         value: "Omega".to_owned(),
     };
@@ -571,14 +571,14 @@ fn wrong_kind_text_sox_edits_are_state_neutral() {
     let troop_error = troop_workspace
         .apply(troop_id, text_edit.clone())
         .unwrap_err();
-    assert!(matches!(troop_error, WorkspaceError::NotTextSox(id) if id == troop_id));
+    assert!(matches!(troop_error, WorkspaceError::NotTextSOX(id) if id == troop_id));
     assert_eq!(troop_workspace.state_id(troop_id).unwrap(), troop_state);
     assert!(!troop_workspace.can_undo(troop_id).unwrap());
 
     let (mut skill_workspace, skill_id) = workspace_with_skill();
     let skill_state = skill_workspace.state_id(skill_id).unwrap();
     let skill_error = skill_workspace.apply(skill_id, text_edit).unwrap_err();
-    assert!(matches!(skill_error, WorkspaceError::NotTextSox(id) if id == skill_id));
+    assert!(matches!(skill_error, WorkspaceError::NotTextSOX(id) if id == skill_id));
     assert_eq!(skill_workspace.state_id(skill_id).unwrap(), skill_state);
     assert!(!skill_workspace.can_undo(skill_id).unwrap());
 
@@ -592,7 +592,7 @@ fn wrong_kind_text_sox_edits_are_state_neutral() {
     let skill_error = text_workspace
         .apply(
             text_id,
-            DocumentEdit::SetSkillId {
+            DocumentEdit::SetSkillID {
                 record: 0,
                 value: 8,
             },
@@ -612,7 +612,7 @@ fn text_sox_duplicate_index_diagnostics_retain_the_typed_field() {
     assert_eq!(diagnostics.len(), 2);
     assert!(
         diagnostics.iter().all(|diagnostic| {
-            diagnostic.field == DiagnosticField::TextSox(TextSoxField::Index)
+            diagnostic.field == DiagnosticField::TextSOX(TextSOXField::Index)
         })
     );
 }

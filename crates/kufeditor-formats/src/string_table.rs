@@ -1,19 +1,19 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::{FormatError, StringTableEncodeError, StringTableParseError, sox::SoxSource};
+use crate::{FormatError, StringTableEncodeError, StringTableParseError, sox::SOXSource};
 
 const HEADER_SIZE: usize = 8;
 const MARKER: u32 = 100;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SoxStringTableLayout {
+pub enum SOXStringTableLayout {
     Sequential,
     Indexed,
     IndexedPair,
     IndexedTriple,
 }
 
-impl SoxStringTableLayout {
+impl SOXStringTableLayout {
     const fn field_count(self) -> usize {
         match self {
             Self::Sequential | Self::Indexed => 1,
@@ -32,7 +32,7 @@ impl SoxStringTableLayout {
     }
 }
 
-impl Display for SoxStringTableLayout {
+impl Display for SOXStringTableLayout {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Sequential => "Sequential",
@@ -50,16 +50,16 @@ struct StringTableRecord {
 }
 
 #[derive(Clone, Debug)]
-pub struct SoxStringTableDocument {
-    layout: SoxStringTableLayout,
-    source: SoxSource,
+pub struct SOXStringTableDocument {
+    layout: SOXStringTableLayout,
+    source: SOXSource,
     records: Vec<StringTableRecord>,
     trailing: Vec<u8>,
 }
 
-impl SoxStringTableDocument {
-    pub fn parse(layout: SoxStringTableLayout, bytes: Vec<u8>) -> Result<Self, FormatError> {
-        let source = SoxSource::parse(bytes)?;
+impl SOXStringTableDocument {
+    pub fn parse(layout: SOXStringTableLayout, bytes: Vec<u8>) -> Result<Self, FormatError> {
+        let source = SOXSource::parse(bytes)?;
         let (records, trailing) = parse_records(layout, source.decoded())?;
         Ok(Self {
             layout,
@@ -69,7 +69,7 @@ impl SoxStringTableDocument {
         })
     }
 
-    pub const fn layout(&self) -> SoxStringTableLayout {
+    pub const fn layout(&self) -> SOXStringTableLayout {
         self.layout
     }
 
@@ -110,10 +110,10 @@ impl SoxStringTableDocument {
 
         for (record_index, record) in self.records.iter().enumerate() {
             match self.layout {
-                SoxStringTableLayout::Sequential => {}
-                SoxStringTableLayout::Indexed
-                | SoxStringTableLayout::IndexedPair
-                | SoxStringTableLayout::IndexedTriple => append_stored_id(&mut decoded, record),
+                SOXStringTableLayout::Sequential => {}
+                SOXStringTableLayout::Indexed
+                | SOXStringTableLayout::IndexedPair
+                | SOXStringTableLayout::IndexedTriple => append_stored_id(&mut decoded, record),
             }
 
             for (field, value) in record.fields.iter().enumerate() {
@@ -152,7 +152,7 @@ impl SoxStringTableDocument {
 }
 
 fn parse_records(
-    layout: SoxStringTableLayout,
+    layout: SOXStringTableLayout,
     decoded: &[u8],
 ) -> Result<(Vec<StringTableRecord>, Vec<u8>), FormatError> {
     let count = parse_header(layout, decoded)?;
@@ -162,10 +162,10 @@ fn parse_records(
 
     for record in 0..capacity {
         let id = match layout {
-            SoxStringTableLayout::Sequential => None,
-            SoxStringTableLayout::Indexed
-            | SoxStringTableLayout::IndexedPair
-            | SoxStringTableLayout::IndexedTriple => {
+            SOXStringTableLayout::Sequential => None,
+            SOXStringTableLayout::Indexed
+            | SOXStringTableLayout::IndexedPair
+            | SOXStringTableLayout::IndexedTriple => {
                 Some(parse_stored_id(layout, decoded, record, &mut offset)?)
             }
         };
@@ -182,7 +182,7 @@ fn parse_records(
     Ok((records, trailing))
 }
 
-fn parse_header(layout: SoxStringTableLayout, decoded: &[u8]) -> Result<u32, FormatError> {
+fn parse_header(layout: SOXStringTableLayout, decoded: &[u8]) -> Result<u32, FormatError> {
     let header = decoded.get(..HEADER_SIZE).ok_or_else(|| {
         parse_error(
             layout,
@@ -220,7 +220,7 @@ fn parse_header(layout: SoxStringTableLayout, decoded: &[u8]) -> Result<u32, For
 }
 
 fn preflight_record_count(
-    layout: SoxStringTableLayout,
+    layout: SOXStringTableLayout,
     decoded: &[u8],
     count: u32,
 ) -> Result<usize, FormatError> {
@@ -254,7 +254,7 @@ fn preflight_record_count(
 }
 
 fn parse_stored_id(
-    layout: SoxStringTableLayout,
+    layout: SOXStringTableLayout,
     decoded: &[u8],
     record: usize,
     offset: &mut usize,
@@ -264,7 +264,7 @@ fn parse_stored_id(
         parse_error(
             layout,
             *offset,
-            StringTableParseError::TruncatedStoredId { record, remaining },
+            StringTableParseError::TruncatedStoredID { record, remaining },
         )
     })?;
     let id = decoded
@@ -274,7 +274,7 @@ fn parse_stored_id(
             parse_error(
                 layout,
                 *offset,
-                StringTableParseError::TruncatedStoredId { record, remaining },
+                StringTableParseError::TruncatedStoredID { record, remaining },
             )
         })?;
     *offset = end;
@@ -282,7 +282,7 @@ fn parse_stored_id(
 }
 
 fn parse_field(
-    layout: SoxStringTableLayout,
+    layout: SOXStringTableLayout,
     decoded: &[u8],
     record: usize,
     field: usize,
@@ -361,7 +361,7 @@ fn read_u32(bytes: &[u8]) -> Option<u32> {
 }
 
 const fn parse_error(
-    layout: SoxStringTableLayout,
+    layout: SOXStringTableLayout,
     offset: usize,
     source: StringTableParseError,
 ) -> FormatError {
@@ -374,15 +374,15 @@ const fn parse_error(
 
 #[cfg(test)]
 mod tests {
-    use super::SoxStringTableLayout;
+    use super::SOXStringTableLayout;
 
     #[test]
     fn layout_minimum_record_sizes_match_the_wire_table() {
         let cases = [
-            (SoxStringTableLayout::Sequential, 2),
-            (SoxStringTableLayout::Indexed, 6),
-            (SoxStringTableLayout::IndexedPair, 8),
-            (SoxStringTableLayout::IndexedTriple, 10),
+            (SOXStringTableLayout::Sequential, 2),
+            (SOXStringTableLayout::Indexed, 6),
+            (SOXStringTableLayout::IndexedPair, 8),
+            (SOXStringTableLayout::IndexedTriple, 10),
         ];
 
         for (layout, expected) in cases {

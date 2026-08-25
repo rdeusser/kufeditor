@@ -101,7 +101,7 @@ mod tests {
         catalog_status::{CatalogKey, CatalogRequestError, CatalogStatus},
         notices::{Notice, NoticeLevel, NoticeSource},
         settings::SettingsStartup,
-        state::RequestId,
+        state::RequestID,
     };
 
     fn test_startup() -> SettingsStartup {
@@ -132,7 +132,7 @@ mod tests {
         key
     }
 
-    fn catalog_request(frame: &AppFrame) -> Option<RequestId> {
+    fn catalog_request(frame: &AppFrame) -> Option<RequestID> {
         match frame.catalog.status() {
             CatalogStatus::Loading { key }
             | CatalogStatus::Ready { key, .. }
@@ -151,12 +151,12 @@ mod tests {
                 game: Game::Crusaders,
                 root: PathBuf::from("/file"),
             },
-            InstallationError::SoxMissing {
+            InstallationError::SOXMissing {
                 game: Game::Crusaders,
                 root: PathBuf::from("/game"),
                 sox_path: PathBuf::from("/game/Data/SOX"),
             },
-            InstallationError::SoxNotDirectory {
+            InstallationError::SOXNotDirectory {
                 game: Game::Crusaders,
                 root: PathBuf::from("/game"),
                 sox_path: PathBuf::from("/game/Data/SOX"),
@@ -385,7 +385,7 @@ mod tests {
                     .set_root(Game::Crusaders, Some(configured.clone()));
                 let paths = frame.game_paths.clone();
                 let key = begin_catalog(frame, Game::Crusaders, "/configured/crusaders");
-                let load_error = CatalogLoadError::InvalidSoxDirectory {
+                let load_error = CatalogLoadError::InvalidSOXDirectory {
                     path: configured.join("Data/SOX"),
                 };
                 let expected = load_error.to_string();
@@ -419,7 +419,7 @@ mod tests {
                 game: Game::Crusaders,
                 root: PathBuf::from("/old"),
             }),
-            CatalogRequestError::Load(CatalogLoadError::InvalidSoxDirectory {
+            CatalogRequestError::Load(CatalogLoadError::InvalidSOXDirectory {
                 path: PathBuf::from("/old/Data/SOX"),
             }),
         ] {

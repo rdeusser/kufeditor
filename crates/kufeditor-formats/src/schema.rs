@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
 use crate::{
-    error::{FormatError, GeneratedSoxError},
+    error::{FormatError, GeneratedSOXError},
     generated::{
         sox_ability_by_job, sox_ability_info, sox_char_info, sox_custom_random_table,
         sox_item_att_info, sox_item_type_info, sox_job_info, sox_leader_generation,
@@ -9,14 +9,14 @@ use crate::{
         sox_special_names, sox_troop_info, sox_unit_uv_info, sox_unit_uvid, sox_worldmap_char_info,
         sox_worldmap_troop_info,
     },
-    sox::SoxSource,
+    sox::SOXSource,
 };
 
 const HEADER_BYTES: usize = 8;
 const CUSTOM_RANDOM_TABLE_BYTES: usize = 1_272;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SoxSchema {
+pub enum SOXSchema {
     AbilityByJob,
     AbilityInfo,
     CharInfo,
@@ -31,13 +31,13 @@ pub enum SoxSchema {
     SkillPointTable,
     SpecialNames,
     TroopInfo,
-    UnitUvInfo,
-    UnitUvid,
+    UnitUVInfo,
+    UnitUVID,
     WorldmapCharInfo,
     WorldmapTroopInfo,
 }
 
-impl SoxSchema {
+impl SOXSchema {
     pub const ALL: [Self; 18] = [
         Self::AbilityByJob,
         Self::AbilityInfo,
@@ -53,8 +53,8 @@ impl SoxSchema {
         Self::SkillPointTable,
         Self::SpecialNames,
         Self::TroopInfo,
-        Self::UnitUvInfo,
-        Self::UnitUvid,
+        Self::UnitUVInfo,
+        Self::UnitUVID,
         Self::WorldmapCharInfo,
         Self::WorldmapTroopInfo,
     ];
@@ -75,8 +75,8 @@ impl SoxSchema {
             Self::SkillPointTable => "SkillPointTable",
             Self::SpecialNames => "SpecialNames",
             Self::TroopInfo => "TroopInfo",
-            Self::UnitUvInfo => "UnitUVInfo",
-            Self::UnitUvid => "UnitUVID",
+            Self::UnitUVInfo => "UnitUVInfo",
+            Self::UnitUVID => "UnitUVID",
             Self::WorldmapCharInfo => "WorldMap_CharInfo",
             Self::WorldmapTroopInfo => "WorldMap_TroopInfo",
         }
@@ -97,19 +97,19 @@ impl SoxSchema {
             Self::CustomRandomTable => None,
             Self::ItemAttInfo | Self::ResistInfo => Some((12, 64)),
             Self::ItemTypeInfo => Some((178, 0)),
-            Self::JobInfo | Self::LeaderGeneration | Self::UnitUvid => Some((72, 64)),
+            Self::JobInfo | Self::LeaderGeneration | Self::UnitUVID => Some((72, 64)),
             Self::LibraryInfo => Some((6, 64)),
             Self::SkillInfo => Some((16, 64)),
             Self::SkillPointTable => Some((8, 64)),
             Self::SpecialNames => Some((4, 64)),
             Self::TroopInfo => Some((148, 64)),
-            Self::UnitUvInfo => Some((36, 64)),
+            Self::UnitUVInfo => Some((36, 64)),
             Self::WorldmapCharInfo | Self::WorldmapTroopInfo => Some((28, 64)),
         }
     }
 }
 
-impl Display for SoxSchema {
+impl Display for SOXSchema {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.file_stem())
     }
@@ -123,15 +123,15 @@ pub struct SpecialNameRef<'a> {
 
 #[derive(Clone, Debug)]
 pub struct SchemaDocument {
-    schema: SoxSchema,
-    source: SoxSource,
+    schema: SOXSchema,
+    source: SOXSource,
     model: SchemaModel,
     trailing: Vec<u8>,
 }
 
 impl SchemaDocument {
-    pub fn parse(schema: SoxSchema, bytes: Vec<u8>) -> Result<Self, FormatError> {
-        let source = SoxSource::parse_with_marker(bytes, schema.marker())?;
+    pub fn parse(schema: SOXSchema, bytes: Vec<u8>) -> Result<Self, FormatError> {
+        let source = SOXSource::parse_with_marker(bytes, schema.marker())?;
         preflight(schema, source.decoded())?;
 
         let mut offset = 0;
@@ -153,7 +153,7 @@ impl SchemaDocument {
         })
     }
 
-    pub const fn schema(&self) -> SoxSchema {
+    pub const fn schema(&self) -> SOXSchema {
         self.schema
     }
 
@@ -190,13 +190,13 @@ impl SchemaDocument {
     }
 }
 
-fn preflight(schema: SoxSchema, decoded: &[u8]) -> Result<(), FormatError> {
+fn preflight(schema: SOXSchema, decoded: &[u8]) -> Result<(), FormatError> {
     let marker = read_u32(schema, decoded, 0)?;
     if marker != schema.marker() {
         return Err(schema_parse_error(
             schema,
             4,
-            GeneratedSoxError::Validation {
+            GeneratedSOXError::Validation {
                 id: "marker.check",
                 message: marker_message(schema),
                 field: "marker",
@@ -204,12 +204,12 @@ fn preflight(schema: SoxSchema, decoded: &[u8]) -> Result<(), FormatError> {
         ));
     }
 
-    if schema == SoxSchema::CustomRandomTable {
+    if schema == SOXSchema::CustomRandomTable {
         if decoded.len() < CUSTOM_RANDOM_TABLE_BYTES {
             return Err(schema_parse_error(
                 schema,
                 decoded.len(),
-                GeneratedSoxError::UnexpectedEof {
+                GeneratedSOXError::UnexpectedEOF {
                     offset: decoded.len(),
                     needed: CUSTOM_RANDOM_TABLE_BYTES - decoded.len(),
                     remaining: 0,
@@ -233,7 +233,7 @@ fn preflight(schema: SoxSchema, decoded: &[u8]) -> Result<(), FormatError> {
         return Err(schema_parse_error(
             schema,
             HEADER_BYTES,
-            GeneratedSoxError::InvalidLength {
+            GeneratedSOXError::InvalidLength {
                 field: "records",
                 value: i128::from(count),
             },
@@ -243,13 +243,13 @@ fn preflight(schema: SoxSchema, decoded: &[u8]) -> Result<(), FormatError> {
     Ok(())
 }
 
-fn read_u32(schema: SoxSchema, bytes: &[u8], offset: usize) -> Result<u32, FormatError> {
+fn read_u32(schema: SOXSchema, bytes: &[u8], offset: usize) -> Result<u32, FormatError> {
     let remaining = bytes.len().saturating_sub(offset);
     let Some(end) = offset.checked_add(4) else {
         return Err(schema_parse_error(
             schema,
             offset,
-            GeneratedSoxError::LengthOverflow {
+            GeneratedSOXError::LengthOverflow {
                 field: "offset",
                 value: 4_usize.to_string(),
                 target: "usize",
@@ -260,7 +260,7 @@ fn read_u32(schema: SoxSchema, bytes: &[u8], offset: usize) -> Result<u32, Forma
         return Err(schema_parse_error(
             schema,
             offset,
-            GeneratedSoxError::UnexpectedEof {
+            GeneratedSOXError::UnexpectedEOF {
                 offset,
                 needed: 4,
                 remaining,
@@ -271,7 +271,7 @@ fn read_u32(schema: SoxSchema, bytes: &[u8], offset: usize) -> Result<u32, Forma
         schema_parse_error(
             schema,
             offset,
-            GeneratedSoxError::FixedSize {
+            GeneratedSOXError::FixedSize {
                 field: "primitive",
                 expected: 4,
                 actual: value.len(),
@@ -281,17 +281,17 @@ fn read_u32(schema: SoxSchema, bytes: &[u8], offset: usize) -> Result<u32, Forma
     Ok(u32::from_le_bytes(value))
 }
 
-const fn marker_message(schema: SoxSchema) -> &'static str {
+const fn marker_message(schema: SOXSchema) -> &'static str {
     match schema {
-        SoxSchema::ItemTypeInfo => "ItemTypeInfo marker must be 2",
+        SOXSchema::ItemTypeInfo => "ItemTypeInfo marker must be 2",
         _ => "SOX marker must be 100",
     }
 }
 
 const fn schema_parse_error(
-    schema: SoxSchema,
+    schema: SOXSchema,
     offset: usize,
-    source: GeneratedSoxError,
+    source: GeneratedSOXError,
 ) -> FormatError {
     FormatError::SchemaParse {
         schema,
@@ -309,16 +309,16 @@ macro_rules! define_schema_models {
 
         impl SchemaModel {
             fn parse(
-                schema: SoxSchema,
+                schema: SOXSchema,
                 bytes: &[u8],
                 offset: &mut usize,
-            ) -> Result<Self, GeneratedSoxError> {
+            ) -> Result<Self, GeneratedSOXError> {
                 match schema {
                     $(
-                        SoxSchema::$variant => $module::File::parse(bytes, offset)
+                        SOXSchema::$variant => $module::File::parse(bytes, offset)
                             .map(Box::new)
                             .map(Self::$variant)
-                            .map_err(GeneratedSoxError::from),
+                            .map_err(GeneratedSOXError::from),
                     )+
                 }
             }
@@ -329,12 +329,12 @@ macro_rules! define_schema_models {
                 }
             }
 
-            fn to_bytes(&self) -> Result<Vec<u8>, GeneratedSoxError> {
+            fn to_bytes(&self) -> Result<Vec<u8>, GeneratedSOXError> {
                 match self {
                     $(
                         Self::$variant(file) => file
                             .to_bytes()
-                            .map_err(GeneratedSoxError::from),
+                            .map_err(GeneratedSOXError::from),
                     )+
                 }
             }
@@ -357,8 +357,8 @@ define_schema_models!(
     SkillPointTable => sox_skill_point_table;
     SpecialNames => sox_special_names;
     TroopInfo => sox_troop_info;
-    UnitUvInfo => sox_unit_uv_info;
-    UnitUvid => sox_unit_uvid;
+    UnitUVInfo => sox_unit_uv_info;
+    UnitUVID => sox_unit_uvid;
     WorldmapCharInfo => sox_worldmap_char_info;
     WorldmapTroopInfo => sox_worldmap_troop_info;
 );
@@ -406,10 +406,10 @@ const _: fn(SchemaModel) = |model| match model {
     SchemaModel::TroopInfo(file) => {
         let _: Box<sox_troop_info::File> = file;
     }
-    SchemaModel::UnitUvInfo(file) => {
+    SchemaModel::UnitUVInfo(file) => {
         let _: Box<sox_unit_uv_info::File> = file;
     }
-    SchemaModel::UnitUvid(file) => {
+    SchemaModel::UnitUVID(file) => {
         let _: Box<sox_unit_uvid::File> = file;
     }
     SchemaModel::WorldmapCharInfo(file) => {
@@ -422,29 +422,29 @@ const _: fn(SchemaModel) = |model| match model {
 
 #[cfg(test)]
 mod tests {
-    use super::{CUSTOM_RANDOM_TABLE_BYTES, SoxSchema};
+    use super::{CUSTOM_RANDOM_TABLE_BYTES, SOXSchema};
 
     #[test]
     fn schema_record_layouts_match_generated_minimums() {
         let cases = [
-            (SoxSchema::AbilityByJob, Some((24, 64))),
-            (SoxSchema::AbilityInfo, Some((64, 64))),
-            (SoxSchema::CharInfo, Some((136, 64))),
-            (SoxSchema::CustomRandomTable, None),
-            (SoxSchema::ItemAttInfo, Some((12, 64))),
-            (SoxSchema::ItemTypeInfo, Some((178, 0))),
-            (SoxSchema::JobInfo, Some((72, 64))),
-            (SoxSchema::LeaderGeneration, Some((72, 64))),
-            (SoxSchema::LibraryInfo, Some((6, 64))),
-            (SoxSchema::ResistInfo, Some((12, 64))),
-            (SoxSchema::SkillInfo, Some((16, 64))),
-            (SoxSchema::SkillPointTable, Some((8, 64))),
-            (SoxSchema::SpecialNames, Some((4, 64))),
-            (SoxSchema::TroopInfo, Some((148, 64))),
-            (SoxSchema::UnitUvInfo, Some((36, 64))),
-            (SoxSchema::UnitUvid, Some((72, 64))),
-            (SoxSchema::WorldmapCharInfo, Some((28, 64))),
-            (SoxSchema::WorldmapTroopInfo, Some((28, 64))),
+            (SOXSchema::AbilityByJob, Some((24, 64))),
+            (SOXSchema::AbilityInfo, Some((64, 64))),
+            (SOXSchema::CharInfo, Some((136, 64))),
+            (SOXSchema::CustomRandomTable, None),
+            (SOXSchema::ItemAttInfo, Some((12, 64))),
+            (SOXSchema::ItemTypeInfo, Some((178, 0))),
+            (SOXSchema::JobInfo, Some((72, 64))),
+            (SOXSchema::LeaderGeneration, Some((72, 64))),
+            (SOXSchema::LibraryInfo, Some((6, 64))),
+            (SOXSchema::ResistInfo, Some((12, 64))),
+            (SOXSchema::SkillInfo, Some((16, 64))),
+            (SOXSchema::SkillPointTable, Some((8, 64))),
+            (SOXSchema::SpecialNames, Some((4, 64))),
+            (SOXSchema::TroopInfo, Some((148, 64))),
+            (SOXSchema::UnitUVInfo, Some((36, 64))),
+            (SOXSchema::UnitUVID, Some((72, 64))),
+            (SOXSchema::WorldmapCharInfo, Some((28, 64))),
+            (SOXSchema::WorldmapTroopInfo, Some((28, 64))),
         ];
 
         for (schema, expected) in cases {
