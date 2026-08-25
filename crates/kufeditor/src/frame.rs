@@ -5,14 +5,15 @@ use gpui::{
     Action, AnyElement, AnyWindowHandle, App, AsyncApp, Context, Div, Entity, FocusHandle,
     Focusable, KeyDownEvent, PathPromptOptions, PromptLevel, Stateful, WeakEntity, Window, div, px,
 };
-use kufeditor_game::Game;
+use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
-    DocumentEdit, DocumentId, DocumentKind, SaveToken, SkillTextField, TroopField, TroopGroup,
-    Workspace, load_path,
+    DocumentEdit, DocumentId, DocumentKind, LoadedDocument, SaveToken, SkillTextField, TroopField,
+    TroopGroup, Workspace, WorkspaceError, load_path,
 };
 
 use crate::{
     actions::{OpenFile, Redo, Save, SaveAll, SaveAs, Undo},
+    catalog_status::{CatalogRequestError, CatalogSession},
     components,
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
@@ -23,6 +24,7 @@ use crate::{
     views,
 };
 
+mod catalog;
 mod settings;
 use self::settings::protected_settings_notice;
 
@@ -331,6 +333,7 @@ pub struct AppFrame {
     text_edit: Option<ActiveTextEdit>,
     game_paths: kufeditor_game::GamePaths,
     recent_files: kufeditor_workspace::RecentFiles,
+    catalog: CatalogSession<NameDictionary, CatalogRequestError>,
     settings: SettingsWritePump,
     notices: NoticeCenter,
     next_workspace_notice: u64,
@@ -376,6 +379,7 @@ impl AppFrame {
             text_edit: None,
             game_paths,
             recent_files,
+            catalog: CatalogSession::default(),
             settings,
             notices,
             next_workspace_notice: 1,
@@ -785,19 +789,13 @@ impl AppFrame {
 
     fn open_action(&mut self, _: &OpenFile, _: &mut Window, cx: &mut Context<Self>) {
         self.cancel_property_edit();
-        let request = self.shell.begin_open();
+        let request = self.begin_open_prompt(cx);
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: true,
             prompt: Some("Open".into()),
         });
-        self.notices.begin(
-            NoticeSource::Open,
-            request.get(),
-            Notice::info("Choose one or more .sox files"),
-        );
-        cx.notify();
 
         cx.spawn(async move |entity, cx| {
             let paths = match prompt.await {
@@ -817,61 +815,132 @@ impl AppFrame {
                     return;
                 }
             };
-
-            let tasks = paths
-                .into_iter()
-                .map(|path| {
-                    cx.background_executor().spawn(async move {
-                        let loaded = load_path(path.clone());
-                        (path, loaded)
-                    })
-                })
-                .collect::<Vec<_>>();
-            let mut opened_any = false;
-
-            for task in tasks {
-                let (path, result) = task.await;
-                let activate = !opened_any;
-                let opened = entity
-                    .update(cx, move |frame, cx| {
-                        if !frame.shell.accepts_open(request) {
-                            return false;
-                        }
-                        match result {
-                            Ok(loaded) => {
-                                let name = display_name(&path);
-                                let document_id = frame.workspace.insert_loaded(loaded);
-                                if activate {
-                                    frame.activate_document(document_id);
-                                    frame.shell.select_area(Area::Files);
-                                }
-                                frame.notices.complete(
-                                    NoticeSource::Open,
-                                    request.get(),
-                                    Some(Notice::success(format!("Opened {name}"))),
-                                );
-                                cx.notify();
-                                true
-                            }
-                            Err(error) => {
-                                frame.notices.complete(
-                                    NoticeSource::Open,
-                                    request.get(),
-                                    Some(Notice::error(
-                                        format!("Could not open {}", display_name(&path)),
-                                        &error,
-                                    )),
-                                );
-                                cx.notify();
-                                false
-                            }
-                        }
-                    })
-                    .unwrap_or(false);
-                opened_any |= opened;
-            }
+            let _ = entity.update(cx, move |frame, cx| {
+                frame.open_paths(request, paths, cx);
+            });
         })
         .detach();
+    }
+
+    fn begin_open_prompt(&mut self, cx: &mut Context<Self>) -> RequestId {
+        let request = self.shell.begin_open();
+        self.notices.begin(
+            NoticeSource::Open,
+            request.get(),
+            Notice::info("Choose one or more .sox files"),
+        );
+        cx.notify();
+        request
+    }
+
+    fn open_recent_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.cancel_property_edit();
+        let request = self.shell.begin_open();
+        self.notices.begin(
+            NoticeSource::Open,
+            request.get(),
+            Notice::info(format!("Opening {}", display_name(&path))),
+        );
+        cx.notify();
+        self.open_paths(request, vec![path], cx);
+    }
+
+    fn open_paths(&mut self, request: RequestId, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        if !self.shell.accepts_open(request) {
+            return;
+        }
+        let tasks = paths
+            .into_iter()
+            .map(|path| {
+                cx.background_executor().spawn(async move {
+                    let loaded = load_path(path.clone());
+                    (path, loaded)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        cx.spawn(async move |entity, cx| {
+            let mut batch = Vec::with_capacity(tasks.len());
+            for task in tasks {
+                batch.push(task.await);
+            }
+            let _ = entity.update(cx, move |frame, cx| {
+                frame.finish_open_paths(request, batch, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_open_paths(
+        &mut self,
+        request: RequestId,
+        batch: Vec<(PathBuf, Result<LoadedDocument, WorkspaceError>)>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.shell.accepts_open(request) {
+            return;
+        }
+
+        let mut accepted = Vec::new();
+        let mut failures = Vec::new();
+        for (path, result) in batch {
+            match result {
+                Ok(loaded) => accepted.push((path, loaded)),
+                Err(error) => failures.push((path, error)),
+            }
+        }
+
+        let unicode_paths = accepted
+            .iter()
+            .filter(|(path, _)| path.to_str().is_some())
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>();
+        let accepted_count = accepted.len();
+        let omitted_count = accepted.len() - unicode_paths.len();
+        if !unicode_paths.is_empty() {
+            let previous = self.recent_files.clone();
+            self.recent_files.add_batch(unicode_paths);
+            if !self.schedule_settings_write(self.shell.game(), cx) {
+                self.recent_files = previous;
+            }
+        }
+
+        for (index, (path, loaded)) in accepted.into_iter().enumerate() {
+            let (_, loaded_document) = loaded.into_parts();
+            let document = self.workspace.open_loaded(path, loaded_document);
+            if index == 0 {
+                self.activate_document(document);
+                self.shell.select_area(Area::Files);
+            }
+        }
+
+        let failed_count = failures.len();
+        let notice = if failed_count > 0 {
+            Notice::error_lines(
+                format!(
+                    "Opened {}; {} failed",
+                    file_count(accepted_count),
+                    failed_count
+                ),
+                failures
+                    .into_iter()
+                    .map(|(path, error)| (path.display().to_string(), error)),
+            )
+        } else if omitted_count > 0 {
+            Notice::plain(
+                NoticeLevel::Warning,
+                format!(
+                    "Opened {}; {} omitted from recent files",
+                    file_count(accepted_count),
+                    path_count(omitted_count)
+                ),
+            )
+        } else {
+            Notice::success(format!("Opened {}", file_count(accepted_count)))
+        };
+        self.notices
+            .complete(NoticeSource::Open, request.get(), Some(notice));
+        cx.notify();
     }
 
     fn save_action(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
@@ -1262,6 +1331,7 @@ impl AppFrame {
         }
         self.shell.select_game(game);
         self.cancel_property_edit();
+        self.start_catalog_load(cx);
         cx.notify();
     }
 
@@ -1297,9 +1367,55 @@ impl AppFrame {
             ))
     }
 
+    fn home_recent_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        match views::home::project_recent_files(self.recent_files.paths()) {
+            views::home::RecentFilesProjection::Empty(message) => vec![
+                div()
+                    .id("home-recent-empty")
+                    .py(px(12.0))
+                    .text_color(self.theme.text_dim)
+                    .child(message)
+                    .into_any_element(),
+            ],
+            views::home::RecentFilesProjection::Rows(rows) => rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    let path = row.path;
+                    let hover = self.theme.raised;
+                    div()
+                        .id(("home-recent-row", index))
+                        .w_full()
+                        .px(px(12.0))
+                        .py(px(10.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.0))
+                        .border_b_1()
+                        .border_color(self.theme.border)
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(hover))
+                        .on_click(cx.listener(move |frame, _, _, cx| {
+                            frame.open_recent_path(path.clone(), cx);
+                        }))
+                        .child(div().text_color(self.theme.text).child(row.label))
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(self.theme.text_dim)
+                                .child(row.secondary),
+                        )
+                        .into_any_element()
+                })
+                .collect(),
+        }
+    }
+
     fn content(&self, cx: &mut Context<Self>) -> Div {
         match self.shell.area() {
-            Area::Home => views::home::render(&self.theme, self.shell.game()),
+            Area::Home => {
+                views::home::render(&self.theme, self.shell.game(), self.home_recent_rows(cx))
+            }
             Area::Files => {
                 let editor = self
                     .active_document
@@ -1948,6 +2064,16 @@ fn display_name(path: &Path) -> String {
         .into_owned()
 }
 
+fn file_count(count: usize) -> String {
+    let label = if count == 1 { "file" } else { "files" };
+    format!("{count} {label}")
+}
+
+fn path_count(count: usize) -> String {
+    let label = if count == 1 { "path" } else { "paths" };
+    format!("{count} {label}")
+}
+
 fn number_command(event: &KeyDownEvent) -> Option<NumberCommand> {
     match event.keystroke.key.as_str() {
         "enter" => Some(NumberCommand::Commit),
@@ -2025,7 +2151,7 @@ mod tests {
     use kufeditor_game::Game;
     use kufeditor_workspace::{
         Document, DocumentEdit, DocumentId, DocumentKind, SkillDocument, SkillTextField,
-        TextSoxDocument, TroopDocument, TroopField, Workspace,
+        TextSoxDocument, TroopDocument, TroopField, Workspace, load_path,
     };
 
     use super::{
@@ -2046,6 +2172,42 @@ mod tests {
         let path = file.path().to_path_buf();
         drop(file);
         SettingsStartup::load(path)
+    }
+
+    fn write_valid_sox(path: &std::path::Path) {
+        let mut bytes = vec![0_u8; 8 + 148 + 64];
+        bytes
+            .get_mut(0..8)
+            .unwrap()
+            .copy_from_slice(&[100, 0, 0, 0, 1, 0, 0, 0]);
+        fs::write(path, bytes).unwrap();
+    }
+
+    fn write_invalid_sox(path: &std::path::Path) {
+        fs::write(path, b"not a valid SOX document").unwrap();
+    }
+
+    fn begin_open_paths(
+        frame: &mut AppFrame,
+        paths: Vec<PathBuf>,
+        cx: &mut gpui::Context<AppFrame>,
+    ) {
+        let request = frame.shell.begin_open();
+        frame.notices.begin(
+            NoticeSource::Open,
+            request.get(),
+            Notice::info("Opening files"),
+        );
+        frame.open_paths(request, paths, cx);
+    }
+
+    fn open_paths_in_workspace(frame: &AppFrame) -> Vec<PathBuf> {
+        frame
+            .workspace
+            .document_ids()
+            .iter()
+            .map(|document| frame.workspace.path(*document).unwrap().to_path_buf())
+            .collect()
     }
 
     #[test]
@@ -2134,6 +2296,371 @@ mod tests {
         assert_eq!(editor_route(DocumentKind::SkillInfo), EditorRoute::Skill);
         assert_eq!(editor_route(DocumentKind::TroopInfo), EditorRoute::Troop);
         assert_eq!(editor_route(DocumentKind::TextSox), EditorRoute::TextSox);
+    }
+
+    #[gpui::test]
+    fn open_batch_keeps_input_order_for_documents_and_recent_files(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = ["A.sox", "B.sox", "C.sox"].map(|name| directory.path().join(name));
+        for path in &paths {
+            write_valid_sox(path);
+        }
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                begin_open_paths(frame, paths.to_vec(), cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(open_paths_in_workspace(frame), paths);
+                assert_eq!(frame.recent_files.paths(), paths);
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.level(), NoticeLevel::Success);
+                assert_eq!(notice.summary(), "Opened 3 files");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn picker_request_and_notice_exist_before_prompt_work(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                let request = frame.begin_open_prompt(cx);
+
+                assert!(frame.shell.accepts_open(request));
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Choose one or more .sox files")
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn open_batch_keeps_successes_and_reports_each_load_failure(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("A.sox");
+        let invalid = directory.path().join("B.sox");
+        let third = directory.path().join("C.sox");
+        write_valid_sox(&first);
+        write_invalid_sox(&invalid);
+        write_valid_sox(&third);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                begin_open_paths(
+                    frame,
+                    vec![first.clone(), invalid.clone(), third.clone()],
+                    cx,
+                );
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    open_paths_in_workspace(frame),
+                    [first.clone(), third.clone()]
+                );
+                assert_eq!(frame.recent_files.paths(), [first.clone(), third.clone()]);
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.level(), NoticeLevel::Error);
+                assert_eq!(notice.summary(), "Opened 2 files; 1 failed");
+                assert!(
+                    notice
+                        .detail()
+                        .starts_with(&format!("{}: ", invalid.display()))
+                );
+                assert!(notice.detail().contains("failed to parse"));
+                assert!(notice.detail().contains("Caused by:"));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn all_failed_open_paths_add_no_recent_file_or_settings_revision(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("A.sox");
+        let second = directory.path().join("B.sox");
+        write_invalid_sox(&first);
+        write_invalid_sox(&second);
+        let blocker = directory.path().join("settings-blocker");
+        fs::write(&blocker, b"blocker").unwrap();
+        let startup = SettingsStartup::load(blocker.join("settings.json"));
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                begin_open_paths(frame, vec![first, second], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, cx| {
+                assert!(frame.workspace.document_ids().is_empty());
+                assert!(frame.recent_files.paths().is_empty());
+                assert!(!frame.settings.has_failed());
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.level(), NoticeLevel::Error);
+                assert_eq!(notice.summary(), "Opened 0 files; 2 failed");
+                assert!(frame.schedule_settings_write(frame.shell.game(), cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.settings.retry_failed().unwrap().get(), 2);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn one_accepted_open_batch_schedules_exactly_one_settings_revision(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("A.sox");
+        let second = directory.path().join("B.sox");
+        write_valid_sox(&first);
+        write_valid_sox(&second);
+        let blocker = directory.path().join("settings-blocker");
+        fs::write(&blocker, b"blocker").unwrap();
+        let startup = SettingsStartup::load(blocker.join("settings.json"));
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                begin_open_paths(frame, vec![first, second], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.settings.retry_failed().unwrap().get(), 2);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn stale_open_completion_cannot_apply_after_a_new_request(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let stale = directory.path().join("stale.sox");
+        let current = directory.path().join("current.sox");
+        write_valid_sox(&stale);
+        write_valid_sox(&current);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                begin_open_paths(frame, vec![stale], cx);
+                begin_open_paths(frame, vec![current.clone()], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    open_paths_in_workspace(frame),
+                    std::slice::from_ref(&current)
+                );
+                assert_eq!(frame.recent_files.paths(), std::slice::from_ref(&current));
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Opened 1 file")
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn late_picker_paths_cannot_supersede_a_newer_recent_file_open(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let picker_path = directory.path().join("picker.sox");
+        let recent_path = directory.path().join("recent.sox");
+        write_valid_sox(&picker_path);
+        write_valid_sox(&recent_path);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                let picker_request = frame.shell.begin_open();
+                frame.notices.begin(
+                    NoticeSource::Open,
+                    picker_request.get(),
+                    Notice::info("Choose one or more .sox files"),
+                );
+                frame.open_recent_path(recent_path.clone(), cx);
+
+                frame.open_paths(picker_request, vec![picker_path], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    open_paths_in_workspace(frame),
+                    std::slice::from_ref(&recent_path)
+                );
+                assert_eq!(
+                    frame.recent_files.paths(),
+                    std::slice::from_ref(&recent_path)
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn duplicate_paths_open_twice_but_appear_once_in_recent_files(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("duplicate.sox");
+        write_valid_sox(&path);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                begin_open_paths(frame, vec![path.clone(), path.clone()], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(open_paths_in_workspace(frame), [path.clone(), path.clone()]);
+                assert_eq!(frame.recent_files.paths(), [path]);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn opening_an_existing_recent_path_moves_it_to_the_front(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.sox");
+        let existing = directory.path().join("existing.sox");
+        write_valid_sox(&existing);
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .recent_files
+                    .add_batch(vec![first.clone(), existing.clone()]);
+                begin_open_paths(frame, vec![existing.clone()], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.recent_files.paths(), [existing, first]);
+            })
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn non_unicode_success_opens_without_changing_recent_files_or_settings(
+        cx: &mut TestAppContext,
+    ) {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = directory.path().join("fixture.sox");
+        write_valid_sox(&fixture);
+        let path = PathBuf::from(OsString::from_vec(vec![
+            b'n', b'o', b'n', b'-', 0xff, b'.', b's', b'o', b'x',
+        ]));
+        let settings_path = directory.path().join("settings.json");
+        let startup = SettingsStartup::load(settings_path.clone());
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(startup, cx))
+            })
+            .unwrap()
+        });
+
+        window
+            .update(cx, |frame, _, cx| {
+                let request = frame.shell.begin_open();
+                frame.notices.begin(
+                    NoticeSource::Open,
+                    request.get(),
+                    Notice::info("Opening file"),
+                );
+                let loaded = load_path(fixture).unwrap();
+                frame.finish_open_paths(request, vec![(path.clone(), Ok(loaded))], cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(open_paths_in_workspace(frame), [path]);
+                assert!(frame.recent_files.paths().is_empty());
+                assert!(!frame.settings.has_failed());
+                assert!(!settings_path.exists());
+                let notice = frame.notices.current().unwrap();
+                assert_eq!(notice.level(), NoticeLevel::Warning);
+                assert_eq!(
+                    notice.summary(),
+                    "Opened 1 file; 1 path omitted from recent files"
+                );
+            })
+            .unwrap();
     }
 
     #[test]

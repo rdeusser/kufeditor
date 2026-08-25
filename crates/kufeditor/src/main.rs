@@ -1,4 +1,5 @@
 mod actions;
+mod catalog_status;
 mod components;
 mod frame;
 mod notices;
@@ -44,6 +45,7 @@ fn main() -> ExitCode {
             },
             |window, cx| {
                 let frame = cx.new(|cx| AppFrame::new(startup, cx));
+                frame.update(cx, AppFrame::start_catalog_load);
                 let weak_frame = frame.downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
                     weak_frame

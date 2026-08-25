@@ -80,6 +80,7 @@ pub struct ShellState {
     game: Game,
     next_request_id: u64,
     active_open_request: Option<RequestId>,
+    active_catalog_request: Option<RequestId>,
 }
 
 impl ShellState {
@@ -115,6 +116,21 @@ impl ShellState {
 
     pub fn accepts_open(&self, request: RequestId) -> bool {
         self.active_open_request == Some(request)
+    }
+
+    pub fn begin_catalog(&mut self) -> RequestId {
+        self.next_request_id += 1;
+        let request = RequestId(self.next_request_id);
+        self.active_catalog_request = Some(request);
+        request
+    }
+
+    pub fn accepts_catalog(&self, request: RequestId) -> bool {
+        self.active_catalog_request == Some(request)
+    }
+
+    pub fn invalidate_catalog(&mut self) {
+        self.active_catalog_request = None;
     }
 }
 
@@ -154,6 +170,19 @@ mod tests {
         let second = state.begin_open();
         assert!(!state.accepts_open(first));
         assert!(state.accepts_open(second));
+    }
+
+    #[test]
+    fn catalog_requests_can_be_superseded_or_invalidated() {
+        let mut state = ShellState::default();
+        let first = state.begin_catalog();
+        let second = state.begin_catalog();
+
+        assert!(!state.accepts_catalog(first));
+        assert!(state.accepts_catalog(second));
+
+        state.invalidate_catalog();
+        assert!(!state.accepts_catalog(second));
     }
 }
 
