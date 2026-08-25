@@ -655,7 +655,7 @@ mod tests {
 
         assert!(loaded.issues.is_empty());
         assert_indexed(&loaded.troop_names, &[(2, b"Footman"), (4_096, b"Archer")]);
-        assert_indexed(&loaded.character_names, &[(17, b"Gerald")]);
+        assert_indexed(&loaded.character_names, &[(0xab, b"Gerald")]);
         assert_indexed(&loaded.leader_pools, &[(73, b"Alpha  Beta\tGamma\x80")]);
         assert_eq!(
             loaded.special_names,
@@ -869,10 +869,13 @@ mod tests {
             CatalogRole::TroopNames,
             &indexed_table(&[(2, b"Footman"), (4_096, b"Archer")]),
         );
-        tree.write(
-            CatalogRole::CharacterNames,
-            &mixed_case_ascii_hex(&indexed_table(&[(17, b"Gerald")])),
+        let character_source = mixed_case_ascii_hex(&indexed_table(&[(0xab, b"Gerald")]));
+        assert!(
+            character_source
+                .iter()
+                .any(|byte| matches!(byte, b'a'..=b'f'))
         );
+        tree.write(CatalogRole::CharacterNames, &character_source);
         tree.write(
             CatalogRole::LeaderPools,
             &indexed_table(&[(73, b"Alpha  Beta\tGamma\x80")]),
