@@ -251,14 +251,14 @@ TEST_CASE("SaveFormat preserves unknown raw discriminants across edits",
 
 	constexpr size_t unitOffset = 4 + 4 + kuf::kSaveContextSize + 4 +
 				      kuf::kSaveMainBlockSize + 4;
-	constexpr size_t ucdOffset = unitOffset + 40;
+	constexpr size_t UCDOffset = unitOffset + 40;
 	constexpr size_t leaderWeaponOffset = unitOffset + 95;
 	constexpr size_t skillType1Offset = leaderWeaponOffset + 28;
 	constexpr size_t resistType1Offset = leaderWeaponOffset + 44;
 	const uint32_t unknownUCD = 99;
 	const int32_t unknownSkillType = 1234;
 	const int32_t unknownResistType = -99;
-	std::memcpy(data.data() + ucdOffset, &unknownUCD, 4);
+	std::memcpy(data.data() + UCDOffset, &unknownUCD, 4);
 	std::memcpy(data.data() + skillType1Offset, &unknownSkillType, 4);
 	std::memcpy(data.data() + resistType1Offset, &unknownResistType, 4);
 
