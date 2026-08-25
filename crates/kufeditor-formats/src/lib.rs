@@ -15,7 +15,7 @@ pub use error::{
     FormatError, GeneratedSoxError, SkillCleaveError, StringTableEncodeError,
     StringTableParseError, TextSoxParseError, TroopCleaveError,
 };
-pub use schema::{SchemaDocument, SoxSchema};
+pub use schema::{SchemaDocument, SoxSchema, SpecialNameRef};
 pub use skill::{SkillDocument, SkillField, SkillTextField};
 pub use sox::{SoxDocument, parse_sox};
 pub use string_table::{SoxStringTableDocument, SoxStringTableLayout};

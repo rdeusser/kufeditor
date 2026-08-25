@@ -6,8 +6,20 @@
 use std::collections::HashSet;
 
 use kufeditor_formats::{
-    FormatError, GeneratedSoxError, SchemaDocument, SoxDocument, SoxSchema, parse_sox,
+    FormatError, GeneratedSoxError, SchemaDocument, SoxDocument, SoxSchema, SpecialNameRef,
+    parse_sox,
 };
+
+const SPECIAL_NAMES_PREFIX: &[u8] = &[
+    0x64, 0x00, 0x00, 0x00, // marker 100
+    0x02, 0x00, 0x00, 0x00, // two records
+    0x04, 0x00, b'H', b'e', b'r', b'o', // record 0 key
+    0x02, 0x00, 0xb0, 0xa1, // record 0 value: CP949 "ga"
+    0x03, 0x00, b'N', b'P', b'C', // record 1 key
+    0x00, 0x00, // record 1 empty value
+];
+const SPECIAL_NAMES_FOOTER: &[u8; 64] =
+    b"THEND                                                           ";
 
 #[test]
 fn registry_contains_each_named_schema_once() {
@@ -165,6 +177,61 @@ fn mixed_case_ascii_hex(bytes: &[u8]) -> Vec<u8> {
         }
     }
     encoded
+}
+
+fn special_names_fixture() -> Vec<u8> {
+    let mut bytes = SPECIAL_NAMES_PREFIX.to_vec();
+    bytes.extend_from_slice(SPECIAL_NAMES_FOOTER);
+    bytes
+}
+
+#[test]
+fn special_name_projects_literal_records_and_preserves_raw_source() {
+    let bytes = special_names_fixture();
+
+    let document = SchemaDocument::parse(SoxSchema::SpecialNames, bytes.clone()).unwrap();
+
+    assert_eq!(
+        document.special_name(0),
+        Some(SpecialNameRef {
+            key: b"Hero",
+            value: &[0xb0, 0xa1],
+        })
+    );
+    assert_eq!(
+        document.special_name(1),
+        Some(SpecialNameRef {
+            key: b"NPC",
+            value: b"",
+        })
+    );
+    assert_eq!(document.encode(), bytes);
+    assert_eq!(document.canonical_encode().unwrap(), bytes);
+}
+
+#[test]
+fn special_name_is_none_for_wrong_schema_or_record() {
+    let special_names =
+        SchemaDocument::parse(SoxSchema::SpecialNames, special_names_fixture()).unwrap();
+    let ability_by_job =
+        SchemaDocument::parse(SoxSchema::AbilityByJob, standard_fixture(24)).unwrap();
+
+    assert_eq!(special_names.special_name(2), None);
+    assert_eq!(ability_by_job.special_name(0), None);
+}
+
+#[test]
+fn special_name_preserves_mixed_case_ascii_hex_source_and_canonicalizes_case() {
+    let raw = special_names_fixture();
+    let encoded = mixed_case_ascii_hex(&raw);
+    assert!(encoded.iter().any(u8::is_ascii_lowercase));
+
+    let document = SchemaDocument::parse(SoxSchema::SpecialNames, encoded.clone()).unwrap();
+    let canonical = document.canonical_encode().unwrap();
+
+    assert_eq!(document.encode(), encoded);
+    assert_eq!(canonical, ascii_hex(&raw));
+    assert!(!canonical.iter().any(u8::is_ascii_lowercase));
 }
 
 #[test]

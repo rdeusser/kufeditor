@@ -115,6 +115,12 @@ impl Display for SoxSchema {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SpecialNameRef<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
+}
+
 #[derive(Clone, Debug)]
 pub struct SchemaDocument {
     schema: SoxSchema,
@@ -153,6 +159,18 @@ impl SchemaDocument {
 
     pub fn record_count(&self) -> usize {
         self.model.record_count()
+    }
+
+    pub fn special_name(&self, record: usize) -> Option<SpecialNameRef<'_>> {
+        let SchemaModel::SpecialNames(file) = &self.model else {
+            return None;
+        };
+        let record = file.records.get(record)?;
+
+        Some(SpecialNameRef {
+            key: &record.key.value,
+            value: &record.value.value,
+        })
     }
 
     pub fn encode(&self) -> Vec<u8> {
