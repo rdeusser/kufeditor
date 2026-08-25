@@ -46,6 +46,12 @@ impl NumberEdit {
         self.invalid
     }
 
+    pub fn is_valid(&self) -> bool {
+        self.draft
+            .parse::<i64>()
+            .is_ok_and(|value| self.minimum <= value && value <= self.maximum)
+    }
+
     pub fn apply(&mut self, command: NumberCommand) -> NumberOutcome {
         match command {
             NumberCommand::Insert(character) => self.insert(character),

@@ -528,7 +528,7 @@ impl AppFrame {
                 if self
                     .number_edit
                     .as_ref()
-                    .is_some_and(|edit| !edit.editor.invalid())
+                    .is_some_and(|edit| edit.editor.is_valid())
                 {
                     clear_editor_notice(&mut self.notice);
                 }
@@ -1096,7 +1096,7 @@ impl AppFrame {
             "Skill ID",
             display,
             active_edit.is_some(),
-            active_edit.is_some_and(|edit| edit.editor.invalid()),
+            active_edit.is_some_and(|edit| edit.editor.invalid() || !edit.editor.is_valid()),
         );
         match value {
             Ok(value) => row
@@ -1198,7 +1198,7 @@ impl AppFrame {
             "Maximum Level",
             display,
             active_edit.is_some(),
-            active_edit.is_some_and(|edit| edit.editor.invalid()),
+            active_edit.is_some_and(|edit| edit.editor.invalid() || !edit.editor.is_valid()),
         );
         match value {
             Ok(value) => row
@@ -1347,7 +1347,7 @@ impl AppFrame {
             field.label(),
             display,
             active_edit.is_some(),
-            active_edit.is_some_and(|edit| edit.editor.invalid()),
+            active_edit.is_some_and(|edit| edit.editor.invalid() || !edit.editor.is_valid()),
         );
 
         match value {
@@ -1578,8 +1578,7 @@ mod tests {
 
     use super::{
         ActiveNumberEdit, AppFrame, EditorRoute, SkillTextProjection, SkillTypeChoice,
-        TextEditTarget, clear_editor_notice, editor_route, invalid_number_notice,
-        skill_text_projection,
+        TextEditTarget, editor_route, invalid_number_notice, skill_text_projection,
     };
     use crate::{
         state::{Area, Notice, NoticeLevel, RecordSelections},
@@ -1771,18 +1770,73 @@ mod tests {
         assert_eq!(selections.selected(second), 5);
     }
 
-    #[test]
-    fn skill_editor_feedback_clears_without_removing_workspace_notices() {
-        let mut editor_notice = Some(invalid_number_notice());
-        clear_editor_notice(&mut editor_notice);
-        assert!(editor_notice.is_none());
+    #[gpui::test]
+    fn skill_maximum_level_feedback_clears_only_after_valid_recovery(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(AppFrame::new))
+                .unwrap()
+        });
+        window
+            .update(cx, |frame, window, _| {
+                let document = open_skill(frame, "SkillInfo.sox", 1);
+                frame.activate_document(document);
+                frame.begin_number_edit(ActiveNumberEdit::skill_max_level(document, 0, 50));
+                window.focus(&frame.focus);
+            })
+            .unwrap();
 
-        let mut workspace_notice = Some(Notice::info("Saving document"));
-        clear_editor_notice(&mut workspace_notice);
-        assert_eq!(
-            workspace_notice.as_ref().map(Notice::summary),
-            Some("Saving document")
-        );
+        cx.simulate_keystrokes(window.into(), "7 0 0 0 0 enter");
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                    Some("70000")
+                );
+                assert_eq!(
+                    frame.notice.as_ref().map(Notice::summary),
+                    Some("Enter a whole number within the allowed range")
+                );
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "0");
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                    Some("700000")
+                );
+                assert_eq!(
+                    frame.notice.as_ref().map(Notice::summary),
+                    Some("Enter a whole number within the allowed range")
+                );
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "backspace");
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                    Some("70000")
+                );
+                assert_eq!(
+                    frame.notice.as_ref().map(Notice::summary),
+                    Some("Enter a whole number within the allowed range")
+                );
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "backspace");
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                    Some("7000")
+                );
+                assert!(frame.notice.is_none());
+            })
+            .unwrap();
     }
 
     #[gpui::test]
