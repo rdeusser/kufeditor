@@ -28,20 +28,29 @@ pub(super) fn normalize(source: &[u8]) -> Result<NormalizedSave, SaveParseError>
     })
 }
 
+pub(super) fn retained_tail_length(source_length: usize, parsed_tail_length: usize) -> usize {
+    source_length
+        .checked_sub(PADDED_SIZE)
+        .map_or(parsed_tail_length, |length| length.min(parsed_tail_length))
+}
+
 pub(super) fn restore(
     canonical: &[u8],
     envelope: SaveEnvelope,
-    tail_length: usize,
+    retained_tail_length: usize,
 ) -> Result<Vec<u8>, SaveEncodeError> {
-    restore_with_reserve(canonical, envelope, tail_length, |bytes, requested| {
-        bytes.try_reserve_exact(requested).map_err(|_| ())
-    })
+    restore_with_reserve(
+        canonical,
+        envelope,
+        retained_tail_length,
+        |bytes, requested| bytes.try_reserve_exact(requested).map_err(|_| ()),
+    )
 }
 
 fn restore_with_reserve<F>(
     canonical: &[u8],
     envelope: SaveEnvelope,
-    tail_length: usize,
+    retained_tail_length: usize,
     reserve: F,
 ) -> Result<Vec<u8>, SaveEncodeError>
 where
@@ -69,14 +78,13 @@ where
                 length: canonical.len(),
                 minimum: CANONICAL_BODY_OFFSET,
             })?;
-    let minimum_length = CANONICAL_BODY_OFFSET.saturating_add(tail_length);
-    let main_body_length =
-        body.len()
-            .checked_sub(tail_length)
-            .ok_or(SaveEncodeError::InvalidCanonicalShape {
-                length: canonical.len(),
-                minimum: minimum_length,
-            })?;
+    let minimum_length = CANONICAL_BODY_OFFSET.saturating_add(retained_tail_length);
+    let main_body_length = body.len().checked_sub(retained_tail_length).ok_or(
+        SaveEncodeError::InvalidCanonicalShape {
+            length: canonical.len(),
+            minimum: minimum_length,
+        },
+    )?;
     let main_body = body
         .get(..main_body_length)
         .ok_or(SaveEncodeError::InvalidCanonicalShape {

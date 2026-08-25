@@ -1266,18 +1266,16 @@ fn invalid_numeric_target_and_value_leave_document_bytes_unchanged() {
 }
 
 #[test]
-fn edited_envelope_restores_flags_context_tail_padding_and_prefix_length() {
-    let tail = [0xde, 0xad, 0, 0xbe, 0xef];
+fn edited_padded_envelopes_keep_main_image_length_without_true_tail() {
     for size_prefix in [false, true] {
         for context in [false, true] {
-            let source = complete_save_fixture(SaveFixtureOptions {
+            let mut source = complete_save_fixture(SaveFixtureOptions {
                 size_prefix,
                 context,
-                pad_to_32_kib: false,
-                tail: tail.to_vec(),
+                ..SaveFixtureOptions::default()
             });
-            let offsets = complete_save_offsets(size_prefix, context);
-            let mut document = SaveDocument::parse(source.clone()).unwrap();
+            *source.get_mut(0x7ff0).unwrap() = 0xa5;
+            let mut document = SaveDocument::parse(source).unwrap();
             assert!(matches!(
                 document.set_number(
                     SaveNumberTarget::Unit {
@@ -1291,48 +1289,134 @@ fn edited_envelope_restores_flags_context_tail_padding_and_prefix_length() {
 
             let encoded = document.encode().unwrap();
 
-            assert_eq!(encoded.len(), 0x8000 + tail.len());
-            assert_eq!(read_u32(&encoded, offsets.magic), 0x6e);
+            assert_eq!(encoded.len(), 0x8000);
+            assert_eq!(encoded.get(0x7ff0), Some(&0xa5));
             if size_prefix {
-                assert_eq!(read_u32(&encoded, 0), u32::try_from(encoded.len()).unwrap());
+                assert_eq!(read_u32(&encoded, 0), 0x8000);
             }
-            if let Some(context_start) = offsets.context {
-                let context_end = context_start + 0x438;
+        }
+    }
+}
+
+#[test]
+fn edited_envelope_restores_flags_context_tail_padding_and_prefix_length() {
+    let tail = [0xde, 0xad, 0, 0xbe, 0xef];
+    for pad_to_32_kib in [false, true] {
+        for size_prefix in [false, true] {
+            for context in [false, true] {
+                let source = complete_save_fixture(SaveFixtureOptions {
+                    size_prefix,
+                    context,
+                    pad_to_32_kib,
+                    tail: tail.to_vec(),
+                });
+                let offsets = complete_save_offsets(size_prefix, context);
+                let mut document = SaveDocument::parse(source.clone()).unwrap();
+                assert!(matches!(
+                    document.set_number(
+                        SaveNumberTarget::Unit {
+                            unit: 0,
+                            field: SaveUnitField::SkillLevel
+                        },
+                        77,
+                    ),
+                    Ok(SaveMutation::Changed { previous: 8 })
+                ));
+
+                let encoded = document.encode().unwrap();
+
+                assert_eq!(encoded.len(), 0x8000 + tail.len());
+                assert_eq!(read_u32(&encoded, offsets.magic), 0x6e);
+                if size_prefix {
+                    assert_eq!(read_u32(&encoded, 0), u32::try_from(encoded.len()).unwrap());
+                }
+                if let Some(context_start) = offsets.context {
+                    let context_end = context_start + 0x438;
+                    assert_eq!(
+                        encoded.get(context_start..context_end),
+                        source.get(context_start..context_end)
+                    );
+                }
+
+                let edited = offsets.unit + 52;
+                assert_eq!(read_u32(&encoded, edited), 77);
                 assert_eq!(
-                    encoded.get(context_start..context_end),
-                    source.get(context_start..context_end)
+                    encoded.get(offsets.magic..edited),
+                    source.get(offsets.magic..edited)
+                );
+                assert_eq!(
+                    encoded.get(edited + 4..offsets.tail),
+                    source.get(edited + 4..offsets.tail)
+                );
+                assert!(
+                    encoded
+                        .get(offsets.tail..0x8000)
+                        .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
+                );
+                assert_eq!(encoded.get(0x8000..0x8000 + tail.len()), Some(&tail[..]));
+
+                let reparsed = SaveDocument::parse(encoded).unwrap();
+                assert_eq!(reparsed.has_size_prefix(), size_prefix);
+                assert_eq!(reparsed.has_context(), context);
+                assert_eq!(
+                    reparsed
+                        .number(SaveNumberTarget::Unit {
+                            unit: 0,
+                            field: SaveUnitField::SkillLevel,
+                        })
+                        .unwrap(),
+                    77,
                 );
             }
+        }
+    }
+}
 
-            let edited = offsets.unit + 52;
-            assert_eq!(read_u32(&encoded, edited), 77);
-            assert_eq!(
-                encoded.get(offsets.magic..edited),
-                source.get(offsets.magic..edited)
-            );
-            assert_eq!(
-                encoded.get(edited + 4..offsets.tail),
-                source.get(edited + 4..offsets.tail)
-            );
-            assert!(
-                encoded
-                    .get(offsets.tail..0x8000)
-                    .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
-            );
-            assert_eq!(encoded.get(0x8000..0x8000 + tail.len()), Some(&tail[..]));
-
-            let reparsed = SaveDocument::parse(encoded).unwrap();
-            assert_eq!(reparsed.has_size_prefix(), size_prefix);
-            assert_eq!(reparsed.has_context(), context);
-            assert_eq!(
-                reparsed
-                    .number(SaveNumberTarget::Unit {
+#[test]
+fn repeated_edits_keep_padded_envelope_length_and_tail_stable() {
+    let tail = [0xde, 0xad, 0, 0xbe, 0xef];
+    for size_prefix in [false, true] {
+        for context in [false, true] {
+            let source = complete_save_fixture(SaveFixtureOptions {
+                size_prefix,
+                context,
+                tail: tail.to_vec(),
+                ..SaveFixtureOptions::default()
+            });
+            let mut document = SaveDocument::parse(source).unwrap();
+            assert!(matches!(
+                document.set_number(
+                    SaveNumberTarget::Unit {
                         unit: 0,
-                        field: SaveUnitField::SkillLevel,
-                    })
-                    .unwrap(),
-                77,
-            );
+                        field: SaveUnitField::SkillLevel
+                    },
+                    77,
+                ),
+                Ok(SaveMutation::Changed { previous: 8 })
+            ));
+
+            let first = document.encode().unwrap();
+            assert_eq!(first.len(), 0x8000 + tail.len());
+            assert_eq!(first.get(0x8000..), Some(&tail[..]));
+
+            let mut reparsed = SaveDocument::parse(first).unwrap();
+            assert!(matches!(
+                reparsed.set_number(
+                    SaveNumberTarget::Unit {
+                        unit: 0,
+                        field: SaveUnitField::SkillLevel
+                    },
+                    78,
+                ),
+                Ok(SaveMutation::Changed { previous: 77 })
+            ));
+
+            let second = reparsed.encode().unwrap();
+            assert_eq!(second.len(), 0x8000 + tail.len());
+            assert_eq!(second.get(0x8000..), Some(&tail[..]));
+            if size_prefix {
+                assert_eq!(read_u32(&second, 0), u32::try_from(second.len()).unwrap());
+            }
         }
     }
 }

@@ -95,11 +95,10 @@ pub fn save_fixture_with_arrays(
         append_u32(&mut source, 0);
     }
     append_u32(&mut source, 0);
-    source.extend(tail);
-
     if pad_to_32_kib && source.len() < PADDED_SIZE {
         source.resize(PADDED_SIZE, 0);
     }
+    source.extend(tail);
 
     if size_prefix {
         patch_size_prefix(&mut source);
@@ -141,11 +140,10 @@ pub fn complete_save_fixture(options: SaveFixtureOptions) -> Vec<u8> {
         append_i32(&mut source, slot - 1);
     }
     append_i32(&mut source, -2);
-    source.extend(tail);
-
     if pad_to_32_kib && source.len() < PADDED_SIZE {
         source.resize(PADDED_SIZE, 0);
     }
+    source.extend(tail);
 
     if size_prefix {
         patch_size_prefix(&mut source);

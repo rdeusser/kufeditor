@@ -7,7 +7,9 @@ use crate::{
     error::{FormatError, SaveCleaveError, SaveParseError, SaveRegion},
     generated::kuf_save,
 };
-use envelope::{CANONICAL_CONTEXT_OFFSET, CONTEXT_SIZE, SaveEnvelope, normalize, restore};
+use envelope::{
+    CANONICAL_CONTEXT_OFFSET, CONTEXT_SIZE, SaveEnvelope, normalize, restore, retained_tail_length,
+};
 use text::extract_context_text;
 
 pub use fields::{
@@ -33,6 +35,7 @@ pub struct SaveDocument {
     source_file: kuf_save::File,
     file: kuf_save::File,
     envelope: SaveEnvelope,
+    retained_tail_length: usize,
     context_text: Vec<String>,
 }
 
@@ -73,12 +76,14 @@ impl SaveDocument {
                 source: SaveCleaveError::from(source),
             })
         })?;
+        let retained_tail_length = retained_tail_length(source.len(), file.tail_data.len());
 
         Ok(Self {
             source,
             source_file: file.clone(),
             file,
             envelope: normalized.envelope,
+            retained_tail_length,
             context_text,
         })
     }
@@ -94,7 +99,7 @@ impl SaveDocument {
             .map_err(SaveCleaveError::from)
             .map_err(crate::error::SaveEncodeError::Cleave)
             .map_err(FormatError::SaveEncode)?;
-        restore(&canonical, self.envelope, self.file.tail_data.len())
+        restore(&canonical, self.envelope, self.retained_tail_length)
             .map_err(FormatError::SaveEncode)
     }
 
