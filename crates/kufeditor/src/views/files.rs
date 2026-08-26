@@ -2,7 +2,8 @@ use gpui::{AnyElement, Div, div, prelude::*, px};
 
 use crate::{components, theme::Theme};
 
-const EMPTY_COPY: &str = "Open a .sox data file or a Crusaders .sav file to begin editing.";
+const EMPTY_COPY: &str =
+    "Open a .sox data file, a Crusaders .sav file, or a Crusaders .stg file to begin editing.";
 
 pub fn render(theme: &Theme, tabs: Vec<AnyElement>, editor: Option<Div>) -> Div {
     let body = editor.unwrap_or_else(|| {
@@ -45,8 +46,9 @@ mod tests {
     use super::EMPTY_COPY;
 
     #[test]
-    fn save_view_empty_copy_names_both_supported_file_extensions() {
+    fn files_supports_stg_in_empty_copy() {
         assert!(EMPTY_COPY.contains(".sox"));
         assert!(EMPTY_COPY.contains(".sav"));
+        assert!(EMPTY_COPY.contains(".stg"));
     }
 }

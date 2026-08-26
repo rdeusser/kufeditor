@@ -389,6 +389,77 @@ struct SaveListControls {
     second_array: SaveListControl,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct STGListBinding {
+    document: DocumentID,
+    cursor: views::stg::STGRowCursor,
+    position: usize,
+    row_count: usize,
+    generation: u64,
+}
+
+struct STGListControl {
+    focus: FocusHandle,
+    scroll: UniformListScrollHandle,
+    binding: Cell<Option<STGListBinding>>,
+}
+
+impl STGListControl {
+    fn new(cx: &mut Context<AppFrame>) -> Self {
+        Self {
+            focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            scroll: UniformListScrollHandle::new(),
+            binding: Cell::new(None),
+        }
+    }
+
+    fn invalidate(&self) {
+        self.binding.set(None);
+    }
+}
+
+struct STGListControls {
+    units: STGListControl,
+    areas: STGListControl,
+    variables: STGListControl,
+    events: STGListControl,
+    footer: STGListControl,
+    event_detail: STGListControl,
+}
+
+impl STGListControls {
+    fn new(cx: &mut Context<AppFrame>) -> Self {
+        Self {
+            units: STGListControl::new(cx),
+            areas: STGListControl::new(cx),
+            variables: STGListControl::new(cx),
+            events: STGListControl::new(cx),
+            footer: STGListControl::new(cx),
+            event_detail: STGListControl::new(cx),
+        }
+    }
+
+    const fn get(&self, kind: views::stg::STGVirtualRowKind) -> &STGListControl {
+        match kind {
+            views::stg::STGVirtualRowKind::Unit => &self.units,
+            views::stg::STGVirtualRowKind::Area => &self.areas,
+            views::stg::STGVirtualRowKind::Variable => &self.variables,
+            views::stg::STGVirtualRowKind::Event => &self.events,
+            views::stg::STGVirtualRowKind::Footer => &self.footer,
+            views::stg::STGVirtualRowKind::EventDetail => &self.event_detail,
+        }
+    }
+
+    fn invalidate_all(&self) {
+        self.units.invalidate();
+        self.areas.invalidate();
+        self.variables.invalidate();
+        self.events.invalidate();
+        self.footer.invalidate();
+        self.event_detail.invalidate();
+    }
+}
+
 impl SaveListControls {
     fn new(cx: &mut Context<AppFrame>) -> Self {
         Self {
@@ -577,6 +648,8 @@ pub struct AppFrame {
     save_presentations: SavePresentationStates,
     stg_presentations: STGPresentationStates,
     save_lists: SaveListControls,
+    stg_lists: STGListControls,
+    stg_search: Option<stg::ActiveSTGSearch>,
     number_edit: Option<ActiveNumberEdit>,
     text_edit: Option<ActiveTextEdit>,
     game_paths: kufeditor_game::GamePaths,
@@ -634,6 +707,8 @@ impl AppFrame {
             save_presentations: SavePresentationStates::default(),
             stg_presentations: STGPresentationStates::default(),
             save_lists: SaveListControls::new(cx),
+            stg_lists: STGListControls::new(cx),
+            stg_search: None,
             number_edit: None,
             text_edit: None,
             game_paths,
@@ -675,6 +750,8 @@ impl AppFrame {
 
     fn activate_document(&mut self, document: DocumentID, cx: &mut Context<Self>) {
         self.save_lists.invalidate_all();
+        self.stg_lists.invalidate_all();
+        self.stg_search = None;
         match self.workspace.document_kind(document).ok() {
             Some(DocumentKind::CrusadersSave) => {
                 self.deactivate_stg_presentation(cx);
@@ -1833,9 +1910,11 @@ impl AppFrame {
         cx.notify();
     }
 
-    fn navigation(&self, cx: &mut Context<Self>) -> Div {
+    fn navigation(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let projection = navigation_projection();
         div()
+            .id("product-navigation")
+            .debug_selector(|| "product-navigation".to_owned())
             .flex()
             .flex_col()
             .flex_none()
@@ -1947,7 +2026,7 @@ impl AppFrame {
             Ok(EditorRoute::Skill) => self.skill_editor(document_id, cx),
             Ok(EditorRoute::TextSOX) => self.text_sox_editor(document_id, cx),
             Ok(EditorRoute::Save) => self.save_editor(document_id, cx),
-            Ok(EditorRoute::STG) => self.stg_editor(document_id),
+            Ok(EditorRoute::STG) => self.stg_editor(document_id, cx),
             Err(error) => div()
                 .size_full()
                 .p(px(28.0))

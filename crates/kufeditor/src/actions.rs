@@ -20,6 +20,12 @@ actions!(
         MoveSaveListPageDown,
         MoveSaveListLeft,
         MoveSaveListRight,
+        MoveSTGListUp,
+        MoveSTGListDown,
+        MoveSTGListHome,
+        MoveSTGListEnd,
+        MoveSTGListPageUp,
+        MoveSTGListPageDown,
     ]
 );
 
@@ -53,5 +59,11 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("pagedown", MoveSaveListPageDown, Some("SaveVirtualList")),
         KeyBinding::new("left", MoveSaveListLeft, Some("SaveVirtualList")),
         KeyBinding::new("right", MoveSaveListRight, Some("SaveVirtualList")),
+        KeyBinding::new("up", MoveSTGListUp, Some("STGVirtualList")),
+        KeyBinding::new("down", MoveSTGListDown, Some("STGVirtualList")),
+        KeyBinding::new("home", MoveSTGListHome, Some("STGVirtualList")),
+        KeyBinding::new("end", MoveSTGListEnd, Some("STGVirtualList")),
+        KeyBinding::new("pageup", MoveSTGListPageUp, Some("STGVirtualList")),
+        KeyBinding::new("pagedown", MoveSTGListPageDown, Some("STGVirtualList")),
     ]);
 }
