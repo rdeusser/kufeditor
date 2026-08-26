@@ -1,5 +1,7 @@
 use std::{fmt, mem::size_of, sync::Arc};
 
+use sha2::{Digest, Sha256};
+
 use crate::{
     error::{
         FormatError, STGCollection, STGEncodeError, STGStructuralLocation, STGTarget,
@@ -90,15 +92,15 @@ impl fmt::Debug for STGStructuralPreview {
     }
 }
 
-#[derive(Clone)]
 pub struct STGStructuralImage {
     lineage: Arc<()>,
     expected_state: Arc<()>,
     result_state: Arc<()>,
-    operation: Arc<StructuralOperation>,
+    operation: StructuralOperation,
+    retained_bytes: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum StructuralOperation {
     InsertEvent {
         target: STGEventTarget,
@@ -107,7 +109,6 @@ enum StructuralOperation {
     },
     RemoveEvent {
         target: STGEventTarget,
-        event: Arc<WireEvent>,
         guard: EventRemovalGuard,
     },
     InsertScript {
@@ -117,20 +118,22 @@ enum StructuralOperation {
     },
     RemoveScript {
         target: STGScriptTarget,
-        script: ScriptImage,
         guard: ScriptRemovalGuard,
     },
     ReplaceScript {
         target: STGScriptTarget,
-        expected: ScriptImage,
+        expected: StructuralFingerprint,
         replacement: ScriptImage,
     },
     ReplaceValue {
         target: STGValueTarget,
-        expected: Arc<StgParamValue>,
+        expected: StructuralFingerprint,
         replacement: Arc<StgParamValue>,
     },
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StructuralFingerprint([u8; 32]);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct EventInsertionGuard {
@@ -148,6 +151,7 @@ struct EventRemovalGuard {
     event_count: usize,
     before_id: Option<u32>,
     after_id: Option<u32>,
+    expected: StructuralFingerprint,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -164,12 +168,47 @@ struct ScriptRemovalGuard {
     script_count: usize,
     before_id: Option<u32>,
     after_id: Option<u32>,
+    expected: StructuralFingerprint,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum ScriptImage {
     Condition(Arc<StgCondition>),
     Action(Arc<StgAction>),
+}
+
+#[derive(Debug)]
+pub struct STGStructuralRestoreFailure {
+    error: Box<FormatError>,
+    image: Box<STGStructuralImage>,
+}
+
+impl STGStructuralRestoreFailure {
+    fn new(error: FormatError, image: STGStructuralImage) -> Self {
+        Self {
+            error: Box::new(error),
+            image: Box::new(image),
+        }
+    }
+
+    pub fn into_parts(self) -> (FormatError, STGStructuralImage) {
+        (*self.error, *self.image)
+    }
+}
+
+struct StructuralTransitionFailure {
+    error: FormatError,
+    operation: StructuralOperation,
+}
+
+impl StructuralTransitionFailure {
+    const fn new(error: FormatError, operation: StructuralOperation) -> Self {
+        Self { error, operation }
+    }
+
+    fn into_parts(self) -> (FormatError, StructuralOperation) {
+        (self.error, self.operation)
+    }
 }
 
 impl STGStructuralImage {
@@ -178,22 +217,23 @@ impl STGStructuralImage {
         expected_state: Arc<()>,
         result_state: Arc<()>,
         operation: StructuralOperation,
+        retained_bytes: usize,
     ) -> Self {
         Self {
             lineage,
             expected_state,
             result_state,
-            operation: Arc::new(operation),
+            operation,
+            retained_bytes,
         }
     }
 
-    pub fn retained_bytes(&self) -> usize {
-        size_of::<StructuralOperation>()
-            .saturating_add(operation_dynamic_bytes(self.operation.as_ref()).unwrap_or(usize::MAX))
+    pub const fn retained_bytes(&self) -> usize {
+        self.retained_bytes
     }
 
     pub fn location(&self) -> STGStructuralLocation {
-        match self.operation.as_ref() {
+        match &self.operation {
             StructuralOperation::InsertEvent { target, .. }
             | StructuralOperation::RemoveEvent { target, .. } => STGStructuralLocation::Event {
                 block: target.block,
@@ -216,7 +256,8 @@ impl PartialEq for STGStructuralImage {
         Arc::ptr_eq(&self.lineage, &other.lineage)
             && Arc::ptr_eq(&self.expected_state, &other.expected_state)
             && Arc::ptr_eq(&self.result_state, &other.result_state)
-            && operation_eq(self.operation.as_ref(), other.operation.as_ref())
+            && self.retained_bytes == other.retained_bytes
+            && operation_eq(&self.operation, &other.operation)
     }
 }
 
@@ -342,7 +383,8 @@ impl STGDocument {
                 actual: 0,
             });
         };
-        let mutation = prospective.apply_structure(operation, model_limit, output_limit)?;
+        let mutation =
+            prospective.apply_structure(operation, retained_bytes, model_limit, output_limit)?;
         let actual = match &mutation {
             STGMutation::Changed { previous } => previous.retained_bytes(),
             STGMutation::Unchanged => 0,
@@ -437,28 +479,61 @@ impl STGDocument {
         &mut self,
         image: STGStructuralImage,
     ) -> Result<STGMutation<STGStructuralImage>, FormatError> {
+        self.restore_structure_recoverable(image)
+            .map_err(|failure| failure.into_parts().0)
+    }
+
+    pub fn restore_structure_recoverable(
+        &mut self,
+        image: STGStructuralImage,
+    ) -> Result<STGMutation<STGStructuralImage>, STGStructuralRestoreFailure> {
         if !Arc::ptr_eq(&self.lineage, &image.lineage) {
-            return Err(FormatError::STGStructuralLineageMismatch);
+            return Err(STGStructuralRestoreFailure::new(
+                FormatError::STGStructuralLineageMismatch,
+                image,
+            ));
         }
         if !Arc::ptr_eq(&self.state, &image.expected_state) {
-            return Err(structural_state_mismatch(image.location()));
+            return Err(STGStructuralRestoreFailure::new(
+                structural_state_mismatch(image.location()),
+                image,
+            ));
         }
-        let expected_state = Arc::clone(&image.expected_state);
-        let result_state = Arc::clone(&image.result_state);
-        let operation =
-            Arc::try_unwrap(image.operation).unwrap_or_else(|operation| operation.as_ref().clone());
-        let inverse = self.apply_structure_transition(
+        let STGStructuralImage {
+            lineage,
+            expected_state,
+            result_state,
+            operation,
+            retained_bytes,
+        } = image;
+        let inverse = match self.apply_structure_transition_recoverable(
             operation,
             Arc::clone(&result_state),
             super::preflight::MODEL_LIMIT,
             super::preflight::SOURCE_LIMIT,
-        )?;
+        ) {
+            Ok(inverse) => inverse,
+            Err(failure) => {
+                let (error, operation) = failure.into_parts();
+                return Err(STGStructuralRestoreFailure::new(
+                    error,
+                    STGStructuralImage {
+                        lineage,
+                        expected_state,
+                        result_state,
+                        operation,
+                        retained_bytes,
+                    },
+                ));
+            }
+        };
         Ok(STGMutation::Changed {
             previous: STGStructuralImage::new(
                 Arc::clone(&self.lineage),
                 result_state,
                 expected_state,
                 inverse,
+                retained_bytes,
             ),
         })
     }
@@ -524,6 +599,7 @@ impl STGDocument {
     fn apply_structure(
         &mut self,
         operation: StructuralOperation,
+        retained_bytes: usize,
         model_limit: usize,
         output_limit: usize,
     ) -> Result<STGMutation<STGStructuralImage>, FormatError> {
@@ -541,6 +617,7 @@ impl STGDocument {
                 next_state,
                 previous_state,
                 inverse,
+                retained_bytes,
             ),
         })
     }
@@ -552,17 +629,41 @@ impl STGDocument {
         model_limit: usize,
         output_limit: usize,
     ) -> Result<StructuralOperation, FormatError> {
+        self.apply_structure_transition_recoverable(
+            operation,
+            next_state,
+            model_limit,
+            output_limit,
+        )
+        .map_err(|failure| failure.into_parts().0)
+    }
+
+    fn apply_structure_transition_recoverable(
+        &mut self,
+        operation: StructuralOperation,
+        next_state: Arc<()>,
+        model_limit: usize,
+        output_limit: usize,
+    ) -> Result<StructuralOperation, Box<StructuralTransitionFailure>> {
         let (projected_model, projected_output) =
-            projected_metrics(&self.model, &operation, model_limit, output_limit)?;
+            match projected_metrics(&self.model, &operation, model_limit, output_limit) {
+                Ok(metrics) => metrics,
+                Err(error) => {
+                    return Err(Box::new(StructuralTransitionFailure::new(error, operation)));
+                }
+            };
         let mut prospective = Arc::clone(&self.model);
-        let inverse = apply_operation(Arc::make_mut(&mut prospective), operation)?;
-        validate_actual_metrics(
+        let inverse = apply_validated_operation(Arc::make_mut(&mut prospective), operation);
+        if let Err(error) = validate_actual_metrics(
             &prospective,
             projected_model,
             projected_output,
             model_limit,
             output_limit,
-        )?;
+        ) {
+            let original = apply_validated_operation(Arc::make_mut(&mut prospective), inverse);
+            return Err(Box::new(StructuralTransitionFailure::new(error, original)));
+        }
         self.model = prospective;
         self.state = next_state;
         self.revision = Arc::new(());
@@ -590,7 +691,7 @@ fn preview_edit(
             let guard = event_removal_guard(model, target, false)?;
             let event = event_ref(model, target, STGTarget::Structure(event_location(target)))?;
             (
-                event_remove_delta(model, target, event, guard)?,
+                event_remove_delta(model, target, guard)?,
                 event_image_retained_bytes(event),
             )
         }
@@ -666,12 +767,7 @@ fn operation_for_edit(
         }
         STGStructuralEdit::RemoveEvent { target } => {
             let guard = event_removal_guard(model, target, false)?;
-            let event = event_ref(model, target, STGTarget::Structure(event_location(target)))?;
-            Ok(Some(StructuralOperation::RemoveEvent {
-                target,
-                event: Arc::new(exact_event(event.clone())),
-                guard,
-            }))
+            Ok(Some(StructuralOperation::RemoveEvent { target, guard }))
         }
         STGStructuralEdit::InsertScript { target, type_id } => {
             let guard = script_insertion_guard(model, target)?;
@@ -684,12 +780,7 @@ fn operation_for_edit(
         }
         STGStructuralEdit::RemoveScript { target } => {
             let guard = script_removal_guard(model, target)?;
-            let script = script_ref(model, target, STGTarget::Script(target))?.to_image();
-            Ok(Some(StructuralOperation::RemoveScript {
-                target,
-                script,
-                guard,
-            }))
+            Ok(Some(StructuralOperation::RemoveScript { target, guard }))
         }
         STGStructuralEdit::ChangeScriptType { target, type_id } => {
             let current = script_ref(model, target, STGTarget::Script(target))?;
@@ -699,7 +790,7 @@ fn operation_for_edit(
             }
             Ok(Some(StructuralOperation::ReplaceScript {
                 target,
-                expected: current.to_image(),
+                expected: script_fingerprint(current),
                 replacement: resized_script(current, type_id, parameter_count),
             }))
         }
@@ -710,7 +801,7 @@ fn operation_for_edit(
             }
             Ok(Some(StructuralOperation::ReplaceValue {
                 target,
-                expected: Arc::new(exact_parameter(current.clone())),
+                expected: parameter_fingerprint(current),
                 replacement: Arc::new(default_value(kind)),
             }))
         }
@@ -786,15 +877,6 @@ impl<'a> ScriptRef<'a> {
         match self {
             Self::Condition(script) => &script.params,
             Self::Action(script) => &script.params,
-        }
-    }
-
-    fn to_image(self) -> ScriptImage {
-        match self {
-            Self::Condition(script) => {
-                ScriptImage::Condition(Arc::new(exact_condition(script.clone())))
-            }
-            Self::Action(script) => ScriptImage::Action(Arc::new(exact_action(script.clone()))),
         }
     }
 }
@@ -1167,7 +1249,7 @@ fn event_removal_guard(
         target.block,
         STGTarget::Structure(location),
     )?;
-    item(
+    let event = item(
         &block.events,
         STGCollection::Event,
         target.event,
@@ -1187,6 +1269,7 @@ fn event_removal_guard(
             .checked_add(1)
             .and_then(|index| block.events.get(index))
             .map(|event| event.event_id),
+        expected: event_fingerprint(event),
     })
 }
 
@@ -1241,6 +1324,7 @@ fn script_removal_guard(
             count,
         });
     }
+    let script = script_ref(model, target, STGTarget::Script(target))?;
     Ok(ScriptRemovalGuard {
         event_id: event.event_id,
         script_count: count,
@@ -1252,6 +1336,7 @@ fn script_removal_guard(
             .script
             .checked_add(1)
             .and_then(|index| script_id_at(event, target.kind, index)),
+        expected: script_fingerprint(script),
     })
 }
 
@@ -1292,7 +1377,6 @@ fn validate_event_insertion_guard(
 fn validate_event_removal_guard(
     model: &STGModel,
     target: STGEventTarget,
-    expected: &WireEvent,
     guard: EventRemovalGuard,
 ) -> Result<(), FormatError> {
     let location = event_location(target);
@@ -1313,7 +1397,7 @@ fn validate_event_removal_guard(
     let current_matches = block
         .events
         .get(target.event)
-        .is_some_and(|event| event_eq(event, expected));
+        .is_some_and(|event| event_fingerprint(event) == guard.expected);
     let created_block_matches = !guard.remove_created_block
         || (target.block == 0
             && target.event == 0
@@ -1366,13 +1450,9 @@ fn validate_script_insertion_guard(
 fn validate_script_removal_guard(
     model: &STGModel,
     target: STGScriptTarget,
-    expected: &ScriptImage,
     guard: ScriptRemovalGuard,
 ) -> Result<(), FormatError> {
     let location = STGStructuralLocation::Script(target);
-    if expected.kind() != target.kind {
-        return Err(structural_state_mismatch(location));
-    }
     let Some(event) = event_at(model, target.block, target.event) else {
         return Err(structural_state_mismatch(location));
     };
@@ -1386,7 +1466,7 @@ fn validate_script_removal_guard(
         .checked_add(1)
         .and_then(|index| script_id_at(event, target.kind, index));
     let current_matches = script_at(event, target.kind, target.script)
-        .is_some_and(|script| script_image_ref_eq(script, expected));
+        .is_some_and(|script| script_fingerprint(script) == guard.expected);
     if event.event_id == guard.event_id
         && count == guard.script_count
         && before_id == guard.before_id
@@ -1440,41 +1520,37 @@ const fn script_collection(kind: STGScriptKind) -> STGCollection {
     }
 }
 
-fn apply_operation(
+fn apply_validated_operation(
     model: &mut STGModel,
     operation: StructuralOperation,
-) -> Result<StructuralOperation, FormatError> {
+) -> StructuralOperation {
     match operation {
         StructuralOperation::InsertEvent {
             target,
             event,
             guard,
         } => apply_insert_event(model, target, event, guard),
-        StructuralOperation::RemoveEvent {
-            target,
-            event,
-            guard,
-        } => apply_remove_event(model, target, event, guard),
+        StructuralOperation::RemoveEvent { target, guard } => {
+            apply_remove_event(model, target, guard)
+        }
         StructuralOperation::InsertScript {
             target,
             script,
             guard,
         } => apply_insert_script(model, target, script, guard),
-        StructuralOperation::RemoveScript {
-            target,
-            script,
-            guard,
-        } => apply_remove_script(model, target, script, guard),
+        StructuralOperation::RemoveScript { target, guard } => {
+            apply_remove_script(model, target, guard)
+        }
         StructuralOperation::ReplaceScript {
             target,
-            expected,
+            expected: _,
             replacement,
-        } => apply_replace_script(model, target, expected, replacement),
+        } => apply_replace_script(model, target, replacement),
         StructuralOperation::ReplaceValue {
             target,
-            expected,
+            expected: _,
             replacement,
-        } => apply_replace_value(model, target, expected, replacement),
+        } => apply_replace_value(model, target, replacement),
     }
 }
 
@@ -1483,213 +1559,200 @@ fn apply_insert_event(
     target: STGEventTarget,
     event: Arc<WireEvent>,
     guard: EventInsertionGuard,
-) -> Result<StructuralOperation, FormatError> {
-    validate_event_insertion_guard(model, target, guard)?;
-    let tail = parsed_tail_mut(model, event_location(target))?;
+) -> StructuralOperation {
+    let event = take_structural_payload(event);
+    let tail = validated(parsed_tail_mut(model, event_location(target)));
     if guard.create_block {
         let block = EventBlock {
             block_header: guard.block_header,
             event_count: 1,
-            events: vec![exact_event(event.as_ref().clone())],
+            events: vec![event],
         };
         insert_exact(&mut tail.event_blocks, target.block, block);
     } else {
         let Some(block) = tail.event_blocks.get_mut(target.block) else {
-            return Err(structural_state_mismatch(event_location(target)));
+            unreachable!("validated STG event block disappeared");
         };
-        insert_exact(
-            &mut block.events,
-            target.event,
-            exact_event(event.as_ref().clone()),
-        );
-        block.event_count = count_u32(block.events.len())?;
+        insert_exact(&mut block.events, target.event, event);
+        block.event_count = validated(count_u32(block.events.len()));
     }
-    let inverse_guard = event_removal_guard(model, target, guard.create_block)?;
-    Ok(StructuralOperation::RemoveEvent {
+    let inverse_guard = validated(event_removal_guard(model, target, guard.create_block));
+    StructuralOperation::RemoveEvent {
         target,
-        event,
         guard: inverse_guard,
-    })
+    }
 }
 
 fn apply_remove_event(
     model: &mut STGModel,
     target: STGEventTarget,
-    expected: Arc<WireEvent>,
     guard: EventRemovalGuard,
-) -> Result<StructuralOperation, FormatError> {
-    validate_event_removal_guard(model, target, expected.as_ref(), guard)?;
-    {
-        let tail = parsed_tail_mut(model, event_location(target))?;
+) -> StructuralOperation {
+    let removed = {
+        let tail = validated(parsed_tail_mut(model, event_location(target)));
         if guard.remove_created_block {
             let block = remove_exact(&mut tail.event_blocks, target.block);
             let mut events = block.events;
-            let _removed = remove_exact(&mut events, target.event);
+            remove_exact(&mut events, target.event)
         } else {
             let Some(block) = tail.event_blocks.get_mut(target.block) else {
-                return Err(structural_state_mismatch(event_location(target)));
+                unreachable!("validated STG event block disappeared");
             };
-            let _removed = remove_exact(&mut block.events, target.event);
-            block.event_count = count_u32(block.events.len())?;
+            let removed = remove_exact(&mut block.events, target.event);
+            block.event_count = validated(count_u32(block.events.len()));
+            removed
         }
-    }
-    let inverse_guard = event_insertion_guard(model, target)?;
-    Ok(StructuralOperation::InsertEvent {
+    };
+    let inverse_guard = validated(event_insertion_guard(model, target));
+    StructuralOperation::InsertEvent {
         target,
-        event: expected,
+        event: Arc::new(removed),
         guard: inverse_guard,
-    })
+    }
 }
 
 fn apply_insert_script(
     model: &mut STGModel,
     target: STGScriptTarget,
     script: ScriptImage,
-    guard: ScriptInsertionGuard,
-) -> Result<StructuralOperation, FormatError> {
-    validate_script_insertion_guard(model, target, &script, guard)?;
-    let event = event_mut(
+    _guard: ScriptInsertionGuard,
+) -> StructuralOperation {
+    let event = validated(event_mut(
         model,
         STGEventTarget {
             block: target.block,
             event: target.event,
         },
         STGTarget::Script(target),
-    )?;
-    match (target.kind, &script) {
+    ));
+    match (target.kind, script) {
         (STGScriptKind::Condition, ScriptImage::Condition(script)) => {
             insert_exact(
                 &mut event.conditions,
                 target.script,
-                exact_condition(script.as_ref().clone()),
+                take_structural_payload(script),
             );
-            event.condition_count = count_u32(event.conditions.len())?;
+            event.condition_count = validated(count_u32(event.conditions.len()));
         }
         (STGScriptKind::Action, ScriptImage::Action(script)) => {
             insert_exact(
                 &mut event.actions,
                 target.script,
-                exact_action(script.as_ref().clone()),
+                take_structural_payload(script),
             );
-            event.action_count = count_u32(event.actions.len())?;
+            event.action_count = validated(count_u32(event.actions.len()));
         }
         (STGScriptKind::Condition, ScriptImage::Action(_))
         | (STGScriptKind::Action, ScriptImage::Condition(_)) => {
-            return Err(structural_state_mismatch(STGStructuralLocation::Script(
-                target,
-            )));
+            unreachable!("validated STG script kind changed before insertion");
         }
     }
-    let inverse_guard = script_removal_guard(model, target)?;
-    Ok(StructuralOperation::RemoveScript {
+    let inverse_guard = validated(script_removal_guard(model, target));
+    StructuralOperation::RemoveScript {
         target,
-        script,
         guard: inverse_guard,
-    })
+    }
 }
 
 fn apply_remove_script(
     model: &mut STGModel,
     target: STGScriptTarget,
-    expected: ScriptImage,
-    guard: ScriptRemovalGuard,
-) -> Result<StructuralOperation, FormatError> {
-    validate_script_removal_guard(model, target, &expected, guard)?;
-    let event = event_mut(
+    _guard: ScriptRemovalGuard,
+) -> StructuralOperation {
+    let event = validated(event_mut(
         model,
         STGEventTarget {
             block: target.block,
             event: target.event,
         },
         STGTarget::Script(target),
-    )?;
-    match target.kind {
+    ));
+    let script = match target.kind {
         STGScriptKind::Condition => {
-            let _removed = remove_exact(&mut event.conditions, target.script);
-            event.condition_count = count_u32(event.conditions.len())?;
+            let removed = remove_exact(&mut event.conditions, target.script);
+            event.condition_count = validated(count_u32(event.conditions.len()));
+            ScriptImage::Condition(Arc::new(removed))
         }
         STGScriptKind::Action => {
-            let _removed = remove_exact(&mut event.actions, target.script);
-            event.action_count = count_u32(event.actions.len())?;
+            let removed = remove_exact(&mut event.actions, target.script);
+            event.action_count = validated(count_u32(event.actions.len()));
+            ScriptImage::Action(Arc::new(removed))
         }
-    }
-    let inverse_guard = script_insertion_guard(model, target)?;
-    Ok(StructuralOperation::InsertScript {
+    };
+    let inverse_guard = validated(script_insertion_guard(model, target));
+    StructuralOperation::InsertScript {
         target,
-        script: expected,
+        script,
         guard: inverse_guard,
-    })
+    }
 }
 
 fn apply_replace_script(
     model: &mut STGModel,
     target: STGScriptTarget,
-    expected: ScriptImage,
     replacement: ScriptImage,
-) -> Result<StructuralOperation, FormatError> {
-    let current = script_ref(model, target, STGTarget::Script(target))?;
-    if expected.kind() != target.kind
-        || replacement.kind() != target.kind
-        || !script_image_ref_eq(current, &expected)
-    {
-        return Err(structural_state_mismatch(STGStructuralLocation::Script(
-            target,
-        )));
-    }
-    let event = event_mut(
+) -> StructuralOperation {
+    let expected = script_image_fingerprint(&replacement);
+    let event = validated(event_mut(
         model,
         STGEventTarget {
             block: target.block,
             event: target.event,
         },
         STGTarget::Script(target),
-    )?;
-    match &replacement {
+    ));
+    let previous = match replacement {
         ScriptImage::Condition(replacement) => {
             let Some(current) = event.conditions.get_mut(target.script) else {
-                return Err(structural_state_mismatch(STGStructuralLocation::Script(
-                    target,
-                )));
+                unreachable!("validated STG condition disappeared");
             };
-            *current = exact_condition(replacement.as_ref().clone());
-            event.condition_count = count_u32(event.conditions.len())?;
+            let previous = std::mem::replace(current, take_structural_payload(replacement));
+            event.condition_count = validated(count_u32(event.conditions.len()));
+            ScriptImage::Condition(Arc::new(previous))
         }
         ScriptImage::Action(replacement) => {
             let Some(current) = event.actions.get_mut(target.script) else {
-                return Err(structural_state_mismatch(STGStructuralLocation::Script(
-                    target,
-                )));
+                unreachable!("validated STG action disappeared");
             };
-            *current = exact_action(replacement.as_ref().clone());
-            event.action_count = count_u32(event.actions.len())?;
+            let previous = std::mem::replace(current, take_structural_payload(replacement));
+            event.action_count = validated(count_u32(event.actions.len()));
+            ScriptImage::Action(Arc::new(previous))
         }
-    }
-    Ok(StructuralOperation::ReplaceScript {
+    };
+    StructuralOperation::ReplaceScript {
         target,
-        expected: replacement,
-        replacement: expected,
-    })
+        expected,
+        replacement: previous,
+    }
 }
 
 fn apply_replace_value(
     model: &mut STGModel,
     target: STGValueTarget,
-    expected: Arc<StgParamValue>,
     replacement: Arc<StgParamValue>,
-) -> Result<StructuralOperation, FormatError> {
-    let current = value_ref(model, target, STGTarget::Value(target))?;
-    if !parameter_eq(current, expected.as_ref()) {
-        return Err(structural_state_mismatch(STGStructuralLocation::Value(
-            target,
-        )));
-    }
-    let current = value_mut(model, target, STGTarget::Value(target))?;
-    *current = exact_parameter(replacement.as_ref().clone());
-    Ok(StructuralOperation::ReplaceValue {
+) -> StructuralOperation {
+    let expected = parameter_fingerprint(&replacement);
+    let current = validated(value_mut(model, target, STGTarget::Value(target)));
+    let previous = std::mem::replace(current, take_structural_payload(replacement));
+    StructuralOperation::ReplaceValue {
         target,
-        expected: replacement,
-        replacement: expected,
-    })
+        expected,
+        replacement: Arc::new(previous),
+    }
+}
+
+fn take_structural_payload<T>(payload: Arc<T>) -> T {
+    match Arc::try_unwrap(payload) {
+        Ok(payload) => payload,
+        Err(_) => unreachable!("STG structural history payload was unexpectedly shared"),
+    }
+}
+
+fn validated<T>(result: Result<T, FormatError>) -> T {
+    match result {
+        Ok(value) => value,
+        Err(_) => unreachable!("validated STG structural transition became invalid"),
+    }
 }
 
 fn insert_exact<T>(values: &mut Vec<T>, index: usize, value: T) {
@@ -1855,38 +1918,6 @@ fn value_kind(value: &StgParamValue) -> STGValueKind {
     }
 }
 
-fn exact_event(mut event: WireEvent) -> WireEvent {
-    for condition in &mut event.conditions {
-        *condition = exact_condition(condition.clone());
-    }
-    for action in &mut event.actions {
-        *action = exact_action(action.clone());
-    }
-    event.conditions = exact_vec(event.conditions);
-    event.actions = exact_vec(event.actions);
-    event.condition_count = u32::try_from(event.conditions.len()).unwrap_or(u32::MAX);
-    event.action_count = u32::try_from(event.actions.len()).unwrap_or(u32::MAX);
-    event
-}
-
-fn exact_condition(mut script: StgCondition) -> StgCondition {
-    for parameter in &mut script.params {
-        *parameter = exact_parameter(parameter.clone());
-    }
-    script.params = exact_vec(script.params);
-    script.param_count = u32::try_from(script.params.len()).unwrap_or(u32::MAX);
-    script
-}
-
-fn exact_action(mut script: StgAction) -> StgAction {
-    for parameter in &mut script.params {
-        *parameter = exact_parameter(parameter.clone());
-    }
-    script.params = exact_vec(script.params);
-    script.param_count = u32::try_from(script.params.len()).unwrap_or(u32::MAX);
-    script
-}
-
 fn exact_parameter(mut parameter: StgParamValue) -> StgParamValue {
     if let StgParamValueValue::StgStringParam(value) = &mut parameter.value {
         value.value = exact_vec(std::mem::take(&mut value.value));
@@ -1916,19 +1947,13 @@ fn operation_eq(left: &StructuralOperation, right: &StructuralOperation) -> bool
         (
             StructuralOperation::RemoveEvent {
                 target: left_target,
-                event: left_event,
                 guard: left_guard,
             },
             StructuralOperation::RemoveEvent {
                 target: right_target,
-                event: right_event,
                 guard: right_guard,
             },
-        ) => {
-            left_target == right_target
-                && left_guard == right_guard
-                && event_eq(left_event, right_event)
-        }
+        ) => left_target == right_target && left_guard == right_guard,
         (
             StructuralOperation::InsertScript {
                 target: left_target,
@@ -1948,19 +1973,13 @@ fn operation_eq(left: &StructuralOperation, right: &StructuralOperation) -> bool
         (
             StructuralOperation::RemoveScript {
                 target: left_target,
-                script: left_script,
                 guard: left_guard,
             },
             StructuralOperation::RemoveScript {
                 target: right_target,
-                script: right_script,
                 guard: right_guard,
             },
-        ) => {
-            left_target == right_target
-                && left_guard == right_guard
-                && script_image_eq(left_script, right_script)
-        }
+        ) => left_target == right_target && left_guard == right_guard,
         (
             StructuralOperation::ReplaceScript {
                 target: left_target,
@@ -1974,7 +1993,7 @@ fn operation_eq(left: &StructuralOperation, right: &StructuralOperation) -> bool
             },
         ) => {
             left_target == right_target
-                && script_image_eq(left_expected, right_expected)
+                && left_expected == right_expected
                 && script_image_eq(left_replacement, right_replacement)
         }
         (
@@ -1990,7 +2009,7 @@ fn operation_eq(left: &StructuralOperation, right: &StructuralOperation) -> bool
             },
         ) => {
             left_target == right_target
-                && parameter_eq(left_expected, right_expected)
+                && left_expected == right_expected
                 && parameter_eq(left_replacement, right_replacement)
         }
         _ => false,
@@ -2057,52 +2076,130 @@ fn parameter_eq(left: &StgParamValue, right: &StgParamValue) -> bool {
     }
 }
 
+fn event_fingerprint(event: &WireEvent) -> StructuralFingerprint {
+    let mut fingerprint = FingerprintBuilder::new(1);
+    fingerprint.write_bytes(&event.description);
+    fingerprint.write_u32(event.event_id);
+    fingerprint.write_u32(event.condition_count);
+    fingerprint.write_usize(event.conditions.len());
+    for condition in &event.conditions {
+        write_condition_fingerprint(&mut fingerprint, condition);
+    }
+    fingerprint.write_u32(event.action_count);
+    fingerprint.write_usize(event.actions.len());
+    for action in &event.actions {
+        write_action_fingerprint(&mut fingerprint, action);
+    }
+    fingerprint.finish()
+}
+
+fn script_fingerprint(script: ScriptRef<'_>) -> StructuralFingerprint {
+    let mut fingerprint = FingerprintBuilder::new(2);
+    match script {
+        ScriptRef::Condition(script) => write_condition_fingerprint(&mut fingerprint, script),
+        ScriptRef::Action(script) => write_action_fingerprint(&mut fingerprint, script),
+    }
+    fingerprint.finish()
+}
+
+fn script_image_fingerprint(script: &ScriptImage) -> StructuralFingerprint {
+    match script {
+        ScriptImage::Condition(script) => script_fingerprint(ScriptRef::Condition(script)),
+        ScriptImage::Action(script) => script_fingerprint(ScriptRef::Action(script)),
+    }
+}
+
+fn parameter_fingerprint(parameter: &StgParamValue) -> StructuralFingerprint {
+    let mut fingerprint = FingerprintBuilder::new(3);
+    write_parameter_fingerprint(&mut fingerprint, parameter);
+    fingerprint.finish()
+}
+
+fn write_condition_fingerprint(fingerprint: &mut FingerprintBuilder, script: &StgCondition) {
+    fingerprint.write_u8(1);
+    fingerprint.write_u32(script.type_id);
+    fingerprint.write_u32(script.param_count);
+    fingerprint.write_usize(script.params.len());
+    for parameter in &script.params {
+        write_parameter_fingerprint(fingerprint, parameter);
+    }
+}
+
+fn write_action_fingerprint(fingerprint: &mut FingerprintBuilder, script: &StgAction) {
+    fingerprint.write_u8(2);
+    fingerprint.write_u32(script.type_id);
+    fingerprint.write_u32(script.param_count);
+    fingerprint.write_usize(script.params.len());
+    for parameter in &script.params {
+        write_parameter_fingerprint(fingerprint, parameter);
+    }
+}
+
+fn write_parameter_fingerprint(fingerprint: &mut FingerprintBuilder, parameter: &StgParamValue) {
+    fingerprint.write_u32(parameter.type_tag);
+    match &parameter.value {
+        StgParamValueValue::I32(value) => {
+            fingerprint.write_u8(1);
+            fingerprint.write_i32(*value);
+        }
+        StgParamValueValue::F32(value) => {
+            fingerprint.write_u8(2);
+            fingerprint.write_u32(value.to_bits());
+        }
+        StgParamValueValue::StgStringParam(value) => {
+            fingerprint.write_u8(3);
+            fingerprint.write_u32(value.length);
+            fingerprint.write_bytes(&value.value);
+        }
+    }
+}
+
+struct FingerprintBuilder {
+    digest: Sha256,
+}
+
+impl FingerprintBuilder {
+    fn new(domain: u8) -> Self {
+        let mut fingerprint = Self {
+            digest: Sha256::new(),
+        };
+        fingerprint.digest.update(b"kufeditor-stg-structure");
+        fingerprint.write_u8(domain);
+        fingerprint
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.digest.update([value]);
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.digest.update(value.to_le_bytes());
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.digest.update(value.to_le_bytes());
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.digest.update(value.to_le_bytes());
+    }
+
+    fn write_bytes(&mut self, value: &[u8]) {
+        self.write_usize(value.len());
+        self.digest.update(value);
+    }
+
+    fn finish(self) -> StructuralFingerprint {
+        StructuralFingerprint(self.digest.finalize().into())
+    }
+}
+
 fn script_image_eq(left: &ScriptImage, right: &ScriptImage) -> bool {
     match (left, right) {
         (ScriptImage::Condition(left), ScriptImage::Condition(right)) => condition_eq(left, right),
         (ScriptImage::Action(left), ScriptImage::Action(right)) => action_eq(left, right),
         (ScriptImage::Condition(_), ScriptImage::Action(_))
         | (ScriptImage::Action(_), ScriptImage::Condition(_)) => false,
-    }
-}
-
-fn script_image_ref_eq(reference: ScriptRef<'_>, image: &ScriptImage) -> bool {
-    match (reference, image) {
-        (ScriptRef::Condition(reference), ScriptImage::Condition(image)) => {
-            condition_eq(reference, image)
-        }
-        (ScriptRef::Action(reference), ScriptImage::Action(image)) => action_eq(reference, image),
-        (ScriptRef::Condition(_), ScriptImage::Action(_))
-        | (ScriptRef::Action(_), ScriptImage::Condition(_)) => false,
-    }
-}
-
-fn operation_dynamic_bytes(operation: &StructuralOperation) -> Option<usize> {
-    match operation {
-        StructuralOperation::InsertEvent { event, .. }
-        | StructuralOperation::RemoveEvent { event, .. } => {
-            size_of::<WireEvent>().checked_add(event_dynamic_bytes(event)?)
-        }
-        StructuralOperation::InsertScript { script, .. }
-        | StructuralOperation::RemoveScript { script, .. } => {
-            script_struct_size(script.kind()).checked_add(script_image_dynamic_bytes(script)?)
-        }
-        StructuralOperation::ReplaceScript {
-            expected,
-            replacement,
-            ..
-        } => script_struct_size(expected.kind())
-            .checked_mul(2)?
-            .checked_add(script_image_dynamic_bytes(expected)?)?
-            .checked_add(script_image_dynamic_bytes(replacement)?),
-        StructuralOperation::ReplaceValue {
-            expected,
-            replacement,
-            ..
-        } => size_of::<StgParamValue>()
-            .checked_mul(2)?
-            .checked_add(parameter_dynamic_bytes(expected))?
-            .checked_add(parameter_dynamic_bytes(replacement)),
     }
 }
 
@@ -2238,15 +2335,20 @@ fn script_ref_image_retained_bytes(script: ScriptRef<'_>) -> usize {
 
 fn replace_script_image_retained_bytes(script: ScriptRef<'_>, new_dynamic: usize) -> usize {
     size_of::<StructuralOperation>()
-        .checked_add(script_struct_size(script.kind()).saturating_mul(2))
-        .and_then(|bytes| bytes.checked_add(script_ref_dynamic_bytes(script).unwrap_or(usize::MAX)))
-        .and_then(|bytes| bytes.checked_add(new_dynamic))
+        .checked_add(script_struct_size(script.kind()))
+        .and_then(|bytes| {
+            bytes.checked_add(
+                script_ref_dynamic_bytes(script)
+                    .unwrap_or(usize::MAX)
+                    .max(new_dynamic),
+            )
+        })
         .unwrap_or(usize::MAX)
 }
 
 fn replace_value_image_retained_bytes(old_dynamic: usize) -> usize {
     size_of::<StructuralOperation>()
-        .checked_add(size_of::<StgParamValue>().saturating_mul(2))
+        .checked_add(size_of::<StgParamValue>())
         .and_then(|bytes| bytes.checked_add(old_dynamic))
         .unwrap_or(usize::MAX)
 }
@@ -2381,11 +2483,9 @@ fn validate_operation(
             }
             count_u32(guard.event_count.saturating_add(1)).map(|_| ())
         }
-        StructuralOperation::RemoveEvent {
-            target,
-            event,
-            guard,
-        } => validate_event_removal_guard(model, *target, event.as_ref(), *guard),
+        StructuralOperation::RemoveEvent { target, guard } => {
+            validate_event_removal_guard(model, *target, *guard)
+        }
         StructuralOperation::InsertScript {
             target,
             script,
@@ -2394,18 +2494,16 @@ fn validate_operation(
             validate_script_insertion_guard(model, *target, script, *guard)?;
             count_u32(guard.script_count.saturating_add(1)).map(|_| ())
         }
-        StructuralOperation::RemoveScript {
-            target,
-            script,
-            guard,
-        } => validate_script_removal_guard(model, *target, script, *guard),
+        StructuralOperation::RemoveScript { target, guard } => {
+            validate_script_removal_guard(model, *target, *guard)
+        }
         StructuralOperation::ReplaceScript {
             target,
+            expected,
             replacement,
-            ..
         } => {
-            script_ref(model, *target, STGTarget::Script(*target))?;
-            if replacement.kind() == target.kind {
+            let current = script_ref(model, *target, STGTarget::Script(*target))?;
+            if replacement.kind() == target.kind && script_fingerprint(current) == *expected {
                 count_u32(replacement.parameters().len()).map(|_| ())
             } else {
                 Err(structural_state_mismatch(STGStructuralLocation::Script(
@@ -2413,8 +2511,17 @@ fn validate_operation(
                 )))
             }
         }
-        StructuralOperation::ReplaceValue { target, .. } => {
-            value_ref(model, *target, STGTarget::Value(*target)).map(|_| ())
+        StructuralOperation::ReplaceValue {
+            target, expected, ..
+        } => {
+            let current = value_ref(model, *target, STGTarget::Value(*target))?;
+            if parameter_fingerprint(current) == *expected {
+                Ok(())
+            } else {
+                Err(structural_state_mismatch(STGStructuralLocation::Value(
+                    *target,
+                )))
+            }
         }
     }
 }
@@ -2429,21 +2536,17 @@ fn operation_delta(
             event,
             guard,
         } => event_insert_delta(model, *target, event, *guard),
-        StructuralOperation::RemoveEvent {
-            target,
-            event,
-            guard,
-        } => event_remove_delta(model, *target, event, *guard),
+        StructuralOperation::RemoveEvent { target, guard } => {
+            event_remove_delta(model, *target, *guard)
+        }
         StructuralOperation::InsertScript {
             target,
             script,
             guard: _,
         } => script_insert_delta(model, *target, script),
-        StructuralOperation::RemoveScript {
-            target,
-            script,
-            guard: _,
-        } => script_remove_delta(model, *target, script),
+        StructuralOperation::RemoveScript { target, guard: _ } => {
+            script_remove_delta(model, *target)
+        }
         StructuralOperation::ReplaceScript {
             target,
             replacement,
@@ -2521,7 +2624,6 @@ fn event_insert_delta(
 fn event_remove_delta(
     model: &STGModel,
     target: STGEventTarget,
-    event: &WireEvent,
     guard: EventRemovalGuard,
 ) -> Result<MetricDelta, FormatError> {
     let tail = parsed_tail(model, event_location(target))?;
@@ -2529,6 +2631,12 @@ fn event_remove_delta(
         &tail.event_blocks,
         STGCollection::EventBlock,
         target.block,
+        STGTarget::Structure(event_location(target)),
+    )?;
+    let event = item(
+        &block.events,
+        STGCollection::Event,
+        target.event,
         STGTarget::Structure(event_location(target)),
     )?;
     let event_retained = event_dynamic_bytes(event).unwrap_or(usize::MAX);
@@ -2593,7 +2701,6 @@ fn script_insert_delta(
 fn script_remove_delta(
     model: &STGModel,
     target: STGScriptTarget,
-    script: &ScriptImage,
 ) -> Result<MetricDelta, FormatError> {
     let event = event_ref(
         model,
@@ -2603,13 +2710,14 @@ fn script_remove_delta(
         },
         STGTarget::Script(target),
     )?;
+    let script = script_ref(model, target, STGTarget::Script(target))?;
     Ok(MetricDelta {
         old_retained: script_collection_capacity(event, target.kind)
-            .saturating_add(script_image_dynamic_bytes(script).unwrap_or(usize::MAX)),
+            .saturating_add(script_ref_dynamic_bytes(script).unwrap_or(usize::MAX)),
         new_retained: script_count(event, target.kind)
             .saturating_sub(1)
             .saturating_mul(script_struct_size(target.kind)),
-        old_wire: script_image_wire_len(script).unwrap_or(usize::MAX),
+        old_wire: script_ref_wire_len(script).unwrap_or(usize::MAX),
         new_wire: 0,
     })
 }
@@ -2759,6 +2867,39 @@ mod tests {
     }
 
     #[test]
+    fn structural_event_restore_moves_large_payloads_between_history_and_model() {
+        let mut document = parse(large_action_string_fixture(256 * 1_024));
+        let mut insert = changed(document.remove_event(0, 0).unwrap());
+
+        for _ in 0..8 {
+            let history_pointer = inserted_event_string_pointer(&insert);
+            let remove = changed(document.restore_structure(insert).unwrap());
+            assert_eq!(model_event_string_pointer(&document), history_pointer);
+            insert = changed(document.restore_structure(remove).unwrap());
+        }
+    }
+
+    #[test]
+    fn structural_script_restore_moves_large_payloads_between_history_and_model() {
+        let mut document = parse(large_action_string_fixture(256 * 1_024));
+        let target = STGScriptTarget {
+            block: 0,
+            event: 0,
+            kind: STGScriptKind::Action,
+            script: 0,
+        };
+        let mut restore_original = changed(document.change_script_type(target, 7).unwrap());
+
+        for _ in 0..8 {
+            let history_pointer = replacement_script_string_pointer(&restore_original);
+            let restore_replacement =
+                changed(document.restore_structure(restore_original).unwrap());
+            assert_eq!(model_event_string_pointer(&document), history_pointer);
+            restore_original = changed(document.restore_structure(restore_replacement).unwrap());
+        }
+    }
+
+    #[test]
     fn structural_event_limits_reject_before_install_and_keep_exact_capacities() {
         let original = parse(empty_stg_fixture());
         let mut accepted = original.clone();
@@ -2855,6 +2996,54 @@ mod tests {
 
     fn parse(bytes: Vec<u8>) -> STGDocument {
         STGDocument::parse(bytes).unwrap_or_else(|error| panic!("test STG parse failed: {error}"))
+    }
+
+    fn large_action_string_fixture(length: usize) -> Vec<u8> {
+        let fixture = complete_stg_fixture();
+        let mut source = fixture.bytes;
+        let value_start = fixture.offsets.action_string_length + size_of::<u32>();
+        let value_end = value_start + b"action".len();
+        source.splice(value_start..value_end, std::iter::repeat_n(b'x', length));
+        let length = u32::try_from(length).expect("test string length must fit u32");
+        source[fixture.offsets.action_string_length
+            ..fixture.offsets.action_string_length + size_of::<u32>()]
+            .copy_from_slice(&length.to_le_bytes());
+        source
+    }
+
+    fn inserted_event_string_pointer(image: &STGStructuralImage) -> *const u8 {
+        let StructuralOperation::InsertEvent { event, .. } = &image.operation else {
+            panic!("expected an insert-event history action");
+        };
+        event_string_pointer(event)
+    }
+
+    fn replacement_script_string_pointer(image: &STGStructuralImage) -> *const u8 {
+        let StructuralOperation::ReplaceScript { replacement, .. } = &image.operation else {
+            panic!("expected a replace-script history action");
+        };
+        let ScriptImage::Action(script) = replacement else {
+            panic!("expected an action-script history payload");
+        };
+        parameter_string_pointer(&script.params[0])
+    }
+
+    fn model_event_string_pointer(document: &STGDocument) -> *const u8 {
+        let STGTail::Parsed(tail) = &document.model.tail else {
+            panic!("test STG unexpectedly has an opaque tail");
+        };
+        event_string_pointer(&tail.event_blocks[0].events[0])
+    }
+
+    fn event_string_pointer(event: &WireEvent) -> *const u8 {
+        parameter_string_pointer(&event.actions[0].params[0])
+    }
+
+    fn parameter_string_pointer(parameter: &StgParamValue) -> *const u8 {
+        let StgParamValueValue::StgStringParam(value) = &parameter.value else {
+            panic!("expected an STG string parameter");
+        };
+        value.value.as_ptr()
     }
 
     fn changed(mutation: STGMutation<STGStructuralImage>) -> STGStructuralImage {

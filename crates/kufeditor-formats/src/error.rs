@@ -730,6 +730,9 @@ pub enum STGStructuralLocation {
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum STGEncodeError {
+    #[error("direct-sink STG encoding is not available in the generated Rust codec")]
+    DirectSinkUnavailable,
+
     #[error("generated STG encoding failed: {0}")]
     Cleave(#[source] STGCleaveError),
 

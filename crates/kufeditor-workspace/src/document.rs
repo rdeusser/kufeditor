@@ -1,6 +1,7 @@
 use kufeditor_formats::{
-    FormatError, SaveDocument, SaveMutation, SaveNumberTarget, SaveTextField, SkillDocument,
-    SkillTextField, TextSOXDocument, TroopDocument, TroopField,
+    FormatError, STGDocument, STGEncodeError, STGFloatTarget, STGFloatValue, STGNumberTarget,
+    STGRebaseError, STGStructuralEdit, STGTextTarget, SaveDocument, SaveMutation, SaveNumberTarget,
+    SaveTextField, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument, TroopField,
 };
 
 use crate::{
@@ -24,6 +25,7 @@ pub enum Document {
     Skill(SkillDocument),
     TextSOX(TextSOXDocument),
     Save(SaveDocument),
+    STG(STGDocument),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +34,7 @@ pub enum DocumentKind {
     SkillInfo,
     TextSOX,
     CrusadersSave,
+    CrusadersSTG,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,6 +73,33 @@ pub enum DocumentEdit {
         field: SaveTextField,
         value: String,
     },
+    SetSTGNumber {
+        target: STGNumberTarget,
+        value: i64,
+    },
+    SetSTGFloat {
+        target: STGFloatTarget,
+        value: STGFloatValue,
+    },
+    SetSTGText {
+        target: STGTextTarget,
+        value: String,
+    },
+    EditSTGStructure {
+        edit: STGStructuralEdit,
+    },
+}
+
+impl DocumentEdit {
+    pub(crate) const fn is_stg(&self) -> bool {
+        matches!(
+            self,
+            Self::SetSTGNumber { .. }
+                | Self::SetSTGFloat { .. }
+                | Self::SetSTGText { .. }
+                | Self::EditSTGStructure { .. }
+        )
+    }
 }
 
 impl Document {
@@ -79,6 +109,7 @@ impl Document {
             Self::Skill(_) => DocumentKind::SkillInfo,
             Self::TextSOX(_) => DocumentKind::TextSOX,
             Self::Save(_) => DocumentKind::CrusadersSave,
+            Self::STG(_) => DocumentKind::CrusadersSTG,
         }
     }
 
@@ -134,6 +165,12 @@ impl Document {
                 self.apply_save_number(id, target, value)
             }
             DocumentEdit::SetSaveText { field, value } => self.apply_save_text(id, field, value),
+            DocumentEdit::SetSTGNumber { .. }
+            | DocumentEdit::SetSTGFloat { .. }
+            | DocumentEdit::SetSTGText { .. }
+            | DocumentEdit::EditSTGStructure { .. } => {
+                unreachable!("STG edits use the bounded workspace history path")
+            }
         }
     }
 
@@ -299,6 +336,9 @@ impl Document {
             Self::Skill(document) => document.encode(),
             Self::TextSOX(document) => document.encode(),
             Self::Save(document) => document.encode(),
+            Self::STG(_) => Err(FormatError::STGEncode(
+                STGEncodeError::DirectSinkUnavailable,
+            )),
         }
     }
 
@@ -312,6 +352,9 @@ impl Document {
             (Self::Skill(document), Self::Skill(saved)) => document.rebase_source(saved, bytes),
             (Self::TextSOX(document), Self::TextSOX(saved)) => document.rebase_source(saved, bytes),
             (Self::Save(document), Self::Save(saved)) => document.rebase_source(saved, bytes),
+            (Self::STG(_), _) | (_, Self::STG(_)) => {
+                Err(FormatError::STGRebase(STGRebaseError::InconsistentImage))
+            }
             (Self::Save(_), _) | (_, Self::Save(_)) => Err(FormatError::InconsistentSaveRebase),
             _ => Err(FormatError::InconsistentSOXRebase),
         }

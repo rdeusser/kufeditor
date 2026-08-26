@@ -418,6 +418,7 @@ enum EditorRoute {
     Skill,
     TextSOX,
     Save,
+    STG,
 }
 
 const fn editor_route(kind: DocumentKind) -> EditorRoute {
@@ -426,6 +427,7 @@ const fn editor_route(kind: DocumentKind) -> EditorRoute {
         DocumentKind::SkillInfo => EditorRoute::Skill,
         DocumentKind::TextSOX => EditorRoute::TextSOX,
         DocumentKind::CrusadersSave => EditorRoute::Save,
+        DocumentKind::CrusadersSTG => EditorRoute::STG,
     }
 }
 
@@ -1885,12 +1887,36 @@ impl AppFrame {
             Ok(EditorRoute::Skill) => self.skill_editor(document_id, cx),
             Ok(EditorRoute::TextSOX) => self.text_sox_editor(document_id, cx),
             Ok(EditorRoute::Save) => self.save_editor(document_id, cx),
+            Ok(EditorRoute::STG) => self.stg_editor(document_id),
             Err(error) => div()
                 .size_full()
                 .p(px(28.0))
                 .text_color(self.theme.text_dim)
                 .child(format!("Could not open the document editor: {error}")),
         }
+    }
+
+    fn stg_editor(&self, document_id: DocumentID) -> Div {
+        let summary = match (
+            self.workspace.stg_unit_count(document_id),
+            self.workspace.stg_area_count(document_id),
+            self.workspace.stg_event_block_count(document_id),
+        ) {
+            (Ok(units), Ok(Some(areas)), Ok(Some(event_blocks))) => {
+                format!("{units} units · {areas} areas · {event_blocks} event blocks")
+            }
+            (Ok(units), Ok(None), Ok(None)) => {
+                format!("{units} units · opaque tail preserved")
+            }
+            _ => "Document summary is unavailable".to_owned(),
+        };
+        div()
+            .size_full()
+            .p(px(28.0))
+            .text_color(self.theme.text_dim)
+            .child("STG")
+            .child(summary)
+            .child("Structured editing controls are not available yet.")
     }
 
     fn skill_editor(&self, document_id: DocumentID, cx: &mut Context<Self>) -> Div {
@@ -2891,10 +2917,12 @@ mod tests {
     }
 
     #[test]
-    fn text_sox_routing_keeps_all_document_routes_distinct() {
+    fn document_routing_keeps_all_editor_routes_distinct() {
         assert_eq!(editor_route(DocumentKind::SkillInfo), EditorRoute::Skill);
         assert_eq!(editor_route(DocumentKind::TroopInfo), EditorRoute::Troop);
         assert_eq!(editor_route(DocumentKind::TextSOX), EditorRoute::TextSOX);
+        assert_eq!(editor_route(DocumentKind::CrusadersSave), EditorRoute::Save);
+        assert_eq!(editor_route(DocumentKind::CrusadersSTG), EditorRoute::STG);
     }
 
     #[gpui::test]

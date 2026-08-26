@@ -11,10 +11,20 @@ use std::{
 use kufeditor_formats::{DiagnosticField, FormatError};
 use kufeditor_workspace::{
     ApplyOutcome, DiagnosticLocation, Document, DocumentEdit, DocumentID, DocumentKind,
-    SaveDocument, SaveEditor, SaveNumberTarget, SaveTextField, SaveUnitField, SkillDocument,
-    SkillTextField, StateID, TextSOXDocument, TextSOXField, TroopDocument, TroopField, Workspace,
-    WorkspaceError,
+    STGDocument, STGEventTarget, STGFloatTarget, STGFloatValue, STGHeaderTextField,
+    STGNumberTarget, STGParameterTarget, STGScriptKind, STGScriptTarget, STGStructuralEdit,
+    STGTailStatus, STGText, STGTextTarget, STGUnitField, STGUnitFloatField, STGValue, STGValueKind,
+    STGValueTarget, SaveDocument, SaveEditor, SaveNumberTarget, SaveTextField, SaveUnitField,
+    SkillDocument, SkillTextField, StateID, TextSOXDocument, TextSOXField, TroopDocument,
+    TroopField, Workspace, WorkspaceError,
 };
+
+#[path = "../../kufeditor-formats/tests/support/stg.rs"]
+#[allow(
+    dead_code,
+    reason = "the shared STG fixture exposes offsets and variants used by format-level tests"
+)]
+mod stg_support;
 
 const SAVE_CONTEXT_SIZE: usize = 0x438;
 const SAVE_MAIN_SIZE: usize = 0x154;
@@ -1045,5 +1055,697 @@ fn every_existing_sox_edit_variant_treats_equal_values_as_no_ops() {
             value: "Alpha".to_owned(),
         },
         &directory.path().join("text.sox"),
+    );
+}
+
+fn workspace_with_stg() -> (Workspace, DocumentID) {
+    workspace_with_stg_bytes(stg_support::complete_stg_fixture().bytes)
+}
+
+fn workspace_with_stg_bytes(bytes: Vec<u8>) -> (Workspace, DocumentID) {
+    let document = STGDocument::parse(bytes).unwrap();
+    let mut workspace = Workspace::new();
+    let id = workspace.open_loaded(PathBuf::from("campaign.stg"), Document::STG(document));
+    (workspace, id)
+}
+
+fn stg_event_id_target() -> STGNumberTarget {
+    STGNumberTarget::EventID { block: 0, event: 0 }
+}
+
+fn stg_action_string_target() -> STGValueTarget {
+    STGValueTarget::ScriptParameter(STGParameterTarget {
+        script: STGScriptTarget {
+            block: 0,
+            event: 0,
+            kind: STGScriptKind::Action,
+            script: 0,
+        },
+        parameter: 0,
+    })
+}
+
+#[test]
+fn stg_document_kind_and_projections_cover_the_typed_document() {
+    let (workspace, id) = workspace_with_stg();
+
+    assert_eq!(
+        workspace.document_kind(id).unwrap(),
+        DocumentKind::CrusadersSTG
+    );
+    assert_eq!(workspace.record_count(id).unwrap(), 1);
+    assert_eq!(workspace.stg_unit_count(id).unwrap(), 1);
+    assert_eq!(workspace.stg_area_count(id).unwrap(), Some(1));
+    assert_eq!(workspace.stg_variable_count(id).unwrap(), Some(4));
+    assert_eq!(workspace.stg_event_block_count(id).unwrap(), Some(2));
+    assert_eq!(workspace.stg_footer_count(id).unwrap(), Some(2));
+    assert!(matches!(
+        workspace.stg_tail_status(id).unwrap(),
+        STGTailStatus::Parsed { suffix } if suffix == [0xf0, 0x0d, 0xca, 0xfe]
+    ));
+
+    let block = workspace.stg_event_block(id, 0).unwrap();
+    assert_eq!(block.header, 0x0102_0304);
+    assert_eq!(block.event_count, 2);
+    let event_target = STGEventTarget { block: 0, event: 0 };
+    let event = workspace.stg_event(id, event_target).unwrap();
+    assert_eq!(event.id, 500);
+    assert_eq!(event.description.decoded(), Some("Primary Event"));
+    assert_eq!(event.condition_count, 1);
+    assert_eq!(event.action_count, 1);
+
+    let condition_target = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let condition = workspace.stg_script(id, condition_target).unwrap();
+    assert_eq!(condition.id, 19);
+    assert_eq!(condition.parameter_count, 2);
+    let parameter_target = STGParameterTarget {
+        script: condition_target,
+        parameter: 0,
+    };
+    let parameter = workspace.stg_parameter(id, parameter_target).unwrap();
+    assert_eq!(parameter.value, STGValue::Integer(23));
+    assert_eq!(
+        workspace
+            .stg_value(id, STGValueTarget::ScriptParameter(parameter_target),)
+            .unwrap(),
+        STGValue::Integer(23)
+    );
+
+    assert_eq!(
+        workspace
+            .stg_number(
+                id,
+                STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::UCD,
+                },
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        workspace
+            .stg_float(
+                id,
+                STGFloatTarget::Unit {
+                    unit: 0,
+                    field: STGUnitFloatField::LeaderHPOverride,
+                },
+            )
+            .unwrap(),
+        STGFloatValue::from_bits(0)
+    );
+    assert_eq!(
+        workspace
+            .stg_text(id, STGTextTarget::Header(STGHeaderTextField::MapFilename),)
+            .unwrap(),
+        STGText::Decoded("".into())
+    );
+    assert!(!workspace.diagnostics(id).unwrap().is_empty());
+}
+
+#[test]
+fn stg_scalar_edits_have_one_state_each_and_exact_undo_redo() {
+    let (mut workspace, id) = workspace_with_stg();
+    let saved_state = workspace.state_id(id).unwrap();
+    let number_target = stg_event_id_target();
+    let float_target = STGFloatTarget::Unit {
+        unit: 0,
+        field: STGUnitFloatField::LeaderHPOverride,
+    };
+    let fixed_text_target = STGTextTarget::Header(STGHeaderTextField::MapFilename);
+    let dynamic_text_target = STGTextTarget::ParameterString {
+        value: stg_action_string_target(),
+    };
+    let edits = [
+        DocumentEdit::SetSTGNumber {
+            target: number_target,
+            value: 900,
+        },
+        DocumentEdit::SetSTGFloat {
+            target: float_target,
+            value: STGFloatValue::from_bits(0x7fc0_0002),
+        },
+        DocumentEdit::SetSTGText {
+            target: fixed_text_target,
+            value: "Map B".to_owned(),
+        },
+        DocumentEdit::SetSTGText {
+            target: dynamic_text_target,
+            value: "changed action".to_owned(),
+        },
+    ];
+
+    let mut states = vec![saved_state];
+    for edit in edits {
+        assert_eq!(workspace.apply(id, edit).unwrap(), ApplyOutcome::Changed);
+        states.push(workspace.state_id(id).unwrap());
+    }
+    states.sort_unstable_by_key(|state| format!("{state:?}"));
+    states.dedup();
+    assert_eq!(states.len(), 5);
+    let retained = workspace.history_retained_bytes(id).unwrap();
+    assert!(retained > 0);
+    assert_eq!(workspace.stg_number(id, number_target).unwrap(), 900);
+    assert_eq!(
+        workspace.stg_float(id, float_target).unwrap(),
+        STGFloatValue::from_bits(0x7fc0_0002)
+    );
+    assert_eq!(
+        workspace.stg_text(id, fixed_text_target).unwrap().decoded(),
+        Some("Map B")
+    );
+    assert_eq!(
+        workspace
+            .stg_text(id, dynamic_text_target)
+            .unwrap()
+            .decoded(),
+        Some("changed action")
+    );
+
+    for _ in 0..4 {
+        assert!(workspace.undo(id).unwrap());
+    }
+    assert_eq!(workspace.state_id(id).unwrap(), saved_state);
+    assert!(!workspace.is_dirty(id).unwrap());
+    assert_eq!(workspace.stg_number(id, number_target).unwrap(), 500);
+    assert_eq!(
+        workspace.stg_float(id, float_target).unwrap(),
+        STGFloatValue::from_bits(0)
+    );
+    assert_eq!(
+        workspace.stg_text(id, fixed_text_target).unwrap().decoded(),
+        Some("")
+    );
+    assert_eq!(
+        workspace
+            .stg_text(id, dynamic_text_target)
+            .unwrap()
+            .decoded(),
+        Some("action")
+    );
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
+
+    for _ in 0..4 {
+        assert!(workspace.redo(id).unwrap());
+    }
+    assert!(workspace.is_dirty(id).unwrap());
+    assert_eq!(workspace.stg_number(id, number_target).unwrap(), 900);
+    assert_eq!(
+        workspace.stg_float(id, float_target).unwrap(),
+        STGFloatValue::from_bits(0x7fc0_0002)
+    );
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
+}
+
+#[test]
+fn stg_structural_edits_are_single_exact_history_entries() {
+    let (mut workspace, id) = workspace_with_stg();
+    let saved_state = workspace.state_id(id).unwrap();
+    let insert = STGStructuralEdit::InsertEvent {
+        target: STGEventTarget { block: 0, event: 1 },
+    };
+    assert_eq!(
+        workspace
+            .apply(id, DocumentEdit::EditSTGStructure { edit: insert })
+            .unwrap(),
+        ApplyOutcome::Changed
+    );
+    assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 3);
+    let after_insert = workspace.state_id(id).unwrap();
+    assert_ne!(after_insert, saved_state);
+
+    let value_target = stg_action_string_target();
+    assert_eq!(
+        workspace
+            .apply(
+                id,
+                DocumentEdit::EditSTGStructure {
+                    edit: STGStructuralEdit::ChangeValueType {
+                        target: value_target,
+                        kind: STGValueKind::Float,
+                    },
+                },
+            )
+            .unwrap(),
+        ApplyOutcome::Changed
+    );
+    assert_eq!(
+        workspace.stg_value(id, value_target).unwrap(),
+        STGValue::Float(STGFloatValue::from_bits(0))
+    );
+    let retained = workspace.history_retained_bytes(id).unwrap();
+
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(
+        workspace.stg_value(id, value_target).unwrap(),
+        STGValue::String(STGText::Decoded("action".into()))
+    );
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 2);
+    assert_eq!(workspace.state_id(id).unwrap(), saved_state);
+    assert!(!workspace.is_dirty(id).unwrap());
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
+
+    assert!(workspace.redo(id).unwrap());
+    assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 3);
+    assert!(workspace.redo(id).unwrap());
+    assert_eq!(
+        workspace.stg_value(id, value_target).unwrap(),
+        STGValue::Float(STGFloatValue::from_bits(0))
+    );
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
+}
+
+#[test]
+fn stg_history_dispatches_every_structural_action_family() {
+    let (mut workspace, id) = workspace_with_stg();
+    let saved_state = workspace.state_id(id).unwrap();
+    let condition = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let event_one_condition = STGScriptTarget {
+        block: 0,
+        event: 1,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let event_one_action = STGScriptTarget {
+        kind: STGScriptKind::Action,
+        ..event_one_condition
+    };
+    let value = STGValueTarget::ScriptParameter(STGParameterTarget {
+        script: condition,
+        parameter: 1,
+    });
+    let edits = [
+        STGStructuralEdit::ChangeScriptType {
+            target: condition,
+            type_id: 19,
+        },
+        STGStructuralEdit::ChangeValueType {
+            target: value,
+            kind: STGValueKind::String,
+        },
+        STGStructuralEdit::InsertScript {
+            target: event_one_condition,
+            type_id: 27,
+        },
+        STGStructuralEdit::RemoveScript {
+            target: event_one_condition,
+        },
+        STGStructuralEdit::InsertScript {
+            target: event_one_action,
+            type_id: 7,
+        },
+        STGStructuralEdit::RemoveScript {
+            target: event_one_action,
+        },
+        STGStructuralEdit::InsertEvent {
+            target: STGEventTarget { block: 0, event: 1 },
+        },
+        STGStructuralEdit::RemoveEvent {
+            target: STGEventTarget { block: 0, event: 1 },
+        },
+    ];
+
+    let mut previous_state = saved_state;
+    for edit in edits {
+        assert_eq!(
+            workspace
+                .apply(id, DocumentEdit::EditSTGStructure { edit })
+                .unwrap(),
+            ApplyOutcome::Changed
+        );
+        let state = workspace.state_id(id).unwrap();
+        assert_ne!(state, previous_state);
+        previous_state = state;
+    }
+    assert_eq!(
+        workspace.stg_script(id, condition).unwrap().parameter_count,
+        3
+    );
+    assert_eq!(
+        workspace.stg_value(id, value).unwrap(),
+        STGValue::String(STGText::Decoded("".into()))
+    );
+    assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 2);
+    let retained = workspace.history_retained_bytes(id).unwrap();
+
+    for _ in 0..edits.len() {
+        assert!(workspace.undo(id).unwrap());
+    }
+    assert_eq!(workspace.state_id(id).unwrap(), saved_state);
+    assert!(!workspace.is_dirty(id).unwrap());
+    assert_eq!(
+        workspace.stg_script(id, condition).unwrap().parameter_count,
+        2
+    );
+    assert_eq!(
+        workspace.stg_value(id, value).unwrap(),
+        STGValue::Float(STGFloatValue::from_bits((-0.0_f32).to_bits()))
+    );
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
+
+    for _ in 0..edits.len() {
+        assert!(workspace.redo(id).unwrap());
+    }
+    assert_eq!(
+        workspace.stg_script(id, condition).unwrap().parameter_count,
+        3
+    );
+    assert_eq!(
+        workspace.stg_value(id, value).unwrap(),
+        STGValue::String(STGText::Decoded("".into()))
+    );
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
+}
+
+#[test]
+fn stg_history_repairs_a_longer_same_id_script_exactly() {
+    let fixture = stg_support::complete_stg_fixture();
+    let mut bytes = fixture.bytes;
+    bytes
+        .get_mut(
+            fixture.offsets.condition_parameter_count
+                ..fixture.offsets.condition_parameter_count + size_of::<u32>(),
+        )
+        .unwrap()
+        .copy_from_slice(&4_u32.to_le_bytes());
+    let mut extra = Vec::new();
+    append_u32(&mut extra, 0);
+    append_i32(&mut extra, 77);
+    append_u32(&mut extra, 0);
+    append_i32(&mut extra, 88);
+    bytes.splice(
+        fixture.offsets.action_count..fixture.offsets.action_count,
+        extra,
+    );
+
+    let (mut workspace, id) = workspace_with_stg_bytes(bytes);
+    let condition = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    assert_eq!(
+        workspace.stg_script(id, condition).unwrap().parameter_count,
+        4
+    );
+    workspace
+        .apply(
+            id,
+            DocumentEdit::EditSTGStructure {
+                edit: STGStructuralEdit::ChangeScriptType {
+                    target: condition,
+                    type_id: 19,
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.stg_script(id, condition).unwrap().parameter_count,
+        3
+    );
+    assert_eq!(
+        workspace
+            .stg_parameter(
+                id,
+                STGParameterTarget {
+                    script: condition,
+                    parameter: 2,
+                },
+            )
+            .unwrap()
+            .value,
+        STGValue::Integer(77)
+    );
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(
+        workspace.stg_script(id, condition).unwrap().parameter_count,
+        4
+    );
+    assert!(workspace.redo(id).unwrap());
+    assert_eq!(
+        workspace.stg_script(id, condition).unwrap().parameter_count,
+        3
+    );
+}
+
+#[test]
+fn stg_neutral_and_wrong_kind_edits_preserve_history() {
+    let (mut workspace, id) = workspace_with_stg();
+    let target = stg_event_id_target();
+    workspace
+        .apply(id, DocumentEdit::SetSTGNumber { target, value: 900 })
+        .unwrap();
+    workspace.undo(id).unwrap();
+    let before = history_state(&workspace, id);
+    let retained = workspace.history_retained_bytes(id).unwrap();
+
+    assert_eq!(
+        workspace
+            .apply(id, DocumentEdit::SetSTGNumber { target, value: 500 },)
+            .unwrap(),
+        ApplyOutcome::Unchanged
+    );
+    assert_eq!(history_state(&workspace, id), before);
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
+
+    let error = workspace.apply(id, move_speed(175)).unwrap_err();
+    assert!(matches!(error, WorkspaceError::NotTroop(actual) if actual == id));
+    assert_eq!(history_state(&workspace, id), before);
+
+    let (mut troop_workspace, troop_id) = workspace_with_troop();
+    let troop_before = history_state(&troop_workspace, troop_id);
+    let error = troop_workspace
+        .apply(troop_id, DocumentEdit::SetSTGNumber { target, value: 900 })
+        .unwrap_err();
+    assert!(matches!(error, WorkspaceError::NotSTG(actual) if actual == troop_id));
+    assert_eq!(history_state(&troop_workspace, troop_id), troop_before);
+}
+
+#[test]
+fn stg_history_limit_evicts_oldest_entries_and_rejects_oversized_entries() {
+    let target = stg_event_id_target();
+    let (mut probe, probe_id) = workspace_with_stg();
+    probe
+        .apply(probe_id, DocumentEdit::SetSTGNumber { target, value: 600 })
+        .unwrap();
+    let one_entry = probe.history_retained_bytes(probe_id).unwrap();
+    assert!(one_entry > 0);
+
+    let document = STGDocument::parse(stg_support::complete_stg_fixture().bytes).unwrap();
+    let mut oldest_first = Workspace::with_stg_history_limit(one_entry * 2);
+    let oldest_first_id =
+        oldest_first.open_loaded(PathBuf::from("oldest-first.stg"), Document::STG(document));
+    for value in [600, 700, 800] {
+        oldest_first
+            .apply(
+                oldest_first_id,
+                DocumentEdit::SetSTGNumber { target, value },
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        oldest_first
+            .history_retained_bytes(oldest_first_id)
+            .unwrap(),
+        one_entry * 2
+    );
+    assert!(oldest_first.undo(oldest_first_id).unwrap());
+    assert_eq!(
+        oldest_first.stg_number(oldest_first_id, target).unwrap(),
+        700
+    );
+    assert!(oldest_first.undo(oldest_first_id).unwrap());
+    assert_eq!(
+        oldest_first.stg_number(oldest_first_id, target).unwrap(),
+        600
+    );
+    assert!(!oldest_first.can_undo(oldest_first_id).unwrap());
+
+    let document = STGDocument::parse(stg_support::complete_stg_fixture().bytes).unwrap();
+    let mut workspace = Workspace::with_stg_history_limit(one_entry);
+    let id = workspace.open_loaded(PathBuf::from("bounded.stg"), Document::STG(document));
+    workspace
+        .apply(id, DocumentEdit::SetSTGNumber { target, value: 600 })
+        .unwrap();
+    workspace
+        .apply(id, DocumentEdit::SetSTGNumber { target, value: 700 })
+        .unwrap();
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), one_entry);
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(workspace.stg_number(id, target).unwrap(), 600);
+    assert!(!workspace.can_undo(id).unwrap());
+    assert!(workspace.is_dirty(id).unwrap());
+    assert!(workspace.redo(id).unwrap());
+    assert_eq!(workspace.stg_number(id, target).unwrap(), 700);
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), one_entry);
+
+    let document = STGDocument::parse(stg_support::complete_stg_fixture().bytes).unwrap();
+    let mut rejected = Workspace::with_stg_history_limit(one_entry - 1);
+    let rejected_id = rejected.open_loaded(PathBuf::from("rejected.stg"), Document::STG(document));
+    let before = history_state(&rejected, rejected_id);
+    let error = rejected
+        .apply(
+            rejected_id,
+            DocumentEdit::SetSTGNumber { target, value: 600 },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        WorkspaceError::HistoryBudgetExceeded { requested, maximum }
+            if requested == one_entry && maximum == one_entry - 1
+    ));
+    assert_eq!(history_state(&rejected, rejected_id), before);
+    assert_eq!(rejected.stg_number(rejected_id, target).unwrap(), 500);
+    assert_eq!(rejected.history_retained_bytes(rejected_id).unwrap(), 0);
+}
+
+#[test]
+fn stg_history_limit_clears_redo_before_deterministic_eviction() {
+    let target = stg_event_id_target();
+    let (mut probe, probe_id) = workspace_with_stg();
+    probe
+        .apply(probe_id, DocumentEdit::SetSTGNumber { target, value: 600 })
+        .unwrap();
+    let one_entry = probe.history_retained_bytes(probe_id).unwrap();
+
+    let document = STGDocument::parse(stg_support::complete_stg_fixture().bytes).unwrap();
+    let mut workspace = Workspace::with_stg_history_limit(one_entry * 2);
+    let id = workspace.open_loaded(PathBuf::from("branch.stg"), Document::STG(document));
+    for value in [600, 700] {
+        workspace
+            .apply(id, DocumentEdit::SetSTGNumber { target, value })
+            .unwrap();
+    }
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), one_entry * 2);
+    assert!(workspace.undo(id).unwrap());
+    assert!(workspace.can_redo(id).unwrap());
+
+    workspace
+        .apply(id, DocumentEdit::SetSTGNumber { target, value: 800 })
+        .unwrap();
+    assert!(!workspace.can_redo(id).unwrap());
+    assert_eq!(workspace.history_retained_bytes(id).unwrap(), one_entry * 2);
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(workspace.stg_number(id, target).unwrap(), 600);
+    assert!(workspace.undo(id).unwrap());
+    assert_eq!(workspace.stg_number(id, target).unwrap(), 500);
+    assert!(!workspace.is_dirty(id).unwrap());
+}
+
+#[test]
+fn stg_text_entry_is_rejected_before_document_or_history_changes() {
+    let target = STGTextTarget::ParameterString {
+        value: stg_action_string_target(),
+    };
+    let (mut probe, probe_id) = workspace_with_stg();
+    probe
+        .apply(
+            probe_id,
+            DocumentEdit::SetSTGText {
+                target,
+                value: "a much longer action".to_owned(),
+            },
+        )
+        .unwrap();
+    let one_entry = probe.history_retained_bytes(probe_id).unwrap();
+
+    let document = STGDocument::parse(stg_support::complete_stg_fixture().bytes).unwrap();
+    let mut workspace = Workspace::with_stg_history_limit(one_entry - 1);
+    let id = workspace.open_loaded(PathBuf::from("text-limit.stg"), Document::STG(document));
+    workspace
+        .apply(
+            id,
+            DocumentEdit::SetSTGNumber {
+                target: stg_event_id_target(),
+                value: 600,
+            },
+        )
+        .unwrap();
+    assert!(workspace.undo(id).unwrap());
+    let before = history_state(&workspace, id);
+    let retained_before = workspace.history_retained_bytes(id).unwrap();
+    assert!(before.can_redo);
+    let error = workspace
+        .apply(
+            id,
+            DocumentEdit::SetSTGText {
+                target,
+                value: "a much longer action".to_owned(),
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        WorkspaceError::HistoryBudgetExceeded { requested, maximum }
+            if requested == one_entry && maximum == one_entry - 1
+    ));
+    assert_eq!(history_state(&workspace, id), before);
+    assert_eq!(
+        workspace.stg_text(id, target).unwrap().decoded(),
+        Some("action")
+    );
+    assert_eq!(
+        workspace.history_retained_bytes(id).unwrap(),
+        retained_before
+    );
+}
+
+#[test]
+fn stg_structural_entry_is_rejected_before_document_or_history_changes() {
+    let edit = STGStructuralEdit::RemoveEvent {
+        target: STGEventTarget { block: 0, event: 0 },
+    };
+    let (mut probe, probe_id) = workspace_with_stg();
+    probe
+        .apply(probe_id, DocumentEdit::EditSTGStructure { edit })
+        .unwrap();
+    let structural_entry = probe.history_retained_bytes(probe_id).unwrap();
+
+    let document = STGDocument::parse(stg_support::complete_stg_fixture().bytes).unwrap();
+    let mut workspace = Workspace::with_stg_history_limit(structural_entry - 1);
+    let id = workspace.open_loaded(
+        PathBuf::from("structure-limit.stg"),
+        Document::STG(document),
+    );
+    workspace
+        .apply(
+            id,
+            DocumentEdit::SetSTGNumber {
+                target: stg_event_id_target(),
+                value: 600,
+            },
+        )
+        .unwrap();
+    assert!(workspace.undo(id).unwrap());
+    let before = history_state(&workspace, id);
+    let retained_before = workspace.history_retained_bytes(id).unwrap();
+    assert!(before.can_redo);
+
+    let error = workspace
+        .apply(id, DocumentEdit::EditSTGStructure { edit })
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        WorkspaceError::HistoryBudgetExceeded { requested, maximum }
+            if requested == structural_entry && maximum == structural_entry - 1
+    ));
+    assert_eq!(history_state(&workspace, id), before);
+    assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 2);
+    assert_eq!(
+        workspace.history_retained_bytes(id).unwrap(),
+        retained_before
     );
 }

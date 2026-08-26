@@ -1,8 +1,8 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, mem::size_of};
 
 use encoding_rs::{EUC_KR, EncoderResult};
 
-use crate::error::{STGTextEncoding, STGTextError};
+use crate::error::{FormatError, STGTextEncoding, STGTextError};
 
 use super::STGTextTarget;
 
@@ -32,6 +32,58 @@ impl<'a> STGText<'a> {
 pub struct STGTextImage {
     target: STGTextTarget,
     value: STGTextImageValue,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct STGTextPreview {
+    changed: bool,
+    current_retained_bytes: usize,
+    replacement_retained_bytes: usize,
+}
+
+#[derive(Debug)]
+pub struct STGTextRestoreFailure {
+    error: Box<FormatError>,
+    image: STGTextImage,
+}
+
+impl STGTextRestoreFailure {
+    pub(super) fn new(error: FormatError, image: STGTextImage) -> Self {
+        Self {
+            error: Box::new(error),
+            image,
+        }
+    }
+
+    pub fn into_parts(self) -> (FormatError, STGTextImage) {
+        (*self.error, self.image)
+    }
+}
+
+impl STGTextPreview {
+    pub(super) const fn new(
+        changed: bool,
+        current_retained_bytes: usize,
+        replacement_retained_bytes: usize,
+    ) -> Self {
+        Self {
+            changed,
+            current_retained_bytes,
+            replacement_retained_bytes,
+        }
+    }
+
+    pub const fn is_changed(self) -> bool {
+        self.changed
+    }
+
+    pub const fn current_retained_bytes(self) -> usize {
+        self.current_retained_bytes
+    }
+
+    pub const fn replacement_retained_bytes(self) -> usize {
+        self.replacement_retained_bytes
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -110,6 +162,22 @@ impl STGTextImage {
             STGTextImageValue::Fixed32(_) | STGTextImageValue::Fixed64(_) => None,
         }
     }
+
+    pub fn retained_bytes(&self) -> usize {
+        let dynamic = match &self.value {
+            STGTextImageValue::Dynamic(value) => value.capacity(),
+            STGTextImageValue::Fixed32(_) | STGTextImageValue::Fixed64(_) => 0,
+        };
+        size_of::<Self>().saturating_add(dynamic)
+    }
+
+    pub(super) const fn fixed_retained_bytes() -> usize {
+        size_of::<Self>()
+    }
+
+    pub(super) const fn dynamic_retained_bytes(length: usize) -> usize {
+        size_of::<Self>().saturating_add(length)
+    }
 }
 
 pub(super) fn decode_fixed(bytes: &[u8], encoding: STGTextEncoding) -> STGText<'_> {
@@ -135,11 +203,7 @@ pub(super) fn encode_fixed<const N: usize>(
     value: String,
     encoding: STGTextEncoding,
 ) -> Result<[u8; N], STGTextError> {
-    let maximum = N.saturating_sub(1);
-    let length = encoded_len(&value, encoding)?;
-    if length > maximum {
-        return Err(STGTextError::TooLong { length, maximum });
-    }
+    let length = fixed_encoded_len::<N>(&value, encoding)?;
     let encoded = encode_exact(value, encoding, length);
     let mut image = [0_u8; N];
     let Some(destination) = image.get_mut(..encoded.len()) else {
@@ -147,6 +211,18 @@ pub(super) fn encode_fixed<const N: usize>(
     };
     destination.copy_from_slice(&encoded);
     Ok(image)
+}
+
+pub(super) fn fixed_encoded_len<const N: usize>(
+    value: &str,
+    encoding: STGTextEncoding,
+) -> Result<usize, STGTextError> {
+    let maximum = N.saturating_sub(1);
+    let length = encoded_len(value, encoding)?;
+    if length > maximum {
+        return Err(STGTextError::TooLong { length, maximum });
+    }
+    Ok(length)
 }
 
 pub(super) fn dynamic_encoded_len(value: &str, maximum: u32) -> Result<usize, STGTextError> {

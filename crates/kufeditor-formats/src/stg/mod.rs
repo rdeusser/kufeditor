@@ -36,8 +36,10 @@ pub use fields::{
     STGSkillOwner, STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue,
     STGValueTarget,
 };
-pub use structure::{STGStructuralEdit, STGStructuralImage, STGStructuralPreview};
-pub use text::{STGText, STGTextImage};
+pub use structure::{
+    STGStructuralEdit, STGStructuralImage, STGStructuralPreview, STGStructuralRestoreFailure,
+};
+pub use text::{STGText, STGTextImage, STGTextPreview, STGTextRestoreFailure};
 
 const MAGIC: u32 = 1_001;
 const MAGIC_SIZE: usize = size_of::<u32>();

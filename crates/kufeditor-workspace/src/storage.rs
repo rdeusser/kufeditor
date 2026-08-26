@@ -10,6 +10,7 @@ use crate::{Document, DocumentID, DocumentKind, StateID, WorkspaceError};
 
 const SOX_EXTENSION: &str = "sox";
 const SAV_EXTENSION: &str = "sav";
+const STG_EXTENSION: &str = "stg";
 
 pub const SUPPORTED_OPEN_EXTENSIONS: [&str; 2] = [SOX_EXTENSION, SAV_EXTENSION];
 
@@ -154,6 +155,7 @@ pub(crate) fn normalize_save_target(
     let expected = match kind {
         DocumentKind::TroopInfo | DocumentKind::SkillInfo | DocumentKind::TextSOX => SOX_EXTENSION,
         DocumentKind::CrusadersSave => SAV_EXTENSION,
+        DocumentKind::CrusadersSTG => STG_EXTENSION,
     };
     let Some(actual) = path.extension() else {
         path.set_extension(expected);

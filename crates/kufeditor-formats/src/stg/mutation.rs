@@ -19,8 +19,8 @@ use super::{
     STGAbilityOwner, STGAreaField, STGAreaFloatField, STGDocument, STGFloatTarget, STGFloatValue,
     STGFooterField, STGHeaderTextField, STGModel, STGMutation, STGNumberTarget, STGParameterTarget,
     STGParsedTail, STGReferenceKind, STGScriptKind, STGScriptTarget, STGSkillField, STGSkillOwner,
-    STGTail, STGText, STGTextImage, STGTextTarget, STGUnitField, STGUnitFloatField, STGValueTarget,
-    catalog, retained_model_bytes,
+    STGTail, STGText, STGTextImage, STGTextPreview, STGTextRestoreFailure, STGTextTarget,
+    STGUnitField, STGUnitFloatField, STGValueTarget, catalog, retained_model_bytes,
     text::{self, STGTextImageKind},
     wire,
 };
@@ -35,6 +35,25 @@ impl STGDocument {
         target: STGNumberTarget,
         value: i64,
     ) -> Result<STGMutation<i64>, FormatError> {
+        let previous = match self.preview_number(target, value)? {
+            STGMutation::Unchanged => return Ok(STGMutation::Unchanged),
+            STGMutation::Changed { previous } => previous,
+        };
+
+        let projected = projected_model_bytes(&self.model, super::preflight::MODEL_LIMIT)?;
+        let mut prospective = Arc::clone(&self.model);
+        assign_number(Arc::make_mut(&mut prospective), target, value)?;
+        validate_actual_model(&prospective, projected, super::preflight::MODEL_LIMIT)?;
+        self.model = prospective;
+        self.revision = Arc::new(());
+        Ok(STGMutation::Changed { previous })
+    }
+
+    pub fn preview_number(
+        &self,
+        target: STGNumberTarget,
+        value: i64,
+    ) -> Result<STGMutation<i64>, FormatError> {
         if target.access() == super::STGFieldAccess::ReadOnly {
             return Err(FormatError::STGReadOnlyTarget {
                 target: STGTarget::Number(target),
@@ -46,13 +65,6 @@ impl STGDocument {
         if previous == value {
             return Ok(STGMutation::Unchanged);
         }
-
-        let projected = projected_model_bytes(&self.model, super::preflight::MODEL_LIMIT)?;
-        let mut prospective = Arc::clone(&self.model);
-        assign_number(Arc::make_mut(&mut prospective), target, value)?;
-        validate_actual_model(&prospective, projected, super::preflight::MODEL_LIMIT)?;
-        self.model = prospective;
-        self.revision = Arc::new(());
         Ok(STGMutation::Changed { previous })
     }
 
@@ -96,17 +108,54 @@ impl STGDocument {
         )
     }
 
+    pub fn preview_text(
+        &self,
+        target: STGTextTarget,
+        value: &str,
+    ) -> Result<STGTextPreview, FormatError> {
+        self.preview_text_with_limits(
+            target,
+            value,
+            super::preflight::MODEL_LIMIT,
+            super::preflight::SOURCE_LIMIT,
+            u32::MAX,
+        )
+    }
+
     pub fn restore_text(
         &mut self,
         target: STGTextTarget,
         image: STGTextImage,
     ) -> Result<STGMutation<STGTextImage>, FormatError> {
-        self.replace_text(
+        self.restore_text_recoverable(target, image)
+            .map_err(|failure| failure.into_parts().0)
+    }
+
+    pub fn restore_text_recoverable(
+        &mut self,
+        target: STGTextTarget,
+        image: STGTextImage,
+    ) -> Result<STGMutation<STGTextImage>, STGTextRestoreFailure> {
+        self.replace_text_recoverable(
             target,
             image,
             super::preflight::MODEL_LIMIT,
             super::preflight::SOURCE_LIMIT,
         )
+    }
+
+    pub fn preview_text_restore(
+        &self,
+        target: STGTextTarget,
+        image: &STGTextImage,
+    ) -> Result<bool, FormatError> {
+        self.preview_text_replacement(
+            target,
+            image,
+            super::preflight::MODEL_LIMIT,
+            super::preflight::SOURCE_LIMIT,
+        )
+        .map(|preview| preview.changed)
     }
 
     pub fn float(&self, target: STGFloatTarget) -> Result<STGFloatValue, FormatError> {
@@ -115,6 +164,25 @@ impl STGDocument {
 
     pub fn set_float(
         &mut self,
+        target: STGFloatTarget,
+        value: STGFloatValue,
+    ) -> Result<STGMutation<STGFloatValue>, FormatError> {
+        let previous = match self.preview_float(target, value)? {
+            STGMutation::Unchanged => return Ok(STGMutation::Unchanged),
+            STGMutation::Changed { previous } => previous,
+        };
+
+        let projected = projected_model_bytes(&self.model, super::preflight::MODEL_LIMIT)?;
+        let mut prospective = Arc::clone(&self.model);
+        *float_slot_mut(Arc::make_mut(&mut prospective), target)? = f32::from_bits(value.to_bits());
+        validate_actual_model(&prospective, projected, super::preflight::MODEL_LIMIT)?;
+        self.model = prospective;
+        self.revision = Arc::new(());
+        Ok(STGMutation::Changed { previous })
+    }
+
+    pub fn preview_float(
+        &self,
         target: STGFloatTarget,
         value: STGFloatValue,
     ) -> Result<STGMutation<STGFloatValue>, FormatError> {
@@ -128,13 +196,39 @@ impl STGDocument {
         if previous == value {
             return Ok(STGMutation::Unchanged);
         }
-        let projected = projected_model_bytes(&self.model, super::preflight::MODEL_LIMIT)?;
-        let mut prospective = Arc::clone(&self.model);
-        *float_slot_mut(Arc::make_mut(&mut prospective), target)? = f32::from_bits(value.to_bits());
-        validate_actual_model(&prospective, projected, super::preflight::MODEL_LIMIT)?;
-        self.model = prospective;
-        self.revision = Arc::new(());
         Ok(STGMutation::Changed { previous })
+    }
+
+    fn preview_text_with_limits(
+        &self,
+        target: STGTextTarget,
+        value: &str,
+        model_limit: usize,
+        output_limit: usize,
+        dynamic_length_limit: u32,
+    ) -> Result<STGTextPreview, FormatError> {
+        let slot = text_slot(&self.model, target)?;
+        let current_retained_bytes = slot.image_retained_bytes();
+        if slot.text().decoded() == Some(value) {
+            return Ok(STGTextPreview::new(
+                false,
+                current_retained_bytes,
+                current_retained_bytes,
+            ));
+        }
+        let replacement_retained_bytes = slot.preview_replacement_retained_bytes(
+            &self.model,
+            target,
+            value,
+            model_limit,
+            output_limit,
+            dynamic_length_limit,
+        )?;
+        Ok(STGTextPreview::new(
+            true,
+            current_retained_bytes,
+            replacement_retained_bytes,
+        ))
     }
 
     fn set_text_with_limits(
@@ -171,12 +265,61 @@ impl STGDocument {
         model_limit: usize,
         output_limit: usize,
     ) -> Result<STGMutation<STGTextImage>, FormatError> {
-        let (current_kind, current_dynamic, is_equal) = {
+        self.replace_text_recoverable(target, replacement, model_limit, output_limit)
+            .map_err(|failure| failure.into_parts().0)
+    }
+
+    fn replace_text_recoverable(
+        &mut self,
+        target: STGTextTarget,
+        replacement: STGTextImage,
+        model_limit: usize,
+        output_limit: usize,
+    ) -> Result<STGMutation<STGTextImage>, STGTextRestoreFailure> {
+        let preview =
+            match self.preview_text_replacement(target, &replacement, model_limit, output_limit) {
+                Ok(preview) => preview,
+                Err(error) => return Err(STGTextRestoreFailure::new(error, replacement)),
+            };
+        if !preview.changed {
+            return Ok(STGMutation::Unchanged);
+        }
+
+        let mut prospective = Arc::clone(&self.model);
+        let previous = match text_slot_mut(Arc::make_mut(&mut prospective), target) {
+            Ok(slot) => slot.replace(target, replacement),
+            Err(error) => return Err(STGTextRestoreFailure::new(error, replacement)),
+        };
+        if let Err(error) =
+            validate_actual_model(&prospective, preview.projected_model, model_limit)
+        {
+            let replacement = recover_text_replacement(&mut prospective, target, previous);
+            return Err(STGTextRestoreFailure::new(error, replacement));
+        }
+        if let Err(error) =
+            validate_actual_output(&prospective, preview.projected_output, output_limit)
+        {
+            let replacement = recover_text_replacement(&mut prospective, target, previous);
+            return Err(STGTextRestoreFailure::new(error, replacement));
+        }
+        self.model = prospective;
+        self.revision = Arc::new(());
+        Ok(STGMutation::Changed { previous })
+    }
+
+    fn preview_text_replacement(
+        &self,
+        target: STGTextTarget,
+        replacement: &STGTextImage,
+        model_limit: usize,
+        output_limit: usize,
+    ) -> Result<TextReplacementPreview, FormatError> {
+        let (current_kind, current_dynamic, changed) = {
             let current = text_slot(&self.model, target)?;
             (
                 current.kind(),
                 current.dynamic_metrics(),
-                current.bytes() == replacement.as_bytes(),
+                current.bytes() != replacement.as_bytes(),
             )
         };
         if replacement.target() != target || replacement.kind() != current_kind {
@@ -184,9 +327,6 @@ impl STGDocument {
                 target,
                 source: STGTextError::ImageKindMismatch,
             });
-        }
-        if is_equal {
-            return Ok(STGMutation::Unchanged);
         }
 
         let (projected_model, projected_output) =
@@ -211,16 +351,29 @@ impl STGDocument {
                     projected_output_len(&self.model, output_limit)?,
                 )
             };
-
-        let mut prospective = Arc::clone(&self.model);
-        let previous =
-            text_slot_mut(Arc::make_mut(&mut prospective), target)?.replace(target, replacement);
-        validate_actual_model(&prospective, projected_model, model_limit)?;
-        validate_actual_output(&prospective, projected_output, output_limit)?;
-        self.model = prospective;
-        self.revision = Arc::new(());
-        Ok(STGMutation::Changed { previous })
+        Ok(TextReplacementPreview {
+            changed,
+            projected_model,
+            projected_output,
+        })
     }
+}
+
+struct TextReplacementPreview {
+    changed: bool,
+    projected_model: usize,
+    projected_output: usize,
+}
+
+fn recover_text_replacement(
+    prospective: &mut Arc<STGModel>,
+    target: STGTextTarget,
+    previous: STGTextImage,
+) -> STGTextImage {
+    let Ok(slot) = text_slot_mut(Arc::make_mut(prospective), target) else {
+        unreachable!("validated STG text target disappeared during replacement recovery");
+    };
+    slot.replace(target, previous)
 }
 
 const MAX_STG_DIAGNOSTICS: usize = 4_096;
@@ -634,6 +787,44 @@ impl<'a> TextSlot<'a> {
         match self {
             Self::Dynamic(value) => Some((value.value.capacity(), value.value.len())),
             Self::Fixed32 { .. } | Self::Fixed64 { .. } => None,
+        }
+    }
+
+    fn image_retained_bytes(self) -> usize {
+        match self {
+            Self::Fixed32 { .. } | Self::Fixed64 { .. } => STGTextImage::fixed_retained_bytes(),
+            Self::Dynamic(value) => STGTextImage::dynamic_retained_bytes(value.value.capacity()),
+        }
+    }
+
+    fn preview_replacement_retained_bytes(
+        self,
+        model: &STGModel,
+        target: STGTextTarget,
+        value: &str,
+        model_limit: usize,
+        output_limit: usize,
+        dynamic_length_limit: u32,
+    ) -> Result<usize, FormatError> {
+        match self {
+            Self::Fixed32 { encoding, .. } => text::fixed_encoded_len::<32>(value, encoding)
+                .map(|_| STGTextImage::fixed_retained_bytes())
+                .map_err(|source| map_text_error(target, source)),
+            Self::Fixed64 { encoding, .. } => text::fixed_encoded_len::<64>(value, encoding)
+                .map(|_| STGTextImage::fixed_retained_bytes())
+                .map_err(|source| map_text_error(target, source)),
+            Self::Dynamic(current) => {
+                let length = text::dynamic_encoded_len(value, dynamic_length_limit)
+                    .map_err(|source| map_text_error(target, source))?;
+                projected_dynamic_model_bytes(
+                    model,
+                    current.value.capacity(),
+                    length,
+                    model_limit,
+                )?;
+                projected_dynamic_output_len(model, current.value.len(), length, output_limit)?;
+                Ok(STGTextImage::dynamic_retained_bytes(length))
+            }
         }
     }
 

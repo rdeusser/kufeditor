@@ -1847,7 +1847,8 @@ fn stg_events_project_blocks_scripts_parameters_and_catalog_metadata() {
 fn stg_structure_inserts_removes_and_restores_exact_subtrees() {
     let mut empty = STGDocument::parse(empty_stg_fixture()).unwrap();
     let undo_insert = changed_structure(empty.insert_event(0, 0).unwrap());
-    let expected_undo_insert = undo_insert.clone();
+    let expected_undo_insert_location = undo_insert.location();
+    let expected_undo_insert_charge = undo_insert.retained_bytes();
     assert_eq!(empty.event_block_count(), Some(1));
     assert_eq!(empty.event_block(0).unwrap().header, 0);
     let inserted = empty.event(STGEventTarget { block: 0, event: 0 }).unwrap();
@@ -1858,7 +1859,8 @@ fn stg_structure_inserts_removes_and_restores_exact_subtrees() {
     let redo_insert = changed_structure(empty.restore_structure(undo_insert).unwrap());
     assert_eq!(empty.event_block_count(), Some(0));
     let undo_again = changed_structure(empty.restore_structure(redo_insert).unwrap());
-    assert_eq!(undo_again, expected_undo_insert);
+    assert_eq!(undo_again.location(), expected_undo_insert_location);
+    assert_eq!(undo_again.retained_bytes(), expected_undo_insert_charge);
     assert_eq!(empty.event_block_count(), Some(1));
     changed_structure(empty.restore_structure(undo_again).unwrap());
     assert_eq!(empty.event_block_count(), Some(0));
@@ -2338,6 +2340,35 @@ fn stg_structure_rejects_stale_images_and_raw_tails_atomically() {
 }
 
 #[test]
+fn stg_structure_recoverable_restore_returns_the_owned_image_after_rejection() {
+    let mut owner = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let image = changed_structure(owner.remove_event(0, 0).unwrap());
+    let expected_charge = image.retained_bytes();
+    let expected_location = image.location();
+    let mut foreign = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+
+    let failure = foreign
+        .restore_structure_recoverable(image)
+        .expect_err("foreign structural image must be rejected");
+    let (error, image) = failure.into_parts();
+    assert!(matches!(error, FormatError::STGStructuralLineageMismatch));
+    assert_eq!(image.retained_bytes(), expected_charge);
+    assert_eq!(image.location(), expected_location);
+    assert_eq!(foreign.event_block(0).unwrap().event_count, 2);
+
+    changed_structure(owner.restore_structure(image).unwrap());
+    assert_eq!(owner.event_block(0).unwrap().event_count, 2);
+    assert_eq!(
+        owner
+            .event(STGEventTarget { block: 0, event: 0 })
+            .unwrap()
+            .description
+            .decoded(),
+        Some("Primary Event")
+    );
+}
+
+#[test]
 fn stg_structure_rejects_foreign_and_exact_subtree_mismatches() {
     let mut first = STGDocument::parse(empty_stg_fixture()).unwrap();
     let foreign = changed_structure(first.insert_event(0, 0).unwrap());
@@ -2750,6 +2781,110 @@ fn stg_references_bound_the_diagnostic_result() {
             message: "Additional STG diagnostics were omitted",
         })
     );
+}
+
+#[test]
+fn stg_text_history_preview_matches_both_exact_images() {
+    let targets = [
+        (
+            STGTextTarget::Header(STGHeaderTextField::MapFilename),
+            "Map B",
+        ),
+        (
+            STGTextTarget::ParameterString {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 0,
+                    },
+                    parameter: 0,
+                }),
+            },
+            "changed action",
+        ),
+    ];
+
+    for (target, replacement) in targets {
+        let document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+        let preview = document.preview_text(target, replacement).unwrap();
+        assert!(preview.is_changed());
+
+        let mut changed = document.clone();
+        let previous = match changed.set_text(target, replacement.to_owned()).unwrap() {
+            STGMutation::Changed { previous } => previous,
+            STGMutation::Unchanged => panic!("different STG text must change"),
+        };
+        assert_eq!(previous.retained_bytes(), preview.current_retained_bytes());
+
+        let replacement_image = match changed.restore_text(target, previous).unwrap() {
+            STGMutation::Changed { previous } => previous,
+            STGMutation::Unchanged => panic!("restoring STG text must change"),
+        };
+        assert_eq!(
+            replacement_image.retained_bytes(),
+            preview.replacement_retained_bytes()
+        );
+    }
+
+    let document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let target = STGTextTarget::ParameterString {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Action,
+                script: 0,
+            },
+            parameter: 0,
+        }),
+    };
+    let preview = document.preview_text(target, "action").unwrap();
+    assert!(!preview.is_changed());
+    assert_eq!(
+        preview.current_retained_bytes(),
+        preview.replacement_retained_bytes()
+    );
+}
+
+#[test]
+fn stg_recoverable_text_restore_returns_the_exact_rejected_image() {
+    let target = STGTextTarget::ParameterString {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Action,
+                script: 0,
+            },
+            parameter: 0,
+        }),
+    };
+    let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let image = match document.set_text(target, "changed".to_owned()).unwrap() {
+        STGMutation::Changed { previous } => previous,
+        STGMutation::Unchanged => panic!("different STG text must change"),
+    };
+    let failure = document
+        .restore_text_recoverable(
+            STGTextTarget::Header(STGHeaderTextField::MapFilename),
+            image,
+        )
+        .unwrap_err();
+    let (error, image) = failure.into_parts();
+    assert!(matches!(
+        error,
+        FormatError::STGText {
+            source: STGTextError::ImageKindMismatch,
+            ..
+        }
+    ));
+    assert!(matches!(
+        document.restore_text_recoverable(target, image).unwrap(),
+        STGMutation::Changed { .. }
+    ));
+    assert_eq!(document.text(target).unwrap().decoded(), Some("action"));
 }
 
 fn changed_structure(

@@ -4,19 +4,27 @@ mod document;
 mod history;
 mod recent;
 mod save;
+mod stg;
 mod storage;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
 };
 
 pub use document::{Document, DocumentEdit, DocumentID, DocumentKind, StateID};
+pub use history::DEFAULT_STG_HISTORY_LIMIT;
 pub use kufeditor_formats::{
-    Diagnostic, DiagnosticLocation, SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField,
-    SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField,
-    SaveTextField, SaveUnitField, SaveUnitGroup, Severity, SkillDocument, SkillTextField,
-    TextSOXDocument, TextSOXField, TroopDocument, TroopField, TroopGroup,
+    Diagnostic, DiagnosticLocation, STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice,
+    STGDocument, STGEditor, STGEvent, STGEventBlock, STGEventTarget, STGFieldAccess,
+    STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGNumberTarget,
+    STGParameter, STGParameterTarget, STGReferenceKind, STGScript, STGScriptKind, STGScriptLabel,
+    STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralEdit, STGTailStatus, STGText,
+    STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue, STGValueKind,
+    STGValueTarget, SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField, SaveEquipmentGroup,
+    SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField,
+    SaveUnitField, SaveUnitGroup, Severity, SkillDocument, SkillTextField, TextSOXDocument,
+    TextSOXField, TroopDocument, TroopField, TroopGroup,
 };
 pub use recent::{
     DEFAULT_RECENT_FILE_LIMIT, RECENT_FILE_LIMITS, RecentFiles, normalize_recent_limit,
@@ -26,7 +34,10 @@ pub use storage::{
 };
 use thiserror::Error;
 
-use crate::history::{DocumentMutation, HistoryAction, HistoryEntry};
+use crate::{
+    history::{DocumentMutation, HistoryAction, HistoryEntry},
+    stg::PreparedSTGEdit,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApplyOutcome {
@@ -50,6 +61,21 @@ pub enum WorkspaceError {
 
     #[error("document {0:?} is not a Crusaders save document")]
     NotSave(DocumentID),
+
+    #[error("document {0:?} is not a Crusaders STG document")]
+    NotSTG(DocumentID),
+
+    #[error("history entry retains {requested} bytes, exceeding the {maximum}-byte limit")]
+    HistoryBudgetExceeded { requested: usize, maximum: usize },
+
+    #[error("history retained-byte calculation overflowed")]
+    HistoryChargeOverflow,
+
+    #[error("history charge projected {projected} bytes, but produced {actual} bytes")]
+    HistoryChargeMismatch { projected: usize, actual: usize },
+
+    #[error("history for document {0:?} no longer matches its document state")]
+    HistoryStateMismatch(DocumentID),
 
     #[error(transparent)]
     Format(#[from] kufeditor_formats::FormatError),
@@ -117,9 +143,47 @@ struct Session {
     document: Document,
     current_state: StateID,
     saved_state: StateID,
-    undo: Vec<HistoryEntry>,
-    redo: Vec<HistoryEntry>,
+    undo: VecDeque<HistoryEntry>,
+    redo: VecDeque<HistoryEntry>,
+    history_retained_bytes: usize,
     save_in_flight: Option<SaveToken>,
+}
+
+impl Session {
+    fn clear_redo_history(&mut self) -> Result<(), WorkspaceError> {
+        while let Some(entry) = self.redo.pop_back() {
+            self.history_retained_bytes = self
+                .history_retained_bytes
+                .checked_sub(entry.retained_bytes())
+                .ok_or(WorkspaceError::HistoryChargeOverflow)?;
+        }
+        Ok(())
+    }
+
+    fn evict_undo_for(
+        &mut self,
+        retained_bytes: usize,
+        history_limit: usize,
+    ) -> Result<(), WorkspaceError> {
+        while self
+            .history_retained_bytes
+            .checked_add(retained_bytes)
+            .ok_or(WorkspaceError::HistoryChargeOverflow)?
+            > history_limit
+        {
+            let Some(entry) = self.undo.pop_front() else {
+                return Err(WorkspaceError::HistoryBudgetExceeded {
+                    requested: retained_bytes,
+                    maximum: history_limit,
+                });
+            };
+            self.history_retained_bytes = self
+                .history_retained_bytes
+                .checked_sub(entry.retained_bytes())
+                .ok_or(WorkspaceError::HistoryChargeOverflow)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -129,16 +193,22 @@ pub struct Workspace {
     next_document: u64,
     next_state: u64,
     next_save: u64,
+    stg_history_limit: usize,
 }
 
 impl Workspace {
     pub fn new() -> Self {
+        Self::with_stg_history_limit(DEFAULT_STG_HISTORY_LIMIT)
+    }
+
+    pub fn with_stg_history_limit(stg_history_limit: usize) -> Self {
         Self {
             sessions: HashMap::new(),
             open_order: Vec::new(),
             next_document: 1,
             next_state: 1,
             next_save: 1,
+            stg_history_limit,
         }
     }
 
@@ -152,8 +222,9 @@ impl Workspace {
                 document,
                 current_state: state,
                 saved_state: state,
-                undo: Vec::new(),
-                redo: Vec::new(),
+                undo: VecDeque::new(),
+                redo: VecDeque::new(),
+                history_retained_bytes: 0,
                 save_in_flight: None,
             },
         );
@@ -242,6 +313,9 @@ impl Workspace {
         id: DocumentID,
         edit: DocumentEdit,
     ) -> Result<ApplyOutcome, WorkspaceError> {
+        if edit.is_stg() {
+            return self.apply_stg(id, edit);
+        }
         let action = HistoryAction::Edit(edit);
         let (before, inverse) = {
             let session = self.session_mut(id)?;
@@ -253,7 +327,7 @@ impl Workspace {
         };
         let after = self.allocate_state();
         let session = self.session_mut(id)?;
-        session.undo.push(HistoryEntry {
+        session.undo.push_back(HistoryEntry::Standard {
             forward: action,
             inverse,
             before,
@@ -264,52 +338,220 @@ impl Workspace {
         Ok(ApplyOutcome::Changed)
     }
 
+    fn apply_stg(
+        &mut self,
+        id: DocumentID,
+        edit: DocumentEdit,
+    ) -> Result<ApplyOutcome, WorkspaceError> {
+        let (before, prepared) = {
+            let session = self.session(id)?;
+            (
+                session.current_state,
+                stg::prepare_edit(&session.document, id, edit, self.stg_history_limit)?,
+            )
+        };
+        let PreparedSTGEdit::Changed {
+            document,
+            inverse,
+            retained_bytes,
+        } = prepared
+        else {
+            return Ok(ApplyOutcome::Unchanged);
+        };
+        let inverse = *inverse;
+        if inverse.retained_bytes() != retained_bytes {
+            return Err(WorkspaceError::HistoryChargeMismatch {
+                projected: retained_bytes,
+                actual: inverse.retained_bytes(),
+            });
+        }
+
+        let after = self.allocate_state();
+        let history_limit = self.stg_history_limit;
+        let session = self.session_mut(id)?;
+        session.clear_redo_history()?;
+        session.evict_undo_for(retained_bytes, history_limit)?;
+        session.document = Document::STG(document);
+        session.undo.push_back(HistoryEntry::STG {
+            action: inverse,
+            before,
+            after,
+            retained_bytes,
+        });
+        session.history_retained_bytes = session
+            .history_retained_bytes
+            .checked_add(retained_bytes)
+            .ok_or(WorkspaceError::HistoryChargeOverflow)?;
+        session.current_state = after;
+        Ok(ApplyOutcome::Changed)
+    }
+
     pub fn undo(&mut self, id: DocumentID) -> Result<bool, WorkspaceError> {
         let session = self.session_mut(id)?;
-        let Some(mut entry) = session.undo.pop() else {
+        let Some(entry) = session.undo.pop_back() else {
             return Ok(false);
         };
-
-        let inverse = match session.document.apply(id, entry.inverse.clone()) {
-            Ok(DocumentMutation::Changed { inverse }) => inverse,
-            Ok(DocumentMutation::Unchanged) => {
-                session.undo.push(entry);
-                return Ok(false);
+        match entry {
+            HistoryEntry::Standard {
+                mut forward,
+                inverse,
+                before,
+                after,
+            } => {
+                let next = match session.document.apply(id, inverse.clone()) {
+                    Ok(DocumentMutation::Changed { inverse }) => inverse,
+                    Ok(DocumentMutation::Unchanged) => {
+                        session.undo.push_back(HistoryEntry::Standard {
+                            forward,
+                            inverse,
+                            before,
+                            after,
+                        });
+                        return Ok(false);
+                    }
+                    Err(error) => {
+                        session.undo.push_back(HistoryEntry::Standard {
+                            forward,
+                            inverse,
+                            before,
+                            after,
+                        });
+                        return Err(error);
+                    }
+                };
+                forward = next;
+                session.current_state = before;
+                session.redo.push_back(HistoryEntry::Standard {
+                    forward,
+                    inverse,
+                    before,
+                    after,
+                });
+                Ok(true)
             }
-            Err(error) => {
-                session.undo.push(entry);
-                return Err(error);
+            HistoryEntry::STG {
+                action,
+                before,
+                after,
+                retained_bytes,
+            } => {
+                let Document::STG(document) = &session.document else {
+                    session.undo.push_back(HistoryEntry::STG {
+                        action,
+                        before,
+                        after,
+                        retained_bytes,
+                    });
+                    return Err(WorkspaceError::HistoryStateMismatch(id));
+                };
+                let (document, action) = match stg::apply_history_action(document, id, action) {
+                    Ok(result) => result,
+                    Err(failure) => {
+                        session.undo.push_back(HistoryEntry::STG {
+                            action: failure.action,
+                            before,
+                            after,
+                            retained_bytes,
+                        });
+                        return Err(failure.error);
+                    }
+                };
+                debug_assert_eq!(action.retained_bytes(), retained_bytes);
+                session.document = Document::STG(document);
+                session.current_state = before;
+                session.redo.push_back(HistoryEntry::STG {
+                    action,
+                    before,
+                    after,
+                    retained_bytes,
+                });
+                Ok(true)
             }
-        };
-
-        entry.forward = inverse;
-        session.current_state = entry.before;
-        session.redo.push(entry);
-        Ok(true)
+        }
     }
 
     pub fn redo(&mut self, id: DocumentID) -> Result<bool, WorkspaceError> {
         let session = self.session_mut(id)?;
-        let Some(mut entry) = session.redo.pop() else {
+        let Some(entry) = session.redo.pop_back() else {
             return Ok(false);
         };
-
-        let inverse = match session.document.apply(id, entry.forward.clone()) {
-            Ok(DocumentMutation::Changed { inverse }) => inverse,
-            Ok(DocumentMutation::Unchanged) => {
-                session.redo.push(entry);
-                return Ok(false);
+        match entry {
+            HistoryEntry::Standard {
+                forward,
+                mut inverse,
+                before,
+                after,
+            } => {
+                let next = match session.document.apply(id, forward.clone()) {
+                    Ok(DocumentMutation::Changed { inverse }) => inverse,
+                    Ok(DocumentMutation::Unchanged) => {
+                        session.redo.push_back(HistoryEntry::Standard {
+                            forward,
+                            inverse,
+                            before,
+                            after,
+                        });
+                        return Ok(false);
+                    }
+                    Err(error) => {
+                        session.redo.push_back(HistoryEntry::Standard {
+                            forward,
+                            inverse,
+                            before,
+                            after,
+                        });
+                        return Err(error);
+                    }
+                };
+                inverse = next;
+                session.current_state = after;
+                session.undo.push_back(HistoryEntry::Standard {
+                    forward,
+                    inverse,
+                    before,
+                    after,
+                });
+                Ok(true)
             }
-            Err(error) => {
-                session.redo.push(entry);
-                return Err(error);
+            HistoryEntry::STG {
+                action,
+                before,
+                after,
+                retained_bytes,
+            } => {
+                let Document::STG(document) = &session.document else {
+                    session.redo.push_back(HistoryEntry::STG {
+                        action,
+                        before,
+                        after,
+                        retained_bytes,
+                    });
+                    return Err(WorkspaceError::HistoryStateMismatch(id));
+                };
+                let (document, action) = match stg::apply_history_action(document, id, action) {
+                    Ok(result) => result,
+                    Err(failure) => {
+                        session.redo.push_back(HistoryEntry::STG {
+                            action: failure.action,
+                            before,
+                            after,
+                            retained_bytes,
+                        });
+                        return Err(failure.error);
+                    }
+                };
+                debug_assert_eq!(action.retained_bytes(), retained_bytes);
+                session.document = Document::STG(document);
+                session.current_state = after;
+                session.undo.push_back(HistoryEntry::STG {
+                    action,
+                    before,
+                    after,
+                    retained_bytes,
+                });
+                Ok(true)
             }
-        };
-
-        entry.inverse = inverse;
-        session.current_state = entry.after;
-        session.undo.push(entry);
-        Ok(true)
+        }
     }
 
     pub fn can_undo(&self, id: DocumentID) -> Result<bool, WorkspaceError> {
@@ -332,6 +574,11 @@ impl Workspace {
 
     pub fn state_id(&self, id: DocumentID) -> Result<StateID, WorkspaceError> {
         self.session(id).map(|session| session.current_state)
+    }
+
+    pub fn history_retained_bytes(&self, id: DocumentID) -> Result<usize, WorkspaceError> {
+        self.session(id)
+            .map(|session| session.history_retained_bytes)
     }
 
     pub fn path(&self, id: DocumentID) -> Result<&Path, WorkspaceError> {
@@ -360,6 +607,7 @@ impl Workspace {
             Document::Skill(document) => Ok(document.record_count()),
             Document::TextSOX(document) => Ok(document.record_count()),
             Document::Save(document) => Ok(document.unit_count()),
+            Document::STG(document) => Ok(document.unit_count()),
         }
     }
 
@@ -448,6 +696,7 @@ impl Workspace {
             Document::Skill(document) => Ok(document.diagnostics()),
             Document::TextSOX(document) => Ok(document.diagnostics()),
             Document::Save(document) => Ok(document.diagnostics()),
+            Document::STG(document) => Ok(document.diagnostics()),
         }
     }
 
@@ -530,6 +779,16 @@ mod tests {
         }
     }
 
+    fn empty_stg_fixture() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1_001_u32.to_le_bytes());
+        bytes.resize(bytes.len() + 620, 0);
+        for _ in 0..6 {
+            bytes.extend_from_slice(&0_u32.to_le_bytes());
+        }
+        bytes
+    }
+
     #[test]
     fn committed_save_reconciliation_failure_is_atomic_and_unlocks_the_document() {
         let directory = tempdir().unwrap();
@@ -600,5 +859,52 @@ mod tests {
         assert!(matches!(error, WorkspaceError::WrongExtension { .. }));
         assert_eq!(workspace.next_save, next_save);
         assert!(workspace.session(id).unwrap().save_in_flight.is_none());
+    }
+
+    #[test]
+    fn wrong_document_kind_keeps_popped_stg_history_entries_and_charges() {
+        let stg = STGDocument::parse(empty_stg_fixture()).unwrap();
+        let troop = TroopDocument::parse(troop_fixture()).unwrap();
+        let edit = STGStructuralEdit::InsertEvent {
+            target: STGEventTarget { block: 0, event: 0 },
+        };
+
+        let mut undo_workspace = Workspace::new();
+        let undo_id = undo_workspace.open_loaded(PathBuf::from("undo.stg"), Document::STG(stg));
+        undo_workspace
+            .apply(undo_id, DocumentEdit::EditSTGStructure { edit })
+            .unwrap();
+        let undo_charge = undo_workspace.history_retained_bytes(undo_id).unwrap();
+        undo_workspace.session_mut(undo_id).unwrap().document = Document::Troop(troop.clone());
+        assert!(matches!(
+            undo_workspace.undo(undo_id),
+            Err(WorkspaceError::HistoryStateMismatch(id)) if id == undo_id
+        ));
+        assert!(undo_workspace.can_undo(undo_id).unwrap());
+        assert_eq!(
+            undo_workspace.history_retained_bytes(undo_id).unwrap(),
+            undo_charge
+        );
+
+        let mut redo_workspace = Workspace::new();
+        let redo_id = redo_workspace.open_loaded(
+            PathBuf::from("redo.stg"),
+            Document::STG(STGDocument::parse(empty_stg_fixture()).unwrap()),
+        );
+        redo_workspace
+            .apply(redo_id, DocumentEdit::EditSTGStructure { edit })
+            .unwrap();
+        assert!(redo_workspace.undo(redo_id).unwrap());
+        let redo_charge = redo_workspace.history_retained_bytes(redo_id).unwrap();
+        redo_workspace.session_mut(redo_id).unwrap().document = Document::Troop(troop);
+        assert!(matches!(
+            redo_workspace.redo(redo_id),
+            Err(WorkspaceError::HistoryStateMismatch(id)) if id == redo_id
+        ));
+        assert!(redo_workspace.can_redo(redo_id).unwrap());
+        assert_eq!(
+            redo_workspace.history_retained_bytes(redo_id).unwrap(),
+            redo_charge
+        );
     }
 }
