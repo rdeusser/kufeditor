@@ -1,6 +1,9 @@
 use std::fmt;
 
-use crate::{SaveNumberTarget, SkillField, TextSOXField, TroopField};
+use crate::{
+    STGFloatTarget, STGNumberTarget, STGRegion, STGScriptTarget, STGTextTarget, SaveNumberTarget,
+    SkillField, TextSOXField, TroopField,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Severity {
@@ -39,6 +42,14 @@ pub enum DiagnosticLocation {
         field: DiagnosticField,
     },
     Save(SaveNumberTarget),
+    STGNumber(STGNumberTarget),
+    STGFloat(STGFloatTarget),
+    STGText(STGTextTarget),
+    STGScript(STGScriptTarget),
+    STGTail {
+        region: STGRegion,
+        offset: usize,
+    },
 }
 
 impl DiagnosticLocation {
@@ -46,18 +57,49 @@ impl DiagnosticLocation {
         match self {
             Self::Record { record, .. }
             | Self::Save(
-                SaveNumberTarget::Roster { record, .. } | SaveNumberTarget::SecondArray { record },
+                SaveNumberTarget::Roster { record, .. }
+                | SaveNumberTarget::SecondArray { record }
+                | SaveNumberTarget::Unit { unit: record, .. }
+                | SaveNumberTarget::Equipment { unit: record, .. }
+                | SaveNumberTarget::MissionCompletion { slot: record },
+            )
+            | Self::STGNumber(
+                STGNumberTarget::Unit { unit: record, .. }
+                | STGNumberTarget::Skill { unit: record, .. }
+                | STGNumberTarget::Ability { unit: record, .. }
+                | STGNumberTarget::Area { area: record, .. }
+                | STGNumberTarget::VariableID { variable: record },
+            )
+            | Self::STGFloat(
+                STGFloatTarget::Unit { unit: record, .. }
+                | STGFloatTarget::StatOverride { unit: record, .. }
+                | STGFloatTarget::Area { area: record, .. },
+            )
+            | Self::STGText(
+                STGTextTarget::UnitName { unit: record }
+                | STGTextTarget::AreaDescription { area: record }
+                | STGTextTarget::VariableName { variable: record },
             ) => Some(record),
-            Self::Save(
-                SaveNumberTarget::Unit { unit, .. } | SaveNumberTarget::Equipment { unit, .. },
-            ) => Some(unit),
-            Self::Save(SaveNumberTarget::MissionCompletion { slot }) => Some(slot),
             Self::Save(
                 SaveNumberTarget::CampaignIndex
                 | SaveNumberTarget::Main(_)
                 | SaveNumberTarget::SelectedUnit
                 | SaveNumberTarget::CurrentMissionIndex,
-            ) => None,
+            )
+            | Self::STGNumber(
+                STGNumberTarget::EventBlockHeader { .. }
+                | STGNumberTarget::EventID { .. }
+                | STGNumberTarget::ParameterInteger { .. }
+                | STGNumberTarget::Footer { .. },
+            )
+            | Self::STGFloat(STGFloatTarget::Parameter { .. })
+            | Self::STGText(
+                STGTextTarget::Header(_)
+                | STGTextTarget::EventDescription { .. }
+                | STGTextTarget::ParameterString { .. },
+            )
+            | Self::STGScript(_)
+            | Self::STGTail { .. } => None,
         }
     }
 
@@ -65,6 +107,23 @@ impl DiagnosticLocation {
         match self {
             Self::Record { field, .. } => field.label(),
             Self::Save(target) => target.label(),
+            Self::STGNumber(target) => target.label(),
+            Self::STGFloat(target) => target.label(),
+            Self::STGText(target) => target.label(),
+            Self::STGScript(target) => target.kind.label(),
+            Self::STGTail { .. } => "Raw STG Tail",
+        }
+    }
+
+    pub const fn stg_tail(self) -> Option<(STGRegion, usize)> {
+        match self {
+            Self::STGTail { region, offset } => Some((region, offset)),
+            Self::Record { .. }
+            | Self::Save(_)
+            | Self::STGNumber(_)
+            | Self::STGFloat(_)
+            | Self::STGText(_)
+            | Self::STGScript(_) => None,
         }
     }
 }
