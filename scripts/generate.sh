@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
 cleave_command="${CLEAVE:-cleave}"
+rustfmt_command="${RUSTFMT:-rustfmt}"
 cpp_output="${project_root}/src/parsers"
 rust_output="${project_root}/crates/kufeditor-formats/src/generated"
 
@@ -91,6 +92,7 @@ for schema in "${rust_schemas[@]}"; do
         printf 'error: Cleave generated no Rust schema module %s\n' "${module_name}" >&2
         exit 1
     fi
+    "${rustfmt_command}" --edition 2024 "${staged_file}"
     staged_files+=("${staged_file}")
     destinations+=("${rust_output}/${module_name}")
 done
