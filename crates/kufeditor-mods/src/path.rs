@@ -353,7 +353,6 @@ digest_id!(OperationID, "operation");
 digest_id!(GameRootKey, "game root");
 
 impl InstallationID {
-    #[allow(dead_code, reason = "used by the apply transaction in Task 5")]
     pub(crate) fn for_installation(
         root: GameRootKey,
         package: ModPackageID,

@@ -8,6 +8,12 @@ pub enum ModProgressPhase {
     CopyingPackage,
     CreatingPackage,
     PublishingPackage,
+    PlanningApply,
+    StagingFiles,
+    CreatingRecovery,
+    CommittingFiles,
+    PublishingInstallation,
+    RollingBack,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

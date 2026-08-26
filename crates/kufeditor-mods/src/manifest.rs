@@ -25,6 +25,13 @@ impl ModTimestamp {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub(crate) fn now() -> Result<Self, ModError> {
+        let value = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .map_err(|_| ModError::manifest(ManifestErrorKind::InvalidTimestamp))?;
+        Ok(Self(value))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

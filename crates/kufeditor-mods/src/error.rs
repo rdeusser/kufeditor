@@ -3,6 +3,8 @@ use std::{io, path::PathBuf};
 use kufeditor_game::Game;
 use thiserror::Error;
 
+use crate::{InstallationID, RecoveryReport, RelativeGamePath};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RelativeGamePathErrorKind {
     Empty,
@@ -202,6 +204,44 @@ pub enum InstalledFileErrorKind {
     Changed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InstallationConflictKind {
+    DuplicateName,
+    PathOverlap,
+}
+
+impl std::fmt::Display for InstallationConflictKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::DuplicateName => "another installed mod has the same name",
+            Self::PathOverlap => "another installed mod owns the same path",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TargetPathErrorKind {
+    GameRootChanged,
+    SymbolicLink,
+    ParentNotDirectory,
+    NotRegularFile,
+    Changed,
+    TooLarge,
+}
+
+impl std::fmt::Display for TargetPathErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::GameRootChanged => "the selected game root changed",
+            Self::SymbolicLink => "a target component is a symbolic link",
+            Self::ParentNotDirectory => "a target parent is not a directory",
+            Self::NotRegularFile => "the target is not a regular file",
+            Self::Changed => "the target changed during the operation",
+            Self::TooLarge => "the target exceeds the file-size limit",
+        })
+    }
+}
+
 impl std::fmt::Display for InstalledFileErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
@@ -271,6 +311,19 @@ pub enum ModError {
         path: PathBuf,
         kind: InstalledFileErrorKind,
     },
+    #[error("the package is for {package}, but the selected root is for {target}")]
+    PackageGameMismatch { package: Game, target: Game },
+    #[error("installation conflicts with {installation}: {kind}")]
+    InstallationConflict {
+        kind: InstallationConflictKind,
+        installation: InstallationID,
+        path: Option<RelativeGamePath>,
+    },
+    #[error("invalid game target {path:?}: {kind}")]
+    InvalidTargetPath {
+        path: PathBuf,
+        kind: TargetPathErrorKind,
+    },
     #[error("could not read ZIP package {path:?}: {source}")]
     ZIP {
         path: PathBuf,
@@ -288,9 +341,23 @@ pub enum ModError {
         #[source]
         source: io::Error,
     },
+    #[error("{operation} failed: {source}")]
+    Transaction {
+        operation: &'static str,
+        #[source]
+        source: Box<Self>,
+        recovery: Box<RecoveryReport>,
+    },
 }
 
 impl ModError {
+    pub fn recovery_report(&self) -> Option<&RecoveryReport> {
+        match self {
+            Self::Transaction { recovery, .. } => Some(recovery.as_ref()),
+            _ => None,
+        }
+    }
+
     pub(crate) const fn manifest(kind: ManifestErrorKind) -> Self {
         Self::InvalidManifest { kind }
     }
@@ -340,6 +407,25 @@ impl ModError {
         Self::InvalidInstalledFile {
             path: path.into(),
             kind,
+        }
+    }
+
+    pub(crate) fn target(path: impl Into<PathBuf>, kind: TargetPathErrorKind) -> Self {
+        Self::InvalidTargetPath {
+            path: path.into(),
+            kind,
+        }
+    }
+
+    pub(crate) fn transaction(
+        operation: &'static str,
+        source: Self,
+        recovery: RecoveryReport,
+    ) -> Self {
+        Self::Transaction {
+            operation,
+            source: Box::new(source),
+            recovery: Box::new(recovery),
         }
     }
 }

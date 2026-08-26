@@ -41,6 +41,18 @@ pub struct InstalledFile {
 }
 
 impl InstalledFile {
+    pub(crate) const fn new(
+        path: RelativeGamePath,
+        installed_sha256: FileSHA256,
+        original_existed: bool,
+    ) -> Self {
+        Self {
+            path,
+            installed_sha256,
+            original_existed,
+        }
+    }
+
     pub const fn path(&self) -> &RelativeGamePath {
         &self.path
     }
@@ -86,6 +98,13 @@ pub struct InstalledMod {
 }
 
 impl InstalledMod {
+    pub(crate) const fn from_record(
+        record: InstallationRecord,
+        status: Option<InstalledModStatus>,
+    ) -> Self {
+        Self { record, status }
+    }
+
     pub const fn installation_id(&self) -> InstallationID {
         self.record.installation_id
     }
@@ -283,7 +302,6 @@ impl ModService {
     }
 }
 
-#[allow(dead_code, reason = "used by the apply transaction in Task 5")]
 pub(crate) fn load_installation_records(
     paths: &ModStorePaths,
     limits: &ModLimits,
@@ -304,7 +322,6 @@ pub(crate) fn load_installation_records(
     Ok(records)
 }
 
-#[allow(dead_code, reason = "used by the apply transaction in Task 5")]
 pub(crate) fn installation_plan_conflict(
     records: &[InstallationRecord],
     root_key: GameRootKey,
@@ -771,13 +788,22 @@ fn health_file_stamp(metadata: &fs::Metadata) -> HealthFileStamp {
     }
 }
 
-#[allow(dead_code, reason = "used by the apply transaction in Task 5")]
+#[cfg(test)]
 pub(crate) fn store_installations(
     paths: &ModStorePaths,
     records: &[InstallationRecord],
 ) -> Result<(), ModError> {
     let bytes = serialize_registry(paths, records)?;
     publish_registry_image_with_hook(paths, &bytes, |_| Ok(()))
+}
+
+pub(crate) fn store_installations_with_hook(
+    paths: &ModStorePaths,
+    records: &[InstallationRecord],
+    before_publish: impl FnOnce(&Path) -> Result<(), ModError>,
+) -> Result<(), ModError> {
+    let bytes = serialize_registry(paths, records)?;
+    publish_registry_image_with_hook(paths, &bytes, before_publish)
 }
 
 fn serialize_registry(

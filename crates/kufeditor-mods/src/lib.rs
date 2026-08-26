@@ -1,17 +1,21 @@
 //! Mod packages, backups, installation, and restoration.
 
 mod error;
+mod install;
 mod library;
 mod manifest;
 mod package;
 mod path;
 mod progress;
 mod registry;
+mod transaction;
 
 pub use error::{
-    GameRootErrorKind, InstalledFileErrorKind, ManifestErrorKind, ModError, PackageErrorKind,
-    RegistryErrorKind, RelativeGamePathErrorKind, SourceFileErrorKind,
+    GameRootErrorKind, InstallationConflictKind, InstalledFileErrorKind, ManifestErrorKind,
+    ModError, PackageErrorKind, RegistryErrorKind, RelativeGamePathErrorKind, SourceFileErrorKind,
+    TargetPathErrorKind,
 };
+pub use install::{ApplyModReport, ApplyModRequest};
 pub use library::{ImportedMod, ImportedModDisposition, ModLibraryIssue, ModLibraryScan};
 pub use manifest::{ModManifest, ModMetadata, ModTimestamp};
 pub use package::{CreateModRequest, CreatedMod, ModPackageInfo};
@@ -24,6 +28,7 @@ pub use registry::{
     InstallationIssue, InstallationIssueKind, InstallationScan, InstalledFile, InstalledMod,
     InstalledModStatus,
 };
+pub use transaction::{OperationState, RecoveryReport};
 
 /// Resource ceilings for package, path, and backup operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
