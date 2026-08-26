@@ -641,6 +641,139 @@ pub fn field_row(theme: &Theme, field: &STGFieldProjection) -> Stateful<Div> {
         )
 }
 
+pub fn editable_value_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    value: impl Into<String>,
+    active: bool,
+    invalid: bool,
+) -> Stateful<Div> {
+    let hover = theme.raised;
+    div()
+        .id(id)
+        .w_full()
+        .min_h(px(38.0))
+        .px(px(10.0))
+        .py(px(7.0))
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .rounded_md()
+        .bg(theme.background)
+        .border_1()
+        .border_color(if active || invalid {
+            theme.accent
+        } else {
+            theme.background
+        })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_color(theme.text_dim)
+                .child(label.into()),
+        )
+        .child(
+            div()
+                .flex_none()
+                .max_w(px(420.0))
+                .truncate()
+                .text_color(if invalid { theme.accent } else { theme.text })
+                .child(value.into()),
+        )
+}
+
+pub fn choice_value_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    value: impl Into<String>,
+    unknown_selector: Option<String>,
+    choices: Vec<AnyElement>,
+) -> Stateful<Div> {
+    let unknown_current = unknown_selector.is_some();
+    div()
+        .id(id)
+        .w_full()
+        .px(px(10.0))
+        .py(px(8.0))
+        .flex()
+        .flex_col()
+        .gap(px(7.0))
+        .rounded_md()
+        .bg(theme.background)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(theme.text_dim)
+                        .child(label.into()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(if unknown_current {
+                            theme.accent
+                        } else {
+                            theme.text
+                        })
+                        .child(value.into()),
+                ),
+        )
+        .children(unknown_selector.map(|selector| {
+            let element_id = selector.clone();
+            div()
+                .id(SharedString::from(element_id))
+                .debug_selector(move || selector.clone())
+                .text_size(px(10.0))
+                .text_color(theme.accent)
+                .child("UNKNOWN VALUE · PRESERVED UNTIL YOU CHOOSE A DEFINED VALUE")
+        }))
+        .child(div().flex().flex_wrap().gap(px(5.0)).children(choices))
+}
+
+pub fn text_editor_row(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    input: AnyElement,
+    validation_error: Option<String>,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .w_full()
+        .px(px(10.0))
+        .py(px(8.0))
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .rounded_md()
+        .bg(theme.background)
+        .child(
+            div()
+                .text_size(px(11.0))
+                .text_color(theme.text_dim)
+                .child(label.into()),
+        )
+        .child(input)
+        .children(validation_error.map(|error| {
+            div()
+                .id("stg-text-validation-error")
+                .debug_selector(|| "stg-text-validation-error".to_owned())
+                .text_size(px(12.0))
+                .text_color(theme.accent)
+                .child(error)
+        }))
+}
+
 pub fn empty_state(theme: &Theme, id: &'static str, message: impl Into<String>) -> Stateful<Div> {
     components::surface(theme)
         .id(id)
@@ -1281,6 +1414,7 @@ impl<'a> STGCatalogTextSuggestion<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum STGEventDetailField {
+    BlockHeader,
     Description,
     ID,
 }
@@ -1334,7 +1468,7 @@ impl STGEventDetailRows {
                 .len()
                 .checked_add(action_parameter_counts.len())?,
         );
-        let mut next = 2_usize;
+        let mut next = 3_usize;
         append_script_groups(
             &mut groups,
             event,
@@ -1373,10 +1507,15 @@ impl STGEventDetailRows {
         match position {
             0 => {
                 return Some(STGEventDetailRow::EventField(
-                    STGEventDetailField::Description,
+                    STGEventDetailField::BlockHeader,
                 ));
             }
             1 => {
+                return Some(STGEventDetailRow::EventField(
+                    STGEventDetailField::Description,
+                ));
+            }
+            2 => {
                 return Some(STGEventDetailRow::EventField(STGEventDetailField::ID));
             }
             _ if position == self.condition_add => {
@@ -2105,20 +2244,26 @@ mod tests {
         let rows =
             STGEventDetailRows::from_parameter_counts(target, &conditions, &actions).unwrap();
 
-        assert_eq!(rows.len(), 1_000_012);
+        assert_eq!(rows.len(), 1_000_013);
         assert_eq!(rows.stored_script_group_count(), 3);
         assert_eq!(
             rows.row(0),
+            Some(STGEventDetailRow::EventField(
+                STGEventDetailField::BlockHeader
+            ))
+        );
+        assert_eq!(
+            rows.row(1),
             Some(STGEventDetailRow::EventField(
                 STGEventDetailField::Description
             ))
         );
         assert_eq!(
-            rows.row(1),
+            rows.row(2),
             Some(STGEventDetailRow::EventField(STGEventDetailField::ID))
         );
         assert_eq!(
-            rows.row(2),
+            rows.row(3),
             Some(STGEventDetailRow::ScriptHeader(script(
                 2,
                 4,
@@ -2127,14 +2272,14 @@ mod tests {
             )))
         );
         assert_eq!(
-            rows.row(3),
+            rows.row(4),
             Some(STGEventDetailRow::Parameter(STGParameterTarget {
                 script: script(2, 4, STGScriptKind::Condition, 0),
                 parameter: 0,
             }))
         );
         assert_eq!(
-            rows.row(1_000_003),
+            rows.row(1_000_004),
             Some(STGEventDetailRow::ScriptHeader(script(
                 2,
                 4,
@@ -2143,11 +2288,11 @@ mod tests {
             )))
         );
         assert_eq!(
-            rows.row(1_000_006),
+            rows.row(1_000_007),
             Some(STGEventDetailRow::AddScript(STGScriptKind::Condition))
         );
         assert_eq!(
-            rows.row(1_000_007),
+            rows.row(1_000_008),
             Some(STGEventDetailRow::ScriptHeader(script(
                 2,
                 4,
@@ -2156,7 +2301,7 @@ mod tests {
             )))
         );
         assert_eq!(
-            rows.row(1_000_011),
+            rows.row(1_000_012),
             Some(STGEventDetailRow::AddScript(STGScriptKind::Action))
         );
         assert_eq!(rows.row(rows.len()), None);

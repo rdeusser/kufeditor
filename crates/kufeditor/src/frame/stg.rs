@@ -2,23 +2,28 @@ use gpui::{
     AnyElement, Context, Div, ElementId, Entity, ScrollStrategy, SharedString, div, prelude::*, px,
 };
 use kufeditor_workspace::{
-    DocumentID, STGAbilityOwner, STGAreaField, STGAreaFloatField, STGEventTarget, STGFloatTarget,
-    STGFooterField, STGHeaderTextField, STGNumberTarget, STGReferenceKind, STGScriptKind,
-    STGScriptTarget, STGSkillField, STGSkillOwner, STGTailStatus, STGTextTarget, STGUnitField,
-    STGUnitFloatField, STGUnitGroup, STGValue, STGValueTarget, WorkspaceError,
+    DocumentID, STGAbilityOwner, STGAreaField, STGAreaFloatField, STGEditor, STGEventTarget,
+    STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField,
+    STGNumberTarget, STGReferenceKind, STGScriptKind, STGScriptTarget, STGSkillField,
+    STGSkillOwner, STGTailStatus, STGText, STGTextTarget, STGUnitField, STGUnitFloatField,
+    STGUnitGroup, STGValue, STGValueTarget, WorkspaceError,
 };
 
-use super::AppFrame;
+use super::{
+    ActiveFloatEdit, ActiveNumberEdit, AppFrame, NumberEditTarget, STGEditBinding, TextEditTarget,
+};
 use crate::{
     actions::{
         MoveSTGListDown, MoveSTGListEnd, MoveSTGListHome, MoveSTGListPageDown, MoveSTGListPageUp,
-        MoveSTGListUp,
+        MoveSTGListUp, SetSTGChoice,
     },
+    components,
     crusaders_catalog_status::CrusadersCatalogStatus,
     notices::{Notice, NoticeSource},
     state::{
-        STGDocumentTransition, STGIndexVisibility, STGReferenceVisibility, STGSection,
-        STGSelection, STGVisibleSelections,
+        STGDocumentTransition, STGDraftBinding, STGDraftStatus, STGDraftTarget, STGIndexVisibility,
+        STGPresentationTransition, STGReferenceVisibility, STGSection, STGSelection,
+        STGVisibleSelections,
     },
     text_input::{TextInput, TextInputEvent},
     views::{
@@ -26,9 +31,9 @@ use crate::{
         stg::{
             self, STGDocumentProjection, STGEventBlockProjection, STGEventDetailField,
             STGEventDetailRow, STGEventDetailRows, STGEventRows, STGFieldProjection, STGFieldState,
-            STGIndexRows, STGProjectionField, STGReferenceRows, STGRowCursor, STGRowLocation,
-            STGSearchQuery, STGSearchRecord, STGSectionProjection, STGTailProjection,
-            STGVirtualRowKind, STGVirtualRows,
+            STGIndexRows, STGProjectionField, STGProjectionID, STGReferenceRows, STGRowCursor,
+            STGRowLocation, STGSearchQuery, STGSearchRecord, STGSectionProjection,
+            STGTailProjection, STGVirtualRowKind, STGVirtualRows,
         },
     },
 };
@@ -107,6 +112,194 @@ impl STGPresentationProjection {
 }
 
 impl AppFrame {
+    fn active_stg_draft(&self) -> Option<(STGEditBinding, STGDraftTarget)> {
+        if let Some(edit) = self.number_edit.as_ref()
+            && let Some((binding, target)) = edit.target.stg_binding()
+        {
+            return Some((binding, STGDraftTarget::Number(target)));
+        }
+        if let Some(edit) = self.float_edit.as_ref() {
+            return Some((edit.binding, STGDraftTarget::Float(edit.target)));
+        }
+        self.text_edit
+            .as_ref()
+            .and_then(|edit| edit.target.stg_binding())
+            .map(|(binding, target)| (binding, STGDraftTarget::Text(target)))
+    }
+
+    fn active_stg_draft_status(&self, visible: bool) -> Option<STGDraftStatus> {
+        self.active_stg_draft().map(|(binding, target)| {
+            let binding = STGDraftBinding::new(binding.document, binding.section, target);
+            if visible && self.stg_draft_target_is_visible(binding.document(), binding.target()) {
+                STGDraftStatus::visible(binding)
+            } else {
+                STGDraftStatus::hidden(binding)
+            }
+        })
+    }
+
+    fn finish_stg_presentation_transition(
+        &mut self,
+        document: DocumentID,
+        transition: STGPresentationTransition,
+        cx: &mut Context<Self>,
+    ) {
+        if transition.cancels_draft() {
+            self.cancel_property_edit();
+        } else if let Some(generation) = transition.generation() {
+            if let Some(edit) = self.number_edit.as_mut()
+                && let NumberEditTarget::STG { binding, .. } = &mut edit.target
+                && binding.document == document
+            {
+                binding.generation = generation;
+            }
+            if let Some(edit) = self.float_edit.as_mut()
+                && edit.binding.document == document
+            {
+                edit.binding.generation = generation;
+            }
+            if let Some(edit) = self.text_edit.as_mut()
+                && let TextEditTarget::STG { binding, .. } = &mut edit.target
+                && binding.document == document
+            {
+                binding.generation = generation;
+            }
+        }
+
+        if transition.changed() {
+            self.stg_lists.invalidate_all();
+            cx.notify();
+        }
+    }
+
+    pub(super) fn stg_scalar_binding_is_current(
+        &self,
+        binding: STGEditBinding,
+        target: STGDraftTarget,
+    ) -> bool {
+        self.active_document == Some(binding.document)
+            && self
+                .stg_presentations
+                .get(binding.document)
+                .is_some_and(|state| {
+                    state.section() == binding.section
+                        && state.binding_generation() == binding.generation
+                })
+            && self.stg_draft_target_is_visible(binding.document, target)
+            && match target {
+                STGDraftTarget::Number(target) => {
+                    self.workspace.stg_number(binding.document, target).is_ok()
+                }
+                STGDraftTarget::Float(target) => {
+                    self.workspace.stg_float(binding.document, target).is_ok()
+                }
+                STGDraftTarget::Text(target) => {
+                    self.workspace.stg_text(binding.document, target).is_ok()
+                }
+            }
+    }
+
+    fn stg_draft_target_is_visible(&self, document: DocumentID, target: STGDraftTarget) -> bool {
+        let Some(state) = self
+            .stg_presentations
+            .get(document)
+            .filter(|_| self.active_document == Some(document))
+        else {
+            return false;
+        };
+
+        match target {
+            STGDraftTarget::Number(target) => match target {
+                STGNumberTarget::Unit { unit, .. }
+                | STGNumberTarget::Skill { unit, .. }
+                | STGNumberTarget::Ability { unit, .. } => {
+                    state.section() == STGSection::Units && state.inspected_unit() == Some(unit)
+                }
+                STGNumberTarget::Area { area, .. } => {
+                    state.section() == STGSection::Areas && state.inspected_area() == Some(area)
+                }
+                STGNumberTarget::VariableID { variable }
+                | STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::VariableInitial { variable },
+                } => {
+                    state.section() == STGSection::Variables
+                        && state.inspected_variable() == Some(variable)
+                }
+                STGNumberTarget::EventBlockHeader { block } => {
+                    state.section() == STGSection::Events
+                        && state
+                            .inspected_event()
+                            .is_some_and(|event| event.block == block)
+                }
+                STGNumberTarget::EventID { block, event }
+                | STGNumberTarget::ParameterInteger {
+                    value:
+                        STGValueTarget::ScriptParameter(kufeditor_workspace::STGParameterTarget {
+                            script: STGScriptTarget { block, event, .. },
+                            ..
+                        }),
+                } => {
+                    state.section() == STGSection::Events
+                        && state.inspected_event() == Some(STGEventTarget { block, event })
+                }
+                STGNumberTarget::Footer { entry, .. } => {
+                    state.section() == STGSection::Footer && state.inspected_footer() == Some(entry)
+                }
+            },
+            STGDraftTarget::Float(target) => match target {
+                STGFloatTarget::Unit { unit, .. } | STGFloatTarget::StatOverride { unit, .. } => {
+                    state.section() == STGSection::Units && state.inspected_unit() == Some(unit)
+                }
+                STGFloatTarget::Area { area, .. } => {
+                    state.section() == STGSection::Areas && state.inspected_area() == Some(area)
+                }
+                STGFloatTarget::Parameter {
+                    value: STGValueTarget::VariableInitial { variable },
+                } => {
+                    state.section() == STGSection::Variables
+                        && state.inspected_variable() == Some(variable)
+                }
+                STGFloatTarget::Parameter {
+                    value:
+                        STGValueTarget::ScriptParameter(kufeditor_workspace::STGParameterTarget {
+                            script: STGScriptTarget { block, event, .. },
+                            ..
+                        }),
+                } => {
+                    state.section() == STGSection::Events
+                        && state.inspected_event() == Some(STGEventTarget { block, event })
+                }
+            },
+            STGDraftTarget::Text(target) => match target {
+                STGTextTarget::Header(_) => state.section() == STGSection::Header,
+                STGTextTarget::UnitName { unit } => {
+                    state.section() == STGSection::Units && state.inspected_unit() == Some(unit)
+                }
+                STGTextTarget::AreaDescription { area } => {
+                    state.section() == STGSection::Areas && state.inspected_area() == Some(area)
+                }
+                STGTextTarget::VariableName { variable }
+                | STGTextTarget::ParameterString {
+                    value: STGValueTarget::VariableInitial { variable },
+                } => {
+                    state.section() == STGSection::Variables
+                        && state.inspected_variable() == Some(variable)
+                }
+                STGTextTarget::EventDescription { block, event }
+                | STGTextTarget::ParameterString {
+                    value:
+                        STGValueTarget::ScriptParameter(kufeditor_workspace::STGParameterTarget {
+                            script: STGScriptTarget { block, event, .. },
+                            ..
+                        }),
+                } => {
+                    state.section() == STGSection::Events
+                        && state.inspected_event() == Some(STGEventTarget { block, event })
+                }
+            },
+        }
+    }
+
     pub(super) fn stg_projection(
         &self,
         document: DocumentID,
@@ -159,21 +352,22 @@ impl AppFrame {
         let Ok(projection) = self.stg_presentation_projection(document) else {
             return;
         };
+        let draft = self.active_stg_draft_status(false);
         let transition =
             self.stg_presentations
-                .activate_document(document, &projection.visibility(), None);
-        if transition.changed() {
-            cx.notify();
-        }
+                .activate_document(document, &projection.visibility(), draft);
+        self.finish_stg_presentation_transition(document, transition, cx);
     }
 
     pub(super) fn deactivate_stg_presentation(&mut self, cx: &mut Context<Self>) {
         self.stg_search = None;
-        if self
-            .stg_presentations
-            .deactivate_active_document(None)
-            .changed()
-        {
+        let draft = self.active_stg_draft_status(false);
+        let document = self.active_stg_draft().map(|(binding, _)| binding.document);
+        let transition = self.stg_presentations.deactivate_active_document(draft);
+        if let Some(document) = document {
+            self.finish_stg_presentation_transition(document, transition, cx);
+        } else if transition.changed() {
+            self.stg_lists.invalidate_all();
             cx.notify();
         }
     }
@@ -241,6 +435,7 @@ impl AppFrame {
             Some(rows) => rows.visibility(),
             None => STGReferenceVisibility::empty(),
         };
+        let draft = self.active_stg_draft_status(matches!(cause, STGDocumentTransition::Catalog));
         let transition = self.stg_presentations.reconcile_document(
             document,
             &projection.visibility(),
@@ -248,11 +443,9 @@ impl AppFrame {
             picker_visible,
             &reference_visibility,
             cause,
-            None,
+            draft,
         );
-        if transition.changed() {
-            cx.notify();
-        }
+        self.finish_stg_presentation_transition(document, transition, cx);
     }
 
     fn stg_presentation_projection(
@@ -541,7 +734,7 @@ impl AppFrame {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match state.section() {
-            STGSection::Header => self.stg_header_view(document).into_any_element(),
+            STGSection::Header => self.stg_header_view(document, cx).into_any_element(),
             STGSection::Units => self
                 .stg_units_view(document, state, projection.units.clone(), cx)
                 .into_any_element(),
@@ -620,13 +813,11 @@ impl AppFrame {
         {
             self.stg_search = None;
         }
+        let draft = self.active_stg_draft_status(true);
         let transition = self
             .stg_presentations
-            .select_section(document, section, None);
-        if transition.changed() {
-            self.stg_lists.invalidate_all();
-            cx.notify();
-        }
+            .select_section(document, section, draft);
+        self.finish_stg_presentation_transition(document, transition, cx);
     }
 
     fn start_stg_search(
@@ -1003,7 +1194,7 @@ impl AppFrame {
 }
 
 impl AppFrame {
-    fn stg_header_view(&self, document: DocumentID) -> Div {
+    fn stg_header_view(&self, document: DocumentID, cx: &mut Context<Self>) -> Div {
         let fields = STGHeaderTextField::ALL
             .into_iter()
             .map(|field| {
@@ -1014,6 +1205,7 @@ impl AppFrame {
                         STGTextTarget::Header(field),
                     ),
                     format!("stg-header-{}", header_field_slug(field)),
+                    cx,
                 )
             })
             .collect();
@@ -1027,6 +1219,7 @@ impl AppFrame {
                     "1001",
                 ),
                 "stg-header-magic".to_owned(),
+                cx,
             ),
             self.stg_field_element(
                 &STGFieldProjection::read_only(
@@ -1037,6 +1230,7 @@ impl AppFrame {
                     "620-byte header block preserved from source",
                 ),
                 "stg-header-reserved".to_owned(),
+                cx,
             ),
         ];
 
@@ -1168,7 +1362,7 @@ impl AppFrame {
                 .size_full()
                 .into_any_element()
             },
-            |unit| self.stg_unit_details(document, unit),
+            |unit| self.stg_unit_details(document, unit, cx),
         );
         stg::split_section(
             &self.theme,
@@ -1180,13 +1374,18 @@ impl AppFrame {
         )
     }
 
-    fn stg_unit_details(&self, document: DocumentID, unit: usize) -> AnyElement {
-        let mut groups = vec![self.stg_unit_identity_group(document, unit)];
-        groups.extend(self.stg_unit_number_groups(document, unit));
-        groups.push(self.stg_unit_float_group(document, unit));
-        groups.extend(self.stg_unit_skill_groups(document, unit));
-        groups.extend(self.stg_unit_ability_groups(document, unit));
-        groups.push(self.stg_unit_stat_override_group(document, unit));
+    fn stg_unit_details(
+        &self,
+        document: DocumentID,
+        unit: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut groups = vec![self.stg_unit_identity_group(document, unit, cx)];
+        groups.push(self.stg_unit_float_group(document, unit, cx));
+        groups.extend(self.stg_unit_number_groups(document, unit, cx));
+        groups.push(self.stg_unit_stat_override_group(document, unit, cx));
+        groups.extend(self.stg_unit_skill_groups(document, unit, cx));
+        groups.extend(self.stg_unit_ability_groups(document, unit, cx));
 
         stg::scrolling_details(
             &self.theme,
@@ -1197,28 +1396,104 @@ impl AppFrame {
         .into_any_element()
     }
 
-    fn stg_unit_identity_group(&self, document: DocumentID, unit: usize) -> AnyElement {
+    fn stg_unit_identity_group(
+        &self,
+        document: DocumentID,
+        unit: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         stg::group(
             &self.theme,
-            "SOURCE IDENTITY",
-            vec![self.stg_field_element(
-                &self.stg_text_field(
-                    document,
-                    STGSection::Units,
-                    STGTextTarget::UnitName { unit },
+            "PRIMARY UNIT",
+            vec![
+                self.stg_field_element(
+                    &self.stg_text_field(
+                        document,
+                        STGSection::Units,
+                        STGTextTarget::UnitName { unit },
+                    ),
+                    format!("stg-unit-{unit}-name"),
+                    cx,
                 ),
-                format!("stg-unit-{unit}-name"),
-            )],
+                self.stg_field_element(
+                    &self.stg_number_field(
+                        document,
+                        STGSection::Units,
+                        STGNumberTarget::Unit {
+                            unit,
+                            field: STGUnitField::UniqueID,
+                        },
+                    ),
+                    format!("stg-unit-{unit}-field-uniqueid"),
+                    cx,
+                ),
+                self.stg_field_element(
+                    &self.stg_number_field(
+                        document,
+                        STGSection::Units,
+                        STGNumberTarget::Unit {
+                            unit,
+                            field: STGUnitField::UCD,
+                        },
+                    ),
+                    format!("stg-unit-{unit}-field-ucd"),
+                    cx,
+                ),
+                self.stg_field_element(
+                    &self.stg_number_field(
+                        document,
+                        STGSection::Units,
+                        STGNumberTarget::Unit {
+                            unit,
+                            field: STGUnitField::LeaderLevel,
+                        },
+                    ),
+                    format!("stg-unit-{unit}-field-leaderlevel"),
+                    cx,
+                ),
+                self.stg_field_element(
+                    &self.stg_float_field(
+                        document,
+                        STGSection::Units,
+                        STGFloatTarget::Unit {
+                            unit,
+                            field: STGUnitFloatField::LeaderHPOverride,
+                        },
+                    ),
+                    format!("stg-unit-{unit}-float-LeaderHPOverride"),
+                    cx,
+                ),
+                self.stg_field_element(
+                    &self.stg_float_field(
+                        document,
+                        STGSection::Units,
+                        STGFloatTarget::StatOverride { unit, slot: 0 },
+                    ),
+                    format!("stg-unit-{unit}-stat-0"),
+                    cx,
+                ),
+            ],
         )
         .into_any_element()
     }
 
-    fn stg_unit_number_groups(&self, document: DocumentID, unit: usize) -> Vec<AnyElement> {
+    fn stg_unit_number_groups(
+        &self,
+        document: DocumentID,
+        unit: usize,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let mut groups = Vec::new();
         for group in STGUnitGroup::ALL {
             let fields = STGUnitField::ALL
                 .into_iter()
-                .filter(|field| field.group() == group)
+                .filter(|field| {
+                    field.group() == group
+                        && !matches!(
+                            field,
+                            STGUnitField::UniqueID | STGUnitField::UCD | STGUnitField::LeaderLevel
+                        )
+                })
                 .map(|field| {
                     self.stg_field_element(
                         &self.stg_number_field(
@@ -1227,6 +1502,7 @@ impl AppFrame {
                             STGNumberTarget::Unit { unit, field },
                         ),
                         format!("stg-unit-{unit}-field-{}", unit_field_slug(field)),
+                        cx,
                     )
                 })
                 .collect();
@@ -1235,12 +1511,18 @@ impl AppFrame {
         groups
     }
 
-    fn stg_unit_float_group(&self, document: DocumentID, unit: usize) -> AnyElement {
+    fn stg_unit_float_group(
+        &self,
+        document: DocumentID,
+        unit: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         stg::group(
             &self.theme,
             "POSITION AND HP",
             STGUnitFloatField::ALL
                 .into_iter()
+                .filter(|field| *field != STGUnitFloatField::LeaderHPOverride)
                 .map(|field| {
                     self.stg_field_element(
                         &self.stg_float_field(
@@ -1249,6 +1531,7 @@ impl AppFrame {
                             STGFloatTarget::Unit { unit, field },
                         ),
                         format!("stg-unit-{unit}-float-{field:?}"),
+                        cx,
                     )
                 })
                 .collect(),
@@ -1256,7 +1539,12 @@ impl AppFrame {
         .into_any_element()
     }
 
-    fn stg_unit_skill_groups(&self, document: DocumentID, unit: usize) -> Vec<AnyElement> {
+    fn stg_unit_skill_groups(
+        &self,
+        document: DocumentID,
+        unit: usize,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let mut groups = Vec::new();
         for owner in STGSkillOwner::ALL {
             let mut fields = Vec::new();
@@ -1274,6 +1562,7 @@ impl AppFrame {
                             },
                         ),
                         format!("stg-unit-{unit}-skill-{owner:?}-{slot}-{field:?}"),
+                        cx,
                     ));
                 }
             }
@@ -1289,7 +1578,12 @@ impl AppFrame {
         groups
     }
 
-    fn stg_unit_ability_groups(&self, document: DocumentID, unit: usize) -> Vec<AnyElement> {
+    fn stg_unit_ability_groups(
+        &self,
+        document: DocumentID,
+        unit: usize,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let mut groups = Vec::new();
         for owner in STGAbilityOwner::ALL {
             let count = match owner {
@@ -1309,6 +1603,7 @@ impl AppFrame {
                                     STGNumberTarget::Ability { unit, owner, slot },
                                 ),
                                 format!("stg-unit-{unit}-ability-{owner:?}-{slot}"),
+                                cx,
                             )
                         })
                         .collect(),
@@ -1319,11 +1614,16 @@ impl AppFrame {
         groups
     }
 
-    fn stg_unit_stat_override_group(&self, document: DocumentID, unit: usize) -> AnyElement {
+    fn stg_unit_stat_override_group(
+        &self,
+        document: DocumentID,
+        unit: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         stg::group(
             &self.theme,
             "STAT OVERRIDES · 22 SLOTS",
-            (0..22)
+            (1..22)
                 .map(|slot| {
                     self.stg_field_element(
                         &self.stg_float_field(
@@ -1332,6 +1632,7 @@ impl AppFrame {
                             STGFloatTarget::StatOverride { unit, slot },
                         ),
                         format!("stg-unit-{unit}-stat-{slot}"),
+                        cx,
                     )
                 })
                 .collect(),
@@ -1370,7 +1671,7 @@ impl AppFrame {
                 .size_full()
                 .into_any_element()
             },
-            |area| self.stg_area_details(document, area),
+            |area| self.stg_area_details(document, area, cx),
         );
         stg::split_section(
             &self.theme,
@@ -1382,7 +1683,12 @@ impl AppFrame {
         )
     }
 
-    fn stg_area_details(&self, document: DocumentID, area: usize) -> AnyElement {
+    fn stg_area_details(
+        &self,
+        document: DocumentID,
+        area: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let identity = vec![
             self.stg_field_element(
                 &self.stg_text_field(
@@ -1391,6 +1697,7 @@ impl AppFrame {
                     STGTextTarget::AreaDescription { area },
                 ),
                 format!("stg-area-{area}-description"),
+                cx,
             ),
             self.stg_field_element(
                 &self.stg_number_field(
@@ -1402,6 +1709,7 @@ impl AppFrame {
                     },
                 ),
                 format!("stg-area-{area}-id"),
+                cx,
             ),
         ];
         let bounds = STGAreaFloatField::ALL
@@ -1414,6 +1722,7 @@ impl AppFrame {
                         STGFloatTarget::Area { area, field },
                     ),
                     format!("stg-area-{area}-bound-{field:?}"),
+                    cx,
                 )
             })
             .collect();
@@ -1427,6 +1736,7 @@ impl AppFrame {
                         STGNumberTarget::Area { area, field },
                     ),
                     format!("stg-area-{area}-advanced-{field:?}"),
+                    cx,
                 )
             })
             .collect();
@@ -1478,7 +1788,7 @@ impl AppFrame {
                 .size_full()
                 .into_any_element()
             },
-            |variable| self.stg_variable_details(document, variable),
+            |variable| self.stg_variable_details(document, variable, cx),
         );
         stg::split_section(
             &self.theme,
@@ -1490,7 +1800,12 @@ impl AppFrame {
         )
     }
 
-    fn stg_variable_details(&self, document: DocumentID, variable: usize) -> AnyElement {
+    fn stg_variable_details(
+        &self,
+        document: DocumentID,
+        variable: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let value = STGValueTarget::VariableInitial { variable };
         stg::scrolling_details(
             &self.theme,
@@ -1507,6 +1822,7 @@ impl AppFrame {
                                 STGTextTarget::VariableName { variable },
                             ),
                             format!("stg-variable-{variable}-name"),
+                            cx,
                         ),
                         self.stg_field_element(
                             &self.stg_number_field(
@@ -1515,6 +1831,7 @@ impl AppFrame {
                                 STGNumberTarget::VariableID { variable },
                             ),
                             format!("stg-variable-{variable}-id"),
+                            cx,
                         ),
                         self.stg_field_element(
                             &self.stg_value_field(
@@ -1524,6 +1841,7 @@ impl AppFrame {
                                 "Initial typed value",
                             ),
                             format!("stg-variable-{variable}-value"),
+                            cx,
                         ),
                     ],
                 )
@@ -1569,7 +1887,7 @@ impl AppFrame {
                 .size_full()
                 .into_any_element()
             },
-            |entry| self.stg_footer_details(document, entry),
+            |entry| self.stg_footer_details(document, entry, cx),
         );
         stg::split_section(
             &self.theme,
@@ -1581,7 +1899,12 @@ impl AppFrame {
         )
     }
 
-    fn stg_footer_details(&self, document: DocumentID, entry: usize) -> AnyElement {
+    fn stg_footer_details(
+        &self,
+        document: DocumentID,
+        entry: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         stg::scrolling_details(
             &self.theme,
             SharedString::from(format!("stg-footer-detail:{entry}")),
@@ -1599,6 +1922,7 @@ impl AppFrame {
                                     STGNumberTarget::Footer { entry, field },
                                 ),
                                 format!("stg-footer-{entry}-{field:?}"),
+                                cx,
                             )
                         })
                         .collect(),
@@ -1610,10 +1934,474 @@ impl AppFrame {
         .into_any_element()
     }
 
-    fn stg_field_element(&self, field: &STGFieldProjection, selector: String) -> AnyElement {
+    fn current_stg_edit_binding(
+        &self,
+        document: DocumentID,
+        section: STGSection,
+    ) -> Option<STGEditBinding> {
+        let state = self.stg_presentations.get(document)?;
+        (self.active_document == Some(document) && state.section() == section)
+            .then(|| STGEditBinding::new(document, section, state.binding_generation()))
+    }
+
+    fn start_stg_number_edit(
+        &mut self,
+        projection: STGProjectionID,
+        target: STGNumberTarget,
+        source: i64,
+        editor: STGEditor,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let document = projection.document();
+        let section = projection.section();
+        let Some(binding) = self.current_stg_edit_binding(document, section) else {
+            return;
+        };
+        if !self.stg_scalar_binding_is_current(binding, STGDraftTarget::Number(target))
+            || self.workspace.stg_number(document, target).ok() != Some(source)
+        {
+            return;
+        }
+        let Some(edit) = ActiveNumberEdit::stg(binding, target, source, editor) else {
+            return;
+        };
+        self.begin_number_edit(edit);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn start_stg_float_edit(
+        &mut self,
+        projection: STGProjectionID,
+        target: STGFloatTarget,
+        source: STGFloatValue,
+        replacement: bool,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let document = projection.document();
+        let section = projection.section();
+        let Some(binding) = self.current_stg_edit_binding(document, section) else {
+            return;
+        };
+        if target.access() == STGFieldAccess::ReadOnly
+            || !self.stg_scalar_binding_is_current(binding, STGDraftTarget::Float(target))
+            || self.workspace.stg_float(document, target).ok() != Some(source)
+            || (source.finite_value().is_none() && !replacement)
+        {
+            return;
+        }
+        self.cancel_property_edit();
+        self.float_edit = Some(ActiveFloatEdit {
+            binding,
+            target,
+            editor: if replacement {
+                crate::float_edit::FloatEdit::replacement(source)
+            } else {
+                crate::float_edit::FloatEdit::new(source)
+            },
+        });
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn start_stg_text_edit(
+        &mut self,
+        document: DocumentID,
+        section: STGSection,
+        target: STGTextTarget,
+        replacement: bool,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(binding) = self.current_stg_edit_binding(document, section) else {
+            return;
+        };
+        if !self.stg_scalar_binding_is_current(binding, STGDraftTarget::Text(target)) {
+            return;
+        }
+        let Ok(source) = self.workspace.stg_text(document, target) else {
+            return;
+        };
+        let value = match source {
+            STGText::Decoded(value) if !replacement => value.as_ref().to_owned(),
+            STGText::Raw(_) if replacement => String::new(),
+            STGText::Decoded(_) | STGText::Raw(_) => return,
+        };
+        self.start_text_edit(TextEditTarget::stg(binding, target), value, window, cx);
+    }
+
+    pub(super) fn set_stg_choice(
+        &mut self,
+        action: &SetSTGChoice,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let binding = STGEditBinding::new(action.document, action.section, action.generation);
+        let valid_choice = matches!(
+            action.target.editor(),
+            Some(STGEditor::Choice { choices })
+                if choices.iter().any(|choice| choice.value == action.value)
+        );
+        if !valid_choice
+            || !self.stg_scalar_binding_is_current(binding, STGDraftTarget::Number(action.target))
+        {
+            self.cancel_property_edit();
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("The STG field changed; edit canceled"),
+            );
+            window.focus(&self.focus);
+            cx.notify();
+            return;
+        }
+
+        self.cancel_property_edit();
+        match self.workspace.apply(
+            action.document,
+            kufeditor_workspace::DocumentEdit::SetSTGNumber {
+                target: action.target,
+                value: action.value,
+            },
+        ) {
+            Ok(outcome) => {
+                if outcome == kufeditor_workspace::ApplyOutcome::Changed {
+                    self.document_did_mutate(action.document, cx);
+                }
+                self.notices.clear(NoticeSource::Editor);
+            }
+            Err(error) => self.notices.replace(
+                NoticeSource::Editor,
+                Notice::editor_error("Could not update Crusaders STG", &error),
+            ),
+        }
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn stg_field_element(
+        &self,
+        field: &STGFieldProjection,
+        selector: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if field.state() == STGFieldState::Error {
+            return stg::field_row(&self.theme, field)
+                .debug_selector(move || selector.clone())
+                .into_any_element();
+        }
+
+        match field.id().field_kind() {
+            STGProjectionField::Number(target) => {
+                let Ok(source) = self.workspace.stg_number(field.id().document(), target) else {
+                    return self.stg_read_only_field_element(field, selector);
+                };
+                let Some(editor) = target.editor() else {
+                    return self.stg_read_only_field_element(field, selector);
+                };
+                self.stg_number_field_element(field, selector, target, source, editor, cx)
+            }
+            STGProjectionField::Float(target) => {
+                let Ok(source) = self.workspace.stg_float(field.id().document(), target) else {
+                    return self.stg_read_only_field_element(field, selector);
+                };
+                if target.access() == STGFieldAccess::ReadOnly {
+                    self.stg_read_only_field_element(field, selector)
+                } else {
+                    self.stg_float_field_element(field, selector, target, source, cx)
+                }
+            }
+            STGProjectionField::Text(target) => {
+                let Ok(source) = self.workspace.stg_text(field.id().document(), target) else {
+                    return self.stg_read_only_field_element(field, selector);
+                };
+                let source_is_decoded = matches!(source, STGText::Decoded(_));
+                self.stg_text_field_element(field, selector, target, source_is_decoded, cx)
+            }
+            STGProjectionField::Value(target) => {
+                self.stg_value_field_element(field, selector, target, cx)
+            }
+            STGProjectionField::Row
+            | STGProjectionField::EventDetail(_)
+            | STGProjectionField::Magic
+            | STGProjectionField::Reserved(_) => self.stg_read_only_field_element(field, selector),
+        }
+    }
+
+    fn stg_read_only_field_element(
+        &self,
+        field: &STGFieldProjection,
+        selector: String,
+    ) -> AnyElement {
         stg::field_row(&self.theme, field)
             .debug_selector(move || selector.clone())
             .into_any_element()
+    }
+
+    fn stg_number_field_element(
+        &self,
+        field: &STGFieldProjection,
+        selector: String,
+        target: STGNumberTarget,
+        source: i64,
+        editor: STGEditor,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let document = field.id().document();
+        let projection = field.id();
+        match editor {
+            STGEditor::Number { .. } => {
+                let active = self.number_edit.as_ref().filter(|edit| {
+                    matches!(
+                        edit.target,
+                        NumberEditTarget::STG {
+                            binding,
+                            target: active_target,
+                        } if binding.document == document && active_target == target
+                    )
+                });
+                let display = active.map_or_else(
+                    || field.display_value().to_owned(),
+                    |edit| edit.editor.draft().to_owned(),
+                );
+                stg::editable_value_row(
+                    &self.theme,
+                    SharedString::from(field.id().element_key("stg-number")),
+                    field.label().to_owned(),
+                    display,
+                    active.is_some(),
+                    active.is_some_and(|edit| edit.editor.invalid() || !edit.editor.is_valid()),
+                )
+                .debug_selector(move || selector.clone())
+                .tab_index(0)
+                .on_click(cx.listener(move |frame, _, window, cx| {
+                    frame.start_stg_number_edit(projection, target, source, editor, window, cx);
+                }))
+                .into_any_element()
+            }
+            STGEditor::Choice { choices } => {
+                let generation = self
+                    .stg_presentations
+                    .get(document)
+                    .map_or(0, crate::state::STGPresentationState::binding_generation);
+                let known = choices.iter().any(|choice| choice.value == source);
+                let buttons = choices
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(index, choice)| {
+                        let action = SetSTGChoice {
+                            document,
+                            section: projection.section(),
+                            generation,
+                            target,
+                            value: choice.value,
+                        };
+                        let choice_selector = format!("{selector}-choice-{}", choice.value);
+                        components::choice_button(
+                            &self.theme,
+                            SharedString::from(
+                                field.id().element_key(&format!("stg-choice-{index}")),
+                            ),
+                            choice.label,
+                            choice.value == source,
+                        )
+                        .debug_selector(move || choice_selector.clone())
+                        .tab_index(0)
+                        .on_click(cx.listener(move |_, _, window, cx| {
+                            window.dispatch_action(Box::new(action), cx);
+                        }))
+                        .into_any_element()
+                    })
+                    .collect();
+                let unknown_selector = (!known).then(|| format!("{selector}-unknown"));
+                stg::choice_value_row(
+                    &self.theme,
+                    SharedString::from(field.id().element_key("stg-choice")),
+                    field.label().to_owned(),
+                    field.display_value().to_owned(),
+                    unknown_selector,
+                    buttons,
+                )
+                .debug_selector(move || selector.clone())
+                .into_any_element()
+            }
+        }
+    }
+
+    fn stg_float_field_element(
+        &self,
+        field: &STGFieldProjection,
+        selector: String,
+        target: STGFloatTarget,
+        source: STGFloatValue,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let document = field.id().document();
+        let projection = field.id();
+        if source.finite_value().is_none() {
+            let replace_selector = format!("{selector}-replace");
+            let replace = components::choice_button(
+                &self.theme,
+                SharedString::from(field.id().element_key("stg-float-replace")),
+                "Replace",
+                false,
+            )
+            .debug_selector(move || replace_selector.clone())
+            .tab_index(0)
+            .on_click(cx.listener(move |frame, _, window, cx| {
+                frame.start_stg_float_edit(projection, target, source, true, window, cx);
+            }))
+            .into_any_element();
+            return stg::choice_value_row(
+                &self.theme,
+                SharedString::from(field.id().element_key("stg-float-nonfinite")),
+                field.label().to_owned(),
+                field.display_value().to_owned(),
+                None,
+                vec![replace],
+            )
+            .debug_selector(move || selector.clone())
+            .into_any_element();
+        }
+
+        let active = self
+            .float_edit
+            .as_ref()
+            .filter(|edit| edit.binding.document == document && edit.target == target);
+        let display = active.map_or_else(
+            || field.display_value().to_owned(),
+            |edit| edit.editor.draft().to_owned(),
+        );
+        stg::editable_value_row(
+            &self.theme,
+            SharedString::from(field.id().element_key("stg-float")),
+            field.label().to_owned(),
+            display,
+            active.is_some(),
+            active.is_some_and(|edit| edit.editor.invalid() || !edit.editor.is_valid()),
+        )
+        .debug_selector(move || selector.clone())
+        .tab_index(0)
+        .on_click(cx.listener(move |frame, _, window, cx| {
+            frame.start_stg_float_edit(projection, target, source, false, window, cx);
+        }))
+        .into_any_element()
+    }
+
+    fn stg_text_field_element(
+        &self,
+        field: &STGFieldProjection,
+        selector: String,
+        target: STGTextTarget,
+        source_is_decoded: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let document = field.id().document();
+        let section = field.id().section();
+        let active = self.text_edit.as_ref().filter(|edit| {
+            matches!(
+                edit.target,
+                TextEditTarget::STG {
+                    binding,
+                    target: active_target,
+                } if binding.document == document && active_target == target
+            )
+        });
+        if let Some(active) = active {
+            return stg::text_editor_row(
+                &self.theme,
+                SharedString::from(field.id().element_key("stg-text-editor")),
+                field.label().to_owned(),
+                active.input.clone().into_any_element(),
+                active.validation_error.clone(),
+            )
+            .debug_selector(move || selector.clone())
+            .into_any_element();
+        }
+
+        if !source_is_decoded {
+            let replace_selector = format!("{selector}-replace");
+            let replace = components::choice_button(
+                &self.theme,
+                SharedString::from(field.id().element_key("stg-text-replace")),
+                "Replace",
+                false,
+            )
+            .debug_selector(move || replace_selector.clone())
+            .tab_index(0)
+            .on_click(cx.listener(move |frame, _, window, cx| {
+                frame.start_stg_text_edit(document, section, target, true, window, cx);
+            }))
+            .into_any_element();
+            return stg::choice_value_row(
+                &self.theme,
+                SharedString::from(field.id().element_key("stg-text-invalid")),
+                field.label().to_owned(),
+                field.display_value().to_owned(),
+                None,
+                vec![replace],
+            )
+            .debug_selector(move || selector.clone())
+            .into_any_element();
+        }
+
+        stg::editable_value_row(
+            &self.theme,
+            SharedString::from(field.id().element_key("stg-text")),
+            field.label().to_owned(),
+            field.display_value().to_owned(),
+            false,
+            false,
+        )
+        .debug_selector(move || selector.clone())
+        .tab_index(0)
+        .on_click(cx.listener(move |frame, _, window, cx| {
+            frame.start_stg_text_edit(document, section, target, false, window, cx);
+        }))
+        .into_any_element()
+    }
+
+    fn stg_value_field_element(
+        &self,
+        field: &STGFieldProjection,
+        selector: String,
+        target: STGValueTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let document = field.id().document();
+        match self.workspace.stg_value(document, target) {
+            Ok(STGValue::Integer(value) | STGValue::Enum(value)) => {
+                let target = STGNumberTarget::ParameterInteger { value: target };
+                let Some(editor) = target.editor() else {
+                    return self.stg_read_only_field_element(field, selector);
+                };
+                self.stg_number_field_element(field, selector, target, i64::from(value), editor, cx)
+            }
+            Ok(STGValue::Float(source)) => self.stg_float_field_element(
+                field,
+                selector,
+                STGFloatTarget::Parameter { value: target },
+                source,
+                cx,
+            ),
+            Ok(STGValue::String(STGText::Decoded(_))) => self.stg_text_field_element(
+                field,
+                selector,
+                STGTextTarget::ParameterString { value: target },
+                true,
+                cx,
+            ),
+            Ok(STGValue::String(STGText::Raw(_))) => self.stg_text_field_element(
+                field,
+                selector,
+                STGTextTarget::ParameterString { value: target },
+                false,
+                cx,
+            ),
+            Err(_) => self.stg_read_only_field_element(field, selector),
+        }
     }
 }
 
@@ -2125,6 +2913,16 @@ impl AppFrame {
             )
             .into_any_element();
         };
+        if let Some(field) = self.stg_event_detail_field_element(document, event, row, cx) {
+            return div()
+                .h(px(64.0))
+                .px(px(7.0))
+                .py(px(5.0))
+                .flex()
+                .items_center()
+                .child(field)
+                .into_any_element();
+        }
         let projection = self.stg_event_detail_row_projection(document, event, row);
         match projection {
             Ok((title, metadata)) => {
@@ -2158,6 +2956,72 @@ impl AppFrame {
         }
     }
 
+    fn stg_event_detail_field_element(
+        &self,
+        document: DocumentID,
+        event: STGEventTarget,
+        row: STGEventDetailRow,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (field, selector) = match row {
+            STGEventDetailRow::EventField(STGEventDetailField::BlockHeader) => (
+                self.stg_number_field(
+                    document,
+                    STGSection::Events,
+                    STGNumberTarget::EventBlockHeader { block: event.block },
+                ),
+                format!("stg-event-block-{}-header", event.block),
+            ),
+            STGEventDetailRow::EventField(STGEventDetailField::Description) => (
+                self.stg_text_field(
+                    document,
+                    STGSection::Events,
+                    STGTextTarget::EventDescription {
+                        block: event.block,
+                        event: event.event,
+                    },
+                ),
+                format!("stg-event-{}-{}-description", event.block, event.event),
+            ),
+            STGEventDetailRow::EventField(STGEventDetailField::ID) => (
+                self.stg_number_field(
+                    document,
+                    STGSection::Events,
+                    STGNumberTarget::EventID {
+                        block: event.block,
+                        event: event.event,
+                    },
+                ),
+                format!("stg-event-{}-{}-id", event.block, event.event),
+            ),
+            STGEventDetailRow::Parameter(target) => {
+                let parameter = self.workspace.stg_parameter(document, target).ok()?;
+                let hint = parameter.hint.unwrap_or("Unlabeled parameter");
+                (
+                    self.stg_value_field(
+                        document,
+                        STGSection::Events,
+                        STGValueTarget::ScriptParameter(target),
+                        format!("Parameter {} · {hint}", target.parameter + 1),
+                    ),
+                    format!(
+                        "stg-parameter-{}-{}-{}-{}-{}",
+                        target.script.block,
+                        target.script.event,
+                        match target.script.kind {
+                            STGScriptKind::Condition => "condition",
+                            STGScriptKind::Action => "action",
+                        },
+                        target.script.script,
+                        target.parameter,
+                    ),
+                )
+            }
+            STGEventDetailRow::ScriptHeader(_) | STGEventDetailRow::AddScript(_) => return None,
+        };
+        Some(self.stg_field_element(&field, selector, cx))
+    }
+
     fn stg_event_detail_row_projection(
         &self,
         document: DocumentID,
@@ -2165,6 +3029,13 @@ impl AppFrame {
         row: STGEventDetailRow,
     ) -> STGProjectionResult<(String, String)> {
         match row {
+            STGEventDetailRow::EventField(STGEventDetailField::BlockHeader) => {
+                let projection = self.workspace.stg_event_block(document, event.block)?;
+                Ok((
+                    "Event block header".to_owned(),
+                    projection.header.to_string(),
+                ))
+            }
             STGEventDetailRow::EventField(STGEventDetailField::Description) => {
                 let projection = self.workspace.stg_event(document, event)?;
                 Ok((
@@ -2281,14 +3152,9 @@ impl AppFrame {
             STGRowCursor::Event(event) => STGSelection::Event(Some(event)),
             STGRowCursor::Footer(entry) => STGSelection::Footer(Some(entry)),
         };
-        if self
-            .stg_presentations
-            .select(document, selection, None)
-            .changed()
-        {
-            self.stg_lists.invalidate_all();
-            cx.notify();
-        }
+        let draft = self.active_stg_draft_status(false);
+        let transition = self.stg_presentations.select(document, selection, draft);
+        self.finish_stg_presentation_transition(document, transition, cx);
     }
 
     fn move_stg_list_cursor(
@@ -2520,17 +3386,19 @@ mod tests {
         reason = "controlled GPUI and STG fixtures make failures fatal"
     )]
 
-    use std::{fs, path::PathBuf};
+    use std::{fs, mem::size_of, path::PathBuf};
 
     use gpui::{
-        AppContext, Context, Entity, EntityInputHandler, TestAppContext, VisualTestContext,
-        WindowOptions, point, px, size,
+        AppContext, Context, Entity, EntityInputHandler, Modifiers, TestAppContext,
+        VisualTestContext, WindowOptions, point, px, size,
     };
     use kufeditor_game::Game;
     use kufeditor_workspace::{
-        Document, DocumentEdit, DocumentID, STGDocument, STGEventTarget, STGNumberTarget,
+        Document, DocumentEdit, DocumentID, STGAreaField, STGAreaFloatField, STGDocument,
+        STGEventTarget, STGFloatTarget, STGFooterField, STGHeaderTextField, STGNumberTarget,
         STGParameterTarget, STGReferenceKind, STGScriptKind, STGScriptTarget, STGStructuralEdit,
-        STGTextTarget, STGValueKind, STGValueTarget, TroopDocument,
+        STGText, STGTextTarget, STGUnitField, STGUnitFloatField, STGValueKind, STGValueTarget,
+        TroopDocument,
     };
 
     use super::{
@@ -2620,6 +3488,130 @@ mod tests {
             append_u32(&mut bytes, 0);
         }
         bytes
+    }
+
+    struct ScalarSTGFixture {
+        bytes: Vec<u8>,
+        area_description: usize,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ScalarParameter<'a> {
+        Integer(i32),
+        Float(f32),
+        String(&'a [u8]),
+        Enum(i32),
+    }
+
+    fn scalar_stg_fixture() -> ScalarSTGFixture {
+        const HEADER_SIZE: usize = 620;
+        const UNIT_SIZE: usize = 544;
+        const AREA_SIZE: usize = 84;
+
+        let mut bytes = Vec::new();
+        append_u32(&mut bytes, 1_001);
+        bytes.resize(bytes.len() + HEADER_SIZE, 0);
+        let header_map = 4 + 68;
+        write_fixture_text(&mut bytes, header_map, b"Map");
+
+        append_u32(&mut bytes, 1);
+        let unit_name = bytes.len();
+        bytes.resize(bytes.len() + UNIT_SIZE, 0);
+        write_fixture_text(&mut bytes, unit_name, b"Unit");
+        write_fixture_u32(&mut bytes, unit_name + 32, 7);
+        *bytes.get_mut(unit_name + 36).unwrap() = 99;
+        write_fixture_u32(&mut bytes, unit_name + 40, 1.25_f32.to_bits());
+        write_fixture_u32(
+            &mut bytes,
+            unit_name + UNIT_SIZE - 22 * size_of::<f32>(),
+            f32::NAN.to_bits(),
+        );
+
+        append_u32(&mut bytes, 1);
+        let area_description = bytes.len();
+        bytes.resize(bytes.len() + AREA_SIZE, 0);
+        write_fixture_text(&mut bytes, area_description, b"Area");
+        write_fixture_u32(&mut bytes, area_description + 64, 22);
+        write_fixture_u32(&mut bytes, area_description + 68, 2.5_f32.to_bits());
+
+        append_u32(&mut bytes, 4);
+        append_scalar_variable(&mut bytes, 100, ScalarParameter::Integer(-12));
+        append_scalar_variable(&mut bytes, 101, ScalarParameter::Float(17.25));
+        append_scalar_variable(&mut bytes, 102, ScalarParameter::String(b"variable"));
+        append_scalar_variable(&mut bytes, 103, ScalarParameter::Enum(7));
+
+        append_u32(&mut bytes, 1);
+        append_u32(&mut bytes, 0x0102_0304);
+        append_u32(&mut bytes, 1);
+        append_fixed_fixture_text::<64>(&mut bytes, b"Primary Event");
+        append_u32(&mut bytes, 500);
+        append_u32(&mut bytes, 1);
+        append_u32(&mut bytes, 19);
+        append_u32(&mut bytes, 2);
+        append_scalar_parameter(&mut bytes, ScalarParameter::Integer(23));
+        append_scalar_parameter(&mut bytes, ScalarParameter::Float(-0.0));
+        append_u32(&mut bytes, 1);
+        append_u32(&mut bytes, 55);
+        append_u32(&mut bytes, 2);
+        append_scalar_parameter(&mut bytes, ScalarParameter::String(b"action"));
+        append_scalar_parameter(&mut bytes, ScalarParameter::Enum(-3));
+
+        append_u32(&mut bytes, 1);
+        append_u32(&mut bytes, 700);
+        append_u32(&mut bytes, 701);
+
+        ScalarSTGFixture {
+            bytes,
+            area_description,
+        }
+    }
+
+    fn append_scalar_variable(bytes: &mut Vec<u8>, id: u32, value: ScalarParameter<'_>) {
+        append_fixed_fixture_text::<64>(bytes, format!("Variable {id}").as_bytes());
+        append_u32(bytes, id);
+        append_scalar_parameter(bytes, value);
+    }
+
+    fn append_scalar_parameter(bytes: &mut Vec<u8>, value: ScalarParameter<'_>) {
+        match value {
+            ScalarParameter::Integer(value) => {
+                append_u32(bytes, 0);
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            ScalarParameter::Float(value) => {
+                append_u32(bytes, 1);
+                append_u32(bytes, value.to_bits());
+            }
+            ScalarParameter::String(value) => {
+                append_u32(bytes, 2);
+                append_u32(bytes, u32::try_from(value.len()).unwrap());
+                bytes.extend_from_slice(value);
+            }
+            ScalarParameter::Enum(value) => {
+                append_u32(bytes, 3);
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+
+    fn append_fixed_fixture_text<const N: usize>(bytes: &mut Vec<u8>, value: &[u8]) {
+        assert!(value.len() < N);
+        bytes.extend_from_slice(value);
+        bytes.resize(bytes.len() + N - value.len(), 0);
+    }
+
+    fn write_fixture_text(bytes: &mut [u8], offset: usize, value: &[u8]) {
+        bytes
+            .get_mut(offset..offset + value.len())
+            .unwrap()
+            .copy_from_slice(value);
+    }
+
+    fn write_fixture_u32(bytes: &mut [u8], offset: usize, value: u32) {
+        bytes
+            .get_mut(offset..offset + size_of::<u32>())
+            .unwrap()
+            .copy_from_slice(&value.to_le_bytes());
     }
 
     fn append_u32(bytes: &mut Vec<u8>, value: u32) {
@@ -2930,6 +3922,482 @@ mod tests {
                     .inspected_event(),
                 None
             );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_number_edit_handles_unit_bounds_choices_and_exact_history(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+
+        select_stg_section(&frame, cx, document, STGSection::Units);
+        assert!(cx.debug_bounds("stg-unit-0-field-ucd-unknown").is_some());
+        click(cx, "stg-unit-0-field-uniqueid");
+        cx.simulate_keystrokes("4 2 enter");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::Unit {
+                            unit: 0,
+                            field: STGUnitField::UniqueID,
+                        },
+                    )
+                    .unwrap(),
+                42,
+            );
+        });
+
+        click(cx, "stg-unit-0-field-uniqueid");
+        cx.simulate_keystrokes("enter");
+        frame.update(cx, |frame, cx| frame.move_history(false, cx));
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::Unit {
+                            unit: 0,
+                            field: STGUnitField::UniqueID,
+                        },
+                    )
+                    .unwrap(),
+                7,
+            );
+        });
+        frame.update(cx, |frame, cx| frame.move_history(true, cx));
+
+        click(cx, "stg-unit-0-field-leaderlevel");
+        cx.simulate_keystrokes("0 enter");
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_some()));
+        cx.simulate_keystrokes("escape");
+
+        click(cx, "stg-unit-0-field-ucd-choice-1");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::Unit {
+                            unit: 0,
+                            field: STGUnitField::UCD,
+                        },
+                    )
+                    .unwrap(),
+                1,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_number_edit_dispatches_area_and_variable_targets(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+
+        select_stg_section(&frame, cx, document, STGSection::Areas);
+        click(cx, "stg-area-0-id");
+        cx.simulate_keystrokes("2 3 enter");
+        select_stg_section(&frame, cx, document, STGSection::Variables);
+        click(cx, "stg-variable-0-id");
+        cx.simulate_keystrokes("2 0 0 enter");
+        click(cx, "stg-variable-0-value");
+        cx.simulate_keystrokes("- 2 4 enter");
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::Area {
+                            area: 0,
+                            field: STGAreaField::AreaID,
+                        },
+                    )
+                    .unwrap(),
+                23,
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(document, STGNumberTarget::VariableID { variable: 0 })
+                    .unwrap(),
+                200,
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::ParameterInteger {
+                            value: STGValueTarget::VariableInitial { variable: 0 },
+                        },
+                    )
+                    .unwrap(),
+                -24,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_number_edit_dispatches_event_and_footer_targets(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-event-block-0-header");
+        cx.simulate_keystrokes("8 enter");
+        click(cx, "stg-event-0-0-id");
+        cx.simulate_keystrokes("5 0 1 enter");
+        click(cx, "stg-parameter-0-0-condition-0-0");
+        cx.simulate_keystrokes("2 4 enter");
+        select_stg_section(&frame, cx, document, STGSection::Footer);
+        click(cx, "stg-footer-0-SlotData1");
+        cx.simulate_keystrokes("8 0 0 enter");
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(document, STGNumberTarget::EventBlockHeader { block: 0 })
+                    .unwrap(),
+                8,
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(document, STGNumberTarget::EventID { block: 0, event: 0 },)
+                    .unwrap(),
+                501,
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::ParameterInteger {
+                            value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                                script: STGScriptTarget {
+                                    block: 0,
+                                    event: 0,
+                                    kind: STGScriptKind::Condition,
+                                    script: 0,
+                                },
+                                parameter: 0,
+                            }),
+                        },
+                    )
+                    .unwrap(),
+                24,
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::Footer {
+                            entry: 0,
+                            field: STGFooterField::SlotData1,
+                        },
+                    )
+                    .unwrap(),
+                800,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_float_edit_preserves_bits_and_requires_explicit_nonfinite_replacement(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Units);
+
+        click(cx, "stg-unit-0-float-LeaderHPOverride");
+        frame.update(cx, |frame, _| {
+            let edit = frame.float_edit.as_ref().unwrap();
+            assert_eq!(
+                edit.target,
+                STGFloatTarget::Unit {
+                    unit: 0,
+                    field: STGUnitFloatField::LeaderHPOverride,
+                }
+            );
+        });
+        cx.simulate_keystrokes("- 0 . 0 enter");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_float(
+                        document,
+                        STGFloatTarget::Unit {
+                            unit: 0,
+                            field: STGUnitFloatField::LeaderHPOverride,
+                        },
+                    )
+                    .unwrap()
+                    .to_bits(),
+                (-0.0_f32).to_bits(),
+            );
+        });
+
+        assert!(cx.debug_bounds("stg-unit-0-stat-0-replace").is_some());
+        click(cx, "stg-unit-0-stat-0-replace");
+        frame.update(cx, |frame, _| {
+            let edit = frame.float_edit.as_ref().unwrap();
+            assert_eq!(edit.editor.draft(), "");
+            assert_eq!(edit.editor.source().to_bits(), f32::NAN.to_bits());
+        });
+        cx.simulate_keystrokes("escape");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_float(document, STGFloatTarget::StatOverride { unit: 0, slot: 0 })
+                    .unwrap()
+                    .to_bits(),
+                f32::NAN.to_bits(),
+            );
+        });
+        click(cx, "stg-unit-0-stat-0-replace");
+        cx.simulate_keystrokes("2 . 5 enter");
+
+        select_stg_section(&frame, cx, document, STGSection::Areas);
+        click(cx, "stg-area-0-bound-BoundX1");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame.float_edit.as_ref().unwrap().target,
+                STGFloatTarget::Area {
+                    area: 0,
+                    field: STGAreaFloatField::BoundX1,
+                },
+            );
+        });
+        cx.simulate_keystrokes("escape");
+
+        select_stg_section(&frame, cx, document, STGSection::Variables);
+        click(cx, "stg-variable-master-row-1");
+        click(cx, "stg-variable-1-value");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame.float_edit.as_ref().unwrap().target,
+                STGFloatTarget::Parameter {
+                    value: STGValueTarget::VariableInitial { variable: 1 },
+                },
+            );
+        });
+        cx.simulate_keystrokes("escape");
+
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-parameter-0-0-condition-0-1");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame.float_edit.as_ref().unwrap().target,
+                STGFloatTarget::Parameter {
+                    value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                        script: STGScriptTarget {
+                            block: 0,
+                            event: 0,
+                            kind: STGScriptKind::Condition,
+                            script: 0,
+                        },
+                        parameter: 1,
+                    }),
+                },
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_text_edit_uses_source_text_and_keeps_raw_replacement_explicit(cx: &mut TestAppContext) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+
+        click(cx, "stg-header-map-filename");
+        let header_input = frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input.read(cx).content(), "Map");
+            edit.input.clone()
+        });
+        header_input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("Café".to_owned()));
+        });
+        frame.update(cx, |frame, _| {
+            assert!(matches!(
+                frame
+                    .workspace
+                    .stg_text(
+                        document,
+                        STGTextTarget::Header(STGHeaderTextField::MapFilename),
+                    )
+                    .unwrap(),
+                STGText::Decoded(value) if value.as_ref() == "Café"
+            ));
+        });
+
+        select_stg_section(&frame, cx, document, STGSection::Units);
+        click(cx, "stg-unit-0-name");
+        let unit_input = frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input.read(cx).content(), "Unit");
+            edit.input.clone()
+        });
+        unit_input.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("수호자".to_owned()));
+        });
+
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-parameter-0-0-action-0-0");
+        frame.update(cx, |frame, cx| {
+            assert_eq!(
+                frame.text_edit.as_ref().unwrap().input.read(cx).content(),
+                "action",
+            );
+        });
+        cx.simulate_keystrokes("escape");
+
+        let mut raw_fixture = scalar_stg_fixture();
+        *raw_fixture
+            .bytes
+            .get_mut(raw_fixture.area_description)
+            .unwrap() = 0x80;
+        let raw_document = activate_stg(&frame, cx, raw_fixture.bytes);
+        select_stg_section(&frame, cx, raw_document, STGSection::Areas);
+        assert!(cx.debug_bounds("stg-area-0-description-replace").is_some());
+        click(cx, "stg-area-0-description-replace");
+        let replacement = frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input.read(cx).content(), "");
+            edit.input.clone()
+        });
+        replacement.update(cx, |_, cx| cx.emit(TextInputEvent::Cancel));
+        frame.update(cx, |frame, _| {
+            assert!(matches!(
+                frame
+                    .workspace
+                    .stg_text(raw_document, STGTextTarget::AreaDescription { area: 0 },)
+                    .unwrap(),
+                STGText::Raw(_)
+            ));
+        });
+        click(cx, "stg-area-0-description-replace");
+        let replacement = frame.update(cx, |frame, _| {
+            frame.text_edit.as_ref().unwrap().input.clone()
+        });
+        replacement.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("Area repaired".to_owned()));
+        });
+        frame.update(cx, |frame, _| {
+            assert!(matches!(
+                frame
+                    .workspace
+                    .stg_text(
+                        raw_document,
+                        STGTextTarget::AreaDescription { area: 0 },
+                    )
+                    .unwrap(),
+                STGText::Decoded(value) if value.as_ref() == "Area repaired"
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn stg_draft_ownership_cancels_hidden_work_and_rebinds_catalog_refresh(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+
+        select_stg_section(&frame, cx, document, STGSection::Units);
+        click(cx, "stg-unit-0-field-uniqueid");
+        select_stg_section(&frame, cx, document, STGSection::Areas);
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_none()));
+
+        select_stg_section(&frame, cx, document, STGSection::Header);
+        click(cx, "stg-header-map-filename");
+        let (input, generation) = frame.update(cx, |frame, _| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            (edit.input.clone(), edit.target.stg_generation().unwrap())
+        });
+        frame.update(cx, |frame, cx| {
+            frame.reconcile_stg_presentation(document, STGDocumentTransition::Catalog, cx);
+        });
+        frame.update(cx, |frame, _| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input, input);
+            assert!(edit.target.stg_generation().unwrap() > generation);
+        });
+        input.update(cx, |_, cx| cx.emit(TextInputEvent::Cancel));
+
+        select_stg_section(&frame, cx, document, STGSection::Units);
+        click(cx, "stg-unit-0-name");
+        frame.update_in(cx, |frame, window, cx| {
+            frame.start_stg_search(document, STGSearchKind::Units, window, cx);
+            assert!(frame.text_edit.is_none());
+        });
+        let search = frame.update(cx, |frame, _| {
+            frame.stg_search.as_ref().unwrap().input.clone()
+        });
+        search.update(cx, |_, cx| cx.emit(TextInputEvent::Commit(String::new())));
+
+        click(cx, "stg-unit-0-field-uniqueid");
+        frame.update(cx, |frame, cx| {
+            frame
+                .workspace
+                .apply(
+                    document,
+                    DocumentEdit::SetSTGNumber {
+                        target: STGNumberTarget::Unit {
+                            unit: 0,
+                            field: STGUnitField::EnabledFlag,
+                        },
+                        value: 1,
+                    },
+                )
+                .unwrap();
+            frame.reconcile_stg_presentation(document, STGDocumentTransition::ScalarEdit, cx);
+            assert!(frame.number_edit.is_none());
+        });
+
+        click(cx, "stg-unit-0-field-uniqueid");
+        frame.update(cx, |frame, cx| {
+            let edit = STGStructuralEdit::InsertEvent {
+                target: STGEventTarget { block: 0, event: 1 },
+            };
+            frame
+                .workspace
+                .apply(document, DocumentEdit::EditSTGStructure { edit })
+                .unwrap();
+            frame.reconcile_stg_presentation(
+                document,
+                STGDocumentTransition::StructuralEdit(Some(edit.change())),
+                cx,
+            );
+            assert!(frame.number_edit.is_none());
+        });
+
+        let other = frame.update(cx, |frame, cx| {
+            let other = frame.workspace.open_loaded(
+                PathBuf::from("other.stg"),
+                Document::STG(STGDocument::parse(scalar_stg_fixture().bytes).unwrap()),
+            );
+            frame.activate_document(other, cx);
+            other
+        });
+        frame.update(cx, |frame, _| {
+            assert_eq!(frame.active_document, Some(other));
+            assert!(frame.number_edit.is_none());
+            assert!(frame.text_edit.is_none());
+            assert!(frame.float_edit.is_none());
         });
     }
 
@@ -3464,10 +4932,7 @@ mod tests {
         section: STGSection,
     ) {
         frame.update(cx, |frame, cx| {
-            frame
-                .stg_presentations
-                .select_section(document, section, None);
-            cx.notify();
+            frame.select_stg_section(document, section, cx);
         });
         draw_stg_frame(cx, frame);
     }
@@ -3479,6 +4944,13 @@ mod tests {
             size(px(1_280.0), px(820.0)),
             move |_, _| frame,
         );
+    }
+
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("missing click target {selector}"));
+        cx.simulate_click(bounds.center(), Modifiers::none());
     }
 
     #[test]

@@ -1,5 +1,7 @@
 use gpui::{Action, App, KeyBinding, actions};
-use kufeditor_workspace::{DocumentID, SaveNumberTarget};
+use kufeditor_workspace::{DocumentID, STGNumberTarget, SaveNumberTarget};
+
+use crate::state::STGSection;
 
 actions!(
     kufeditor,
@@ -34,6 +36,16 @@ actions!(
 pub(crate) struct SetSaveChoice {
     pub(crate) document: DocumentID,
     pub(crate) target: SaveNumberTarget,
+    pub(crate) value: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Action)]
+#[action(namespace = kufeditor, no_json)]
+pub(crate) struct SetSTGChoice {
+    pub(crate) document: DocumentID,
+    pub(crate) section: STGSection,
+    pub(crate) generation: u64,
+    pub(crate) target: STGNumberTarget,
     pub(crate) value: i64,
 }
 

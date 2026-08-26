@@ -13,6 +13,7 @@ use gpui::{
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
     ApplyOutcome, DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
+    STGEditor, STGFloatTarget, STGFloatValue, STGNumberTarget, STGTextTarget,
     SUPPORTED_OPEN_EXTENSIONS, SaveEditor, SaveNumberTarget, SaveTextField, SaveToken,
     SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError, load_path,
 };
@@ -25,12 +26,14 @@ use crate::{
     catalog_status::{CatalogRequestError, CatalogSession},
     components,
     crusaders_catalog_status::CrusadersCatalogSession,
+    float_edit::{FloatCommand, FloatEdit, FloatOutcome},
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
     state::{
-        Area, ClosePolicy, RecordSelections, RequestID, STGPresentationStates, SaveListCursor,
-        SaveListKind, SavePresentationStates, ShellState, navigation_projection,
+        Area, ClosePolicy, RecordSelections, RequestID, STGDraftTarget, STGPresentationStates,
+        STGSection, SaveListCursor, SaveListKind, SavePresentationStates, ShellState,
+        navigation_projection,
     },
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
@@ -61,6 +64,29 @@ struct TaskLaunchCounts {
 struct ActiveNumberEdit {
     target: NumberEditTarget,
     editor: NumberEdit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct STGEditBinding {
+    document: DocumentID,
+    section: STGSection,
+    generation: u64,
+}
+
+impl STGEditBinding {
+    const fn new(document: DocumentID, section: STGSection, generation: u64) -> Self {
+        Self {
+            document,
+            section,
+            generation,
+        }
+    }
+}
+
+struct ActiveFloatEdit {
+    binding: STGEditBinding,
+    target: STGFloatTarget,
+    editor: FloatEdit,
 }
 
 impl ActiveNumberEdit {
@@ -103,6 +129,21 @@ impl ActiveNumberEdit {
             editor: NumberEdit::new(value, minimum, maximum),
         })
     }
+
+    fn stg(
+        binding: STGEditBinding,
+        target: STGNumberTarget,
+        value: i64,
+        editor: STGEditor,
+    ) -> Option<Self> {
+        let STGEditor::Number { minimum, maximum } = editor else {
+            return None;
+        };
+        Some(Self {
+            target: NumberEditTarget::STG { binding, target },
+            editor: NumberEdit::new(value, minimum, maximum),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -124,6 +165,10 @@ enum NumberEditTarget {
         document: DocumentID,
         target: SaveNumberTarget,
     },
+    STG {
+        binding: STGEditBinding,
+        target: STGNumberTarget,
+    },
 }
 
 impl NumberEditTarget {
@@ -133,6 +178,7 @@ impl NumberEditTarget {
             | Self::SkillID { document, .. }
             | Self::SkillMaxLevel { document, .. }
             | Self::Save { document, .. } => *document,
+            Self::STG { binding, .. } => binding.document,
         }
     }
 
@@ -141,6 +187,7 @@ impl NumberEditTarget {
             Self::TroopField { .. } => "TroopInfo",
             Self::SkillID { .. } | Self::SkillMaxLevel { .. } => "SkillInfo",
             Self::Save { .. } => "Crusaders save",
+            Self::STG { .. } => "Crusaders STG",
         }
     }
 
@@ -219,6 +266,20 @@ impl NumberEditTarget {
             Self::Save { document, target } => {
                 Ok((document, DocumentEdit::SetSaveNumber { target, value }))
             }
+            Self::STG { binding, target } => Ok((
+                binding.document,
+                DocumentEdit::SetSTGNumber { target, value },
+            )),
+        }
+    }
+
+    const fn stg_binding(self) -> Option<(STGEditBinding, STGNumberTarget)> {
+        match self {
+            Self::STG { binding, target } => Some((binding, target)),
+            Self::TroopField { .. }
+            | Self::SkillID { .. }
+            | Self::SkillMaxLevel { .. }
+            | Self::Save { .. } => None,
         }
     }
 }
@@ -269,6 +330,10 @@ enum TextEditTarget {
         document: DocumentID,
         field: SaveTextField,
     },
+    STG {
+        binding: STGEditBinding,
+        target: STGTextTarget,
+    },
 }
 
 impl TextEditTarget {
@@ -288,11 +353,16 @@ impl TextEditTarget {
         Self::Save { document, field }
     }
 
+    const fn stg(binding: STGEditBinding, target: STGTextTarget) -> Self {
+        Self::STG { binding, target }
+    }
+
     const fn document(self) -> DocumentID {
         match self {
             Self::Skill { document, .. }
             | Self::TextSOX { document, .. }
             | Self::Save { document, .. } => document,
+            Self::STG { binding, .. } => binding.document,
         }
     }
 
@@ -301,6 +371,7 @@ impl TextEditTarget {
             Self::Skill { .. } => "SkillInfo",
             Self::TextSOX { .. } => "text SOX",
             Self::Save { .. } => "Crusaders save",
+            Self::STG { .. } => "Crusaders STG",
         }
     }
 
@@ -309,6 +380,7 @@ impl TextEditTarget {
             Self::Skill { field, .. } => field.label(),
             Self::TextSOX { .. } => "Text",
             Self::Save { field, .. } => field.label(),
+            Self::STG { target, .. } => target.label(),
         }
     }
 
@@ -336,6 +408,24 @@ impl TextEditTarget {
             Self::Save { document, field } => {
                 (document, DocumentEdit::SetSaveText { field, value })
             }
+            Self::STG { binding, target } => {
+                (binding.document, DocumentEdit::SetSTGText { target, value })
+            }
+        }
+    }
+
+    const fn stg_binding(self) -> Option<(STGEditBinding, STGTextTarget)> {
+        match self {
+            Self::STG { binding, target } => Some((binding, target)),
+            Self::Skill { .. } | Self::TextSOX { .. } | Self::Save { .. } => None,
+        }
+    }
+
+    #[cfg(test)]
+    const fn stg_generation(self) -> Option<u64> {
+        match self {
+            Self::STG { binding, .. } => Some(binding.generation),
+            Self::Skill { .. } | Self::TextSOX { .. } | Self::Save { .. } => None,
         }
     }
 }
@@ -539,6 +629,10 @@ fn invalid_number_notice() -> Notice {
     Notice::editor_info("Enter a whole number within the allowed range")
 }
 
+fn invalid_float_notice() -> Notice {
+    Notice::editor_info("Enter a finite decimal number")
+}
+
 fn open_prompt_copy() -> String {
     let extensions = SUPPORTED_OPEN_EXTENSIONS
         .iter()
@@ -651,6 +745,7 @@ pub struct AppFrame {
     stg_lists: STGListControls,
     stg_search: Option<stg::ActiveSTGSearch>,
     number_edit: Option<ActiveNumberEdit>,
+    float_edit: Option<ActiveFloatEdit>,
     text_edit: Option<ActiveTextEdit>,
     game_paths: kufeditor_game::GamePaths,
     root_revisions: discovery_status::RootRevisions,
@@ -710,6 +805,7 @@ impl AppFrame {
             stg_lists: STGListControls::new(cx),
             stg_search: None,
             number_edit: None,
+            float_edit: None,
             text_edit: None,
             game_paths,
             root_revisions: discovery_status::RootRevisions::default(),
@@ -739,6 +835,7 @@ impl AppFrame {
 
     fn cancel_property_edit(&mut self) {
         self.number_edit = None;
+        self.float_edit = None;
         self.text_edit = None;
         clear_editor_notice(&mut self.notices);
     }
@@ -841,11 +938,13 @@ impl AppFrame {
 
         match event {
             TextInputEvent::ContentChanged => {
-                if matches!(target, TextEditTarget::Save { .. })
-                    && let Some(edit) = self
-                        .text_edit
-                        .as_mut()
-                        .filter(|edit| edit.target == target && edit.input == *input)
+                if matches!(
+                    target,
+                    TextEditTarget::Save { .. } | TextEditTarget::STG { .. }
+                ) && let Some(edit) = self
+                    .text_edit
+                    .as_mut()
+                    .filter(|edit| edit.target == target && edit.input == *input)
                 {
                     edit.validation_error = None;
                 }
@@ -855,6 +954,16 @@ impl AppFrame {
                 window.focus(&self.focus);
             }
             TextInputEvent::Commit(value) => {
+                if !self.text_edit_target_is_current(target) {
+                    self.cancel_property_edit();
+                    self.notices.replace(
+                        NoticeSource::Workspace,
+                        Notice::info("The STG field changed; edit canceled"),
+                    );
+                    window.focus(&self.focus);
+                    cx.notify();
+                    return;
+                }
                 let (document, edit) = target.document_edit(value.clone());
                 match self.workspace.apply(document, edit) {
                     Ok(outcome) => {
@@ -866,7 +975,10 @@ impl AppFrame {
                         window.focus(&self.focus);
                     }
                     Err(error) => {
-                        if matches!(target, TextEditTarget::Save { .. }) {
+                        if matches!(
+                            target,
+                            TextEditTarget::Save { .. } | TextEditTarget::STG { .. }
+                        ) {
                             if let Some(edit) = self
                                 .text_edit
                                 .as_mut()
@@ -894,8 +1006,10 @@ impl AppFrame {
                             TextEditTarget::Skill { .. } => {
                                 format!("Could not update {}", target.format_name())
                             }
-                            TextEditTarget::Save { .. } => {
-                                unreachable!("save text errors stay attached to their active input")
+                            TextEditTarget::Save { .. } | TextEditTarget::STG { .. } => {
+                                unreachable!(
+                                    "save and STG text errors stay attached to their active input"
+                                )
                             }
                         };
                         self.notices
@@ -905,6 +1019,12 @@ impl AppFrame {
             }
         }
         cx.notify();
+    }
+
+    fn text_edit_target_is_current(&self, target: TextEditTarget) -> bool {
+        target.stg_binding().is_none_or(|(binding, stg_target)| {
+            self.stg_scalar_binding_is_current(binding, STGDraftTarget::Text(stg_target))
+        })
     }
 
     fn set_skill_type(
@@ -1166,9 +1286,17 @@ impl AppFrame {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.number_edit.is_none() || !self.focus.is_focused(window) {
+        if !self.focus.is_focused(window) {
             return;
         }
+        if self.number_edit.is_some() {
+            self.handle_number_key_down(event, cx);
+        } else if self.float_edit.is_some() {
+            self.handle_float_key_down(event, cx);
+        }
+    }
+
+    fn handle_number_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let Some(command) = number_command(event) else {
             return;
         };
@@ -1193,6 +1321,35 @@ impl AppFrame {
                 .replace(NoticeSource::Editor, invalid_number_notice()),
             NumberOutcome::Cancel => self.cancel_property_edit(),
             NumberOutcome::Commit(value) => self.commit_number_edit(value, cx),
+        }
+        cx.notify();
+    }
+
+    fn handle_float_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let Some(command) = float_command(event) else {
+            return;
+        };
+        cx.stop_propagation();
+
+        let outcome = self
+            .float_edit
+            .as_mut()
+            .map_or(FloatOutcome::Cancel, |edit| edit.editor.apply(command));
+        match outcome {
+            FloatOutcome::Continue => {
+                if self
+                    .float_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.editor.is_valid())
+                {
+                    clear_editor_notice(&mut self.notices);
+                }
+            }
+            FloatOutcome::Invalid => self
+                .notices
+                .replace(NoticeSource::Editor, invalid_float_notice()),
+            FloatOutcome::Cancel => self.cancel_property_edit(),
+            FloatOutcome::Commit(value) => self.commit_float_edit(value, cx),
         }
         cx.notify();
     }
@@ -1255,6 +1412,16 @@ impl AppFrame {
             return;
         };
         let target = edit.target;
+        if let Some((binding, stg_target)) = target.stg_binding()
+            && !self.stg_scalar_binding_is_current(binding, STGDraftTarget::Number(stg_target))
+        {
+            self.cancel_property_edit();
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("The STG field changed; edit canceled"),
+            );
+            return;
+        }
         let (document, document_edit) = match target.document_edit(value) {
             Ok(edit) => edit,
             Err(error) => {
@@ -1285,6 +1452,40 @@ impl AppFrame {
                     ),
                 );
             }
+        }
+    }
+
+    fn commit_float_edit(&mut self, value: STGFloatValue, cx: &mut Context<Self>) {
+        let Some((binding, target)) = self
+            .float_edit
+            .as_ref()
+            .map(|edit| (edit.binding, edit.target))
+        else {
+            return;
+        };
+        if !self.stg_scalar_binding_is_current(binding, STGDraftTarget::Float(target)) {
+            self.cancel_property_edit();
+            self.notices.replace(
+                NoticeSource::Workspace,
+                Notice::info("The STG field changed; edit canceled"),
+            );
+            return;
+        }
+        match self.workspace.apply(
+            binding.document,
+            DocumentEdit::SetSTGFloat { target, value },
+        ) {
+            Ok(outcome) => {
+                if outcome == ApplyOutcome::Changed {
+                    self.document_did_mutate(binding.document, cx);
+                }
+                self.cancel_property_edit();
+                self.notices.clear(NoticeSource::Editor);
+            }
+            Err(error) => self.notices.replace(
+                NoticeSource::Editor,
+                Notice::editor_error("Could not update Crusaders STG", &error),
+            ),
         }
     }
 
@@ -2684,6 +2885,22 @@ fn number_command(event: &KeyDownEvent) -> Option<NumberCommand> {
     }
 }
 
+fn float_command(event: &KeyDownEvent) -> Option<FloatCommand> {
+    match event.keystroke.key.as_str() {
+        "enter" => Some(FloatCommand::Commit),
+        "escape" => Some(FloatCommand::Cancel),
+        "backspace" => Some(FloatCommand::Backspace),
+        _ => {
+            let mut characters = event.keystroke.key_char.as_deref()?.chars();
+            let character = characters.next()?;
+            characters
+                .next()
+                .is_none()
+                .then_some(FloatCommand::Insert(character))
+        }
+    }
+}
+
 impl Focusable for AppFrame {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -2718,6 +2935,7 @@ impl Render for AppFrame {
             .on_action(cx.listener(Self::undo_action))
             .on_action(cx.listener(Self::redo_action))
             .on_action(cx.listener(Self::set_save_choice))
+            .on_action(cx.listener(Self::set_stg_choice))
             .child(self.top_bar(cx))
             .children(self.notice_bar())
             .child(
