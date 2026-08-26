@@ -413,6 +413,11 @@ impl TextInput {
         self.focus_handle.clone()
     }
 
+    pub(crate) fn with_tab_stop(mut self) -> Self {
+        self.focus_handle = self.focus_handle.tab_index(0).tab_stop(true);
+        self
+    }
+
     pub(crate) fn content(&self) -> &str {
         self.buffer.content()
     }
@@ -836,6 +841,7 @@ impl Element for TextElement {
 impl Render for TextInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let selector = self.element_id.clone();
+        let focus_border = self.colors.cursor;
         div()
             .id(self.element_id.clone())
             .debug_selector(move || selector.to_string())
@@ -849,6 +855,7 @@ impl Render for TextInput {
             .rounded_md()
             .border_1()
             .border_color(self.colors.border)
+            .focus(move |style| style.border_color(focus_border))
             .bg(self.colors.background)
             .text_color(self.colors.text)
             .text_size(px(14.0))

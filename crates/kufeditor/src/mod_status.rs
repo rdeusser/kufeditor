@@ -3,7 +3,7 @@ use std::error::Error;
 use kufeditor_game::Game;
 use kufeditor_mods::{
     BackupID, BackupInfo, InstallationID, InstalledMod, InstalledModStatus, ModError, ModPackageID,
-    ModPackageInfo, ModProgressPhase, OperationID, RelativeGamePath,
+    ModPackageInfo, ModProgress, ModProgressPhase, OperationID, RelativeGamePath,
 };
 
 use crate::state::RequestID;
@@ -290,13 +290,15 @@ pub(crate) struct ModCreateDraft {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the read-only Mods slice reserves every operation identity for Task 9"
-    )
-)]
+pub(crate) enum ModCreateField {
+    Name,
+    Version,
+    Author,
+    Description,
+    BackupLabel,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ModOperationKind {
     Import,
     Create,
@@ -323,10 +325,33 @@ impl ModOperationKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModPromptKind {
+    Import,
+    SelectFiles,
+    Export,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModOperationTarget {
+    Package(ModPackageID),
+    Installation(InstallationID),
+    Backup(BackupID),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ModPendingConfirmation {
     pub(crate) operation: ModOperationKind,
+    pub(crate) target: ModOperationTarget,
     pub(crate) subject: String,
+    pub(crate) consequence: String,
+    pub(crate) key: ModRequestKey,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ModOperationLaunch {
+    pub(crate) kind: ModOperationKind,
+    pub(crate) target: Option<ModOperationTarget>,
     pub(crate) key: ModRequestKey,
 }
 
@@ -337,6 +362,7 @@ pub(crate) struct ModProgressSnapshot {
     pub(crate) completed: u64,
     pub(crate) total: u64,
     pub(crate) path: Option<RelativeGamePath>,
+    pub(crate) can_cancel: bool,
     pub(crate) cancel_requested: bool,
 }
 
@@ -350,7 +376,6 @@ struct ActiveModOperation {
 pub(crate) enum ModContextChange {
     Unchanged,
     Changed,
-    BlockedByOperation,
 }
 
 #[derive(Debug)]
@@ -361,6 +386,7 @@ pub(crate) struct ModPresentationState {
     library_revision: u64,
     next_request_id: u64,
     active_scan: Option<(ModRequestKey, ModScanScope)>,
+    active_prompt: Option<(ModPromptKind, ModRequestKey)>,
     library_state: ModLibraryState,
     root_state: ModRootState,
     selected_package: Option<ModPackageID>,
@@ -382,6 +408,7 @@ impl Default for ModPresentationState {
             library_revision: 0,
             next_request_id: 0,
             active_scan: None,
+            active_prompt: None,
             library_state: ModLibraryState::Idle,
             root_state: ModRootState::Idle,
             selected_package: None,
@@ -439,32 +466,67 @@ impl ModPresentationState {
         self.selected_backup
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Task 9 wires row selection to GPUI actions")
-    )]
+    pub(crate) fn package(&self, package_id: ModPackageID) -> Option<&ModPackageSnapshot> {
+        let ModLibraryState::Ready(library) = &self.library_state else {
+            return None;
+        };
+        library
+            .rows
+            .iter()
+            .find(|package| package.package_id == package_id)
+    }
+
+    pub(crate) fn installation(
+        &self,
+        installation_id: InstallationID,
+    ) -> Option<&InstalledModSnapshot> {
+        let ModRootState::Ready { installations, .. } = &self.root_state else {
+            return None;
+        };
+        installations
+            .rows
+            .iter()
+            .find(|installed| installed.installation_id == installation_id)
+    }
+
+    pub(crate) fn backup(&self, backup_id: BackupID) -> Option<&BackupSnapshot> {
+        let ModRootState::Ready { backups, .. } = &self.root_state else {
+            return None;
+        };
+        backups
+            .rows
+            .iter()
+            .find(|backup| backup.backup_id == backup_id)
+    }
+
     pub(crate) fn select_package(&mut self, package: Option<ModPackageID>) {
         self.selected_package = package;
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Task 9 wires row selection to GPUI actions")
-    )]
     pub(crate) fn select_installation(&mut self, installation: Option<InstallationID>) {
         self.selected_installation = installation;
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Task 9 wires row selection to GPUI actions")
-    )]
     pub(crate) fn select_backup(&mut self, backup: Option<BackupID>) {
         self.selected_backup = backup;
     }
 
     pub(crate) const fn create_draft(&self) -> &ModCreateDraft {
         &self.create_draft
+    }
+
+    pub(crate) fn set_create_field(&mut self, field: ModCreateField, value: String) {
+        match field {
+            ModCreateField::Name => self.create_draft.name = value,
+            ModCreateField::Version => self.create_draft.version = value,
+            ModCreateField::Author => self.create_draft.author = value,
+            ModCreateField::Description => self.create_draft.description = value,
+            ModCreateField::BackupLabel => self.create_draft.backup_label = value,
+        }
+    }
+
+    pub(crate) fn set_create_files(&mut self, files: Vec<RelativeGamePath>) {
+        self.create_draft.files = files;
     }
 
     pub(crate) const fn pending_confirmation(&self) -> Option<&ModPendingConfirmation> {
@@ -493,6 +555,8 @@ impl ModPresentationState {
     ) -> ModRequestKey {
         let key = self.next_key();
         self.active_scan = Some((key, scope));
+        self.active_prompt = None;
+        self.pending_confirmation = None;
         self.library_state = ModLibraryState::Loading;
         if scope == ModScanScope::Full {
             self.root_state = if root_configured {
@@ -544,54 +608,157 @@ impl ModPresentationState {
         if self.game == game && self.root_revision == root_revision {
             return ModContextChange::Unchanged;
         }
-        if self.active_operation.is_some() {
-            return ModContextChange::BlockedByOperation;
-        }
         self.game = game;
         self.root_revision = root_revision;
         self.active_scan = None;
+        self.active_prompt = None;
         self.library_state = ModLibraryState::Idle;
         self.root_state = ModRootState::Idle;
         self.selected_installation = None;
         self.selected_backup = None;
         self.pending_confirmation = None;
+        self.progress = None;
+        self.active_operation = None;
+        self.operation_issues.clear();
         ModContextChange::Changed
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Task 9 increments the library revision after package mutations"
-        )
-    )]
     pub(crate) fn library_changed(&mut self) -> u64 {
         self.library_revision = self.library_revision.wrapping_add(1);
         self.active_scan = None;
+        self.active_prompt = None;
         self.library_state = ModLibraryState::Idle;
         self.selected_package = None;
         self.pending_confirmation = None;
+        self.progress = None;
+        self.active_operation = None;
         self.library_revision
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Task 9 launches destructive mod operations")
-    )]
+    pub(crate) fn begin_prompt(&mut self, kind: ModPromptKind) -> Option<ModRequestKey> {
+        if self.active_operation.is_some() {
+            return None;
+        }
+        let key = self.next_key();
+        self.active_scan = None;
+        self.active_prompt = Some((kind, key));
+        self.pending_confirmation = None;
+        Some(key)
+    }
+
+    pub(crate) fn finish_prompt(&mut self, kind: ModPromptKind, key: ModRequestKey) -> bool {
+        if self.active_prompt != Some((kind, key)) || !self.key_is_current(key) {
+            return false;
+        }
+        self.active_prompt = None;
+        true
+    }
+
+    pub(crate) fn begin_confirmation(
+        &mut self,
+        operation: ModOperationKind,
+        target: ModOperationTarget,
+        subject: impl Into<String>,
+        consequence: impl Into<String>,
+    ) -> Option<ModRequestKey> {
+        if self.active_operation.is_some() {
+            return None;
+        }
+        let key = self.next_key();
+        self.active_scan = None;
+        self.active_prompt = None;
+        self.pending_confirmation = Some(ModPendingConfirmation {
+            operation,
+            target,
+            subject: subject.into(),
+            consequence: consequence.into(),
+            key,
+        });
+        Some(key)
+    }
+
+    pub(crate) fn dismiss_confirmation(&mut self) -> bool {
+        self.pending_confirmation.take().is_some()
+    }
+
+    pub(crate) fn confirm_operation(&mut self) -> Option<ModOperationLaunch> {
+        let pending = self.pending_confirmation.as_ref()?;
+        if self.active_operation.is_some() || !self.key_is_current(pending.key) {
+            self.pending_confirmation = None;
+            return None;
+        }
+        let launch = ModOperationLaunch {
+            kind: pending.operation,
+            target: Some(pending.target),
+            key: pending.key,
+        };
+        self.pending_confirmation = None;
+        self.active_operation = Some(ActiveModOperation {
+            kind: launch.kind,
+            key: launch.key,
+        });
+        self.progress = None;
+        self.operation_issues.clear();
+        Some(launch)
+    }
+
     pub(crate) fn begin_operation(&mut self, kind: ModOperationKind) -> Option<ModRequestKey> {
         if self.active_operation.is_some() {
             return None;
         }
         let key = self.next_key();
         self.active_scan = None;
+        self.active_prompt = None;
+        self.pending_confirmation = None;
         self.active_operation = Some(ActiveModOperation { kind, key });
+        self.progress = None;
+        self.operation_issues.clear();
         Some(key)
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Task 9 completes destructive mod operations")
-    )]
+    pub(crate) fn update_progress(&mut self, key: ModRequestKey, progress: &ModProgress) -> bool {
+        let Some(operation) = self.active_operation else {
+            return false;
+        };
+        if operation.key != key || !self.key_is_current(key) {
+            return false;
+        }
+        if self.progress.as_ref().is_some_and(|current| {
+            let current_phase = progress_phase_order(current.phase);
+            let next_phase = progress_phase_order(progress.phase);
+            next_phase < current_phase
+                || (next_phase == current_phase && progress.completed < current.completed)
+        }) {
+            return false;
+        }
+        let cancel_requested = self
+            .progress
+            .as_ref()
+            .is_some_and(|current| current.cancel_requested);
+        self.progress = Some(ModProgressSnapshot {
+            operation: operation.kind,
+            phase: progress.phase,
+            completed: progress.completed,
+            total: progress.total,
+            path: progress.path.clone(),
+            can_cancel: progress_phase_allows_cancel(progress.phase) && !cancel_requested,
+            cancel_requested,
+        });
+        true
+    }
+
+    pub(crate) fn request_cancellation(&mut self) -> bool {
+        let Some(progress) = self.progress.as_mut() else {
+            return false;
+        };
+        if !progress.can_cancel || progress.cancel_requested {
+            return false;
+        }
+        progress.cancel_requested = true;
+        progress.can_cancel = false;
+        true
+    }
+
     pub(crate) fn finish_operation(&mut self, key: ModRequestKey) -> bool {
         if !matches!(self.active_operation, Some(operation) if operation.key == key)
             || !self.key_is_current(key)
@@ -600,6 +767,14 @@ impl ModPresentationState {
         }
         self.active_operation = None;
         self.progress = None;
+        true
+    }
+
+    pub(crate) fn fail_operation(&mut self, key: ModRequestKey, issue: ModIssueSnapshot) -> bool {
+        if !self.finish_operation(key) {
+            return false;
+        }
+        self.operation_issues.push(issue);
         true
     }
 
@@ -614,7 +789,8 @@ impl ModPresentationState {
     }
 
     fn key_is_current(&self, key: ModRequestKey) -> bool {
-        key.game == self.game
+        key.request.get() == self.next_request_id
+            && key.game == self.game
             && key.root_revision == self.root_revision
             && key.library_revision == self.library_revision
     }
@@ -691,18 +867,55 @@ fn recovery_paths(error: &ModError) -> Vec<String> {
         .collect()
 }
 
+const fn progress_phase_order(phase: ModProgressPhase) -> u8 {
+    match phase {
+        ModProgressPhase::InspectingPackage => 0,
+        ModProgressPhase::CopyingPackage => 1,
+        ModProgressPhase::CreatingPackage => 2,
+        ModProgressPhase::PublishingPackage => 3,
+        ModProgressPhase::PlanningApply => 4,
+        ModProgressPhase::StagingFiles => 5,
+        ModProgressPhase::CreatingRecovery => 6,
+        ModProgressPhase::CommittingFiles => 7,
+        ModProgressPhase::PublishingInstallation => 8,
+        ModProgressPhase::PlanningUninstall => 9,
+        ModProgressPhase::StagingUninstall => 10,
+        ModProgressPhase::RestoringFiles => 11,
+        ModProgressPhase::PublishingUninstall => 12,
+        ModProgressPhase::ScanningBackup => 13,
+        ModProgressPhase::CopyingBackup => 14,
+        ModProgressPhase::PublishingBackup => 15,
+        ModProgressPhase::StagingBackupRestore => 16,
+        ModProgressPhase::CreatingRestoreRecovery => 17,
+        ModProgressPhase::RestoringBackup => 18,
+        ModProgressPhase::RollingBack => 19,
+    }
+}
+
+pub(crate) const fn progress_phase_allows_cancel(phase: ModProgressPhase) -> bool {
+    !matches!(
+        phase,
+        ModProgressPhase::PublishingPackage
+            | ModProgressPhase::PublishingInstallation
+            | ModProgressPhase::PublishingUninstall
+            | ModProgressPhase::PublishingBackup
+            | ModProgressPhase::RollingBack
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use kufeditor_game::Game;
     use kufeditor_mods::{
-        BackupID, InstallationID, InstalledModStatus, ModLimits, ModPackageID, OperationID,
-        RelativeGamePath,
+        BackupID, InstallationID, InstalledModStatus, ModLimits, ModPackageID, ModProgress,
+        ModProgressPhase, OperationID, RelativeGamePath,
     };
 
     use super::{
         BackupSnapshot, InstalledModSnapshot, ModCollectionSnapshot, ModContextChange,
-        ModIssueScope, ModLibraryState, ModOperationKind, ModPackageSnapshot, ModPresentationState,
-        ModRootCompletion, ModRootState, ModScanCompletion, ModScanScope, ModSection,
+        ModIssueScope, ModLibraryState, ModOperationKind, ModOperationTarget, ModPackageSnapshot,
+        ModPresentationState, ModPromptKind, ModRootCompletion, ModRootState, ModScanCompletion,
+        ModScanScope, ModSection,
     };
 
     #[test]
@@ -803,7 +1016,7 @@ mod tests {
     }
 
     #[test]
-    fn only_one_destructive_operation_can_own_the_context() {
+    fn only_one_destructive_operation_can_own_the_context_until_it_changes() {
         let mut state = ModPresentationState::default();
         let operation = state
             .begin_operation(ModOperationKind::Apply)
@@ -812,10 +1025,10 @@ mod tests {
         assert!(state.begin_operation(ModOperationKind::Uninstall).is_none());
         assert_eq!(
             state.set_context(Game::Heroes, 1),
-            ModContextChange::BlockedByOperation
+            ModContextChange::Changed
         );
         assert!(!state.finish_operation(operation.with_request_offset(1)));
-        assert!(state.finish_operation(operation));
+        assert!(!state.finish_operation(operation));
         assert!(state.begin_operation(ModOperationKind::Uninstall).is_some());
     }
 
@@ -844,6 +1057,109 @@ mod tests {
         assert!(ModIssueScope::Root.belongs_to(ModSection::Installed));
         assert!(ModIssueScope::Root.belongs_to(ModSection::Backups));
         assert!(ModIssueScope::Operation.belongs_to(ModSection::Create));
+    }
+
+    #[test]
+    fn mods_stale_prompts_and_confirmations_require_the_exact_current_key() {
+        let mut state = ModPresentationState::default();
+        let first = state
+            .begin_prompt(ModPromptKind::Import)
+            .expect("the first prompt should start");
+        let second = state
+            .begin_prompt(ModPromptKind::Import)
+            .expect("a newer prompt should supersede the first");
+        assert!(!state.finish_prompt(ModPromptKind::Import, first));
+        assert!(state.finish_prompt(ModPromptKind::Import, second));
+
+        let package_id = ModPackageID::parse(&"a".repeat(64)).unwrap();
+        let confirmation = state
+            .begin_confirmation(
+                ModOperationKind::Apply,
+                ModOperationTarget::Package(package_id),
+                "Alpha 1.0",
+                "Replace its owned game files.",
+            )
+            .expect("the confirmation should open");
+        assert_eq!(
+            state.pending_confirmation().map(|pending| pending.key),
+            Some(confirmation)
+        );
+        assert_eq!(state.library_changed(), 1);
+        assert!(state.confirm_operation().is_none());
+
+        let prompt = state
+            .begin_prompt(ModPromptKind::SelectFiles)
+            .expect("the file prompt should start");
+        assert_eq!(
+            state.set_context(Game::Heroes, 3),
+            ModContextChange::Changed
+        );
+        assert!(!state.finish_prompt(ModPromptKind::SelectFiles, prompt));
+    }
+
+    #[test]
+    fn mods_actions_confirm_stable_targets_and_track_bounded_progress() {
+        let mut state = ModPresentationState::default();
+        let installation_id = InstallationID::parse(&"b".repeat(64)).unwrap();
+        state
+            .begin_confirmation(
+                ModOperationKind::Uninstall,
+                ModOperationTarget::Installation(installation_id),
+                "Bravo 1.0",
+                "Restore its before-images and remove its installation record.",
+            )
+            .expect("the confirmation should open");
+        let launch = state
+            .confirm_operation()
+            .expect("the exact confirmation should launch");
+        assert_eq!(launch.kind, ModOperationKind::Uninstall);
+        assert_eq!(
+            launch.target,
+            Some(ModOperationTarget::Installation(installation_id))
+        );
+
+        assert!(state.update_progress(
+            launch.key,
+            &ModProgress {
+                phase: ModProgressPhase::StagingUninstall,
+                completed: 5,
+                total: 10,
+                path: None,
+            },
+        ));
+        assert!(!state.update_progress(
+            launch.key,
+            &ModProgress {
+                phase: ModProgressPhase::StagingUninstall,
+                completed: 4,
+                total: 10,
+                path: None,
+            },
+        ));
+        assert!(state.progress().is_some_and(|progress| progress.can_cancel));
+        assert!(state.request_cancellation());
+        assert!(
+            state
+                .progress()
+                .is_some_and(|progress| progress.cancel_requested)
+        );
+
+        assert!(state.update_progress(
+            launch.key,
+            &ModProgress {
+                phase: ModProgressPhase::PublishingUninstall,
+                completed: 0,
+                total: 1,
+                path: None,
+            },
+        ));
+        assert!(
+            state
+                .progress()
+                .is_some_and(|progress| !progress.can_cancel)
+        );
+        assert!(!state.request_cancellation());
+        assert!(state.finish_operation(launch.key));
     }
 
     fn ready_completion(

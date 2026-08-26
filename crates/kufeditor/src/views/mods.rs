@@ -1,9 +1,11 @@
 use gpui::{AnyElement, Context, Div, FocusHandle, SharedString, Stateful, div, prelude::*, px};
-use kufeditor_mods::{InstalledModStatus, ModProgressPhase};
+use kufeditor_mods::{
+    BackupID, InstallationID, InstalledModStatus, ModPackageID, ModProgressPhase,
+};
 
 use crate::{
     components,
-    frame::AppFrame,
+    frame::{AppFrame, mods::ModFormInputs},
     mod_status::{
         BackupSnapshot, InstalledModSnapshot, ModIssueSnapshot, ModLibraryState,
         ModPackageSnapshot, ModPresentationState, ModRootState, ModSection,
@@ -65,6 +67,7 @@ pub(crate) enum ModContentState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct InstalledRowModel {
+    pub(crate) installation_id: InstallationID,
     pub(crate) element_id: String,
     pub(crate) selected: bool,
     pub(crate) name: String,
@@ -77,6 +80,7 @@ pub(crate) struct InstalledRowModel {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LibraryRowModel {
+    pub(crate) package_id: ModPackageID,
     pub(crate) element_id: String,
     pub(crate) selected: bool,
     pub(crate) name: String,
@@ -85,11 +89,13 @@ pub(crate) struct LibraryRowModel {
     pub(crate) author: Option<String>,
     pub(crate) description: Option<String>,
     pub(crate) secondary: String,
-    pub(crate) action: ModActionAvailability,
+    pub(crate) apply: ModActionAvailability,
+    pub(crate) remove: ModActionAvailability,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct BackupRowModel {
+    pub(crate) backup_id: BackupID,
     pub(crate) element_id: String,
     pub(crate) selected: bool,
     pub(crate) label: String,
@@ -116,13 +122,15 @@ pub(crate) struct ModIssueRowModel {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ModCreateModel {
-    pub(crate) name: String,
-    pub(crate) version: String,
-    pub(crate) author: String,
-    pub(crate) description: String,
-    pub(crate) backup_label: String,
     pub(crate) selected_file_count: usize,
+    pub(crate) select_files: ModActionAvailability,
     pub(crate) export: ModActionAvailability,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ModConfirmationModel {
+    pub(crate) title: String,
+    pub(crate) consequence: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -135,9 +143,10 @@ pub(crate) struct ModViewModel {
     pub(crate) rows: Vec<ModRowModel>,
     pub(crate) issues: Vec<ModIssueRowModel>,
     pub(crate) import_action: ModActionAvailability,
+    pub(crate) create_backup_action: ModActionAvailability,
     pub(crate) create: ModCreateModel,
     pub(crate) active_operation: Option<&'static str>,
-    pub(crate) pending_confirmation: Option<String>,
+    pub(crate) pending_confirmation: Option<ModConfirmationModel>,
     pub(crate) progress: Option<ModProgressModel>,
 }
 
@@ -148,6 +157,7 @@ pub(crate) struct ModProgressModel {
     pub(crate) completed: u64,
     pub(crate) total: u64,
     pub(crate) path: Option<String>,
+    pub(crate) can_cancel: bool,
     pub(crate) cancel_requested: bool,
 }
 
@@ -169,10 +179,21 @@ pub(crate) fn project_mods(state: &ModPresentationState) -> ModViewModel {
             ModActionAvailability::disabled(reason.clone())
         });
     let create_draft = state.create_draft();
-    let export = match (&state.root_state(), operation_reason) {
-        (_, Some(reason)) => ModActionAvailability::disabled(reason),
+    let root_action = match (&state.root_state(), operation_reason.as_ref()) {
+        (_, Some(reason)) => ModActionAvailability::disabled(reason.clone()),
         (ModRootState::Ready { .. }, None) => ModActionAvailability::enabled(),
         (_, None) => ModActionAvailability::disabled(root_requirement(state, ModSection::Create)),
+    };
+    let export = if !root_action.enabled {
+        root_action.clone()
+    } else if create_draft.name.trim().is_empty() {
+        ModActionAvailability::disabled("Enter a package name.")
+    } else if create_draft.version.trim().is_empty() {
+        ModActionAvailability::disabled("Enter a package version.")
+    } else if create_draft.files.is_empty() {
+        ModActionAvailability::disabled("Select at least one game file.")
+    } else {
+        ModActionAvailability::enabled()
     };
     ModViewModel {
         game: state.game().label().to_owned(),
@@ -199,25 +220,24 @@ pub(crate) fn project_mods(state: &ModPresentationState) -> ModViewModel {
         rows,
         issues: issue_rows(state),
         import_action,
+        create_backup_action: root_action.clone(),
         create: ModCreateModel {
-            name: create_draft.name.clone(),
-            version: create_draft.version.clone(),
-            author: create_draft.author.clone(),
-            description: create_draft.description.clone(),
-            backup_label: create_draft.backup_label.clone(),
             selected_file_count: create_draft.files.len(),
+            select_files: root_action,
             export,
         },
         active_operation: state
             .active_operation()
             .map(crate::mod_status::ModOperationKind::label),
         pending_confirmation: state.pending_confirmation().map(|confirmation| {
-            format!(
-                "Confirm {} for {} · request {}",
-                confirmation.operation.label(),
-                confirmation.subject,
-                confirmation.key.request().get()
-            )
+            ModConfirmationModel {
+                title: format!(
+                    "Confirm {} for {}",
+                    confirmation.operation.label(),
+                    confirmation.subject
+                ),
+                consequence: confirmation.consequence.clone(),
+            }
         }),
         progress: state.progress().map(|progress| ModProgressModel {
             operation: progress.operation.label(),
@@ -225,6 +245,7 @@ pub(crate) fn project_mods(state: &ModPresentationState) -> ModViewModel {
             completed: progress.completed,
             total: progress.total,
             path: progress.path.as_ref().map(|path| path.as_str().to_owned()),
+            can_cancel: progress.can_cancel,
             cancel_requested: progress.cancel_requested,
         }),
     }
@@ -317,6 +338,7 @@ fn installed_rows(state: &ModPresentationState) -> Vec<ModRowModel> {
         .iter()
         .map(|installed| {
             ModRowModel::Installed(InstalledRowModel {
+                installation_id: installed.installation_id,
                 element_id: format!("mod-installed-{}", installed.installation_id),
                 selected: state.selected_installation() == Some(installed.installation_id),
                 name: installed.name.clone(),
@@ -373,6 +395,7 @@ fn library_rows(state: &ModPresentationState) -> Vec<ModRowModel> {
         .iter()
         .map(|package| {
             ModRowModel::Library(LibraryRowModel {
+                package_id: package.package_id,
                 element_id: format!("mod-library-{}", package.package_id),
                 selected: state.selected_package() == Some(package.package_id),
                 name: package.name.clone(),
@@ -386,7 +409,8 @@ fn library_rows(state: &ModPresentationState) -> Vec<ModRowModel> {
                     byte_count(package.compressed_bytes),
                     byte_count(package.uncompressed_bytes)
                 ),
-                action: package_action(state, package),
+                apply: package_action(state, package),
+                remove: package_removal_action(state, package),
             })
         })
         .collect()
@@ -435,6 +459,29 @@ fn package_action(
     ModActionAvailability::enabled()
 }
 
+fn package_removal_action(
+    state: &ModPresentationState,
+    package: &ModPackageSnapshot,
+) -> ModActionAvailability {
+    if let Some(operation) = state.active_operation() {
+        return ModActionAvailability::disabled(format!(
+            "{} is already running.",
+            operation.label()
+        ));
+    }
+    if let ModRootState::Ready { installations, .. } = state.root_state()
+        && installations
+            .rows
+            .iter()
+            .any(|installed| installed.package_id == package.package_id)
+    {
+        return ModActionAvailability::disabled(
+            "Uninstall this package before removing it from the library.",
+        );
+    }
+    ModActionAvailability::enabled()
+}
+
 fn backup_rows(state: &ModPresentationState) -> Vec<ModRowModel> {
     let ModRootState::Ready { backups, .. } = state.root_state() else {
         return Vec::new();
@@ -457,6 +504,7 @@ fn backup_row(state: &ModPresentationState, backup: &BackupSnapshot) -> BackupRo
                 ))
             });
     BackupRowModel {
+        backup_id: backup.backup_id,
         element_id: format!("mod-backup-{}", backup.backup_id),
         selected: state.selected_backup() == Some(backup.backup_id),
         label: backup
@@ -584,19 +632,74 @@ const fn progress_phase_label(phase: ModProgressPhase) -> &'static str {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ModControlAction {
+    SelectSection(ModSection),
+    Refresh,
+    ImportPackage,
+    SelectInstallation(InstallationID),
+    Uninstall(InstallationID),
+    SelectPackage(ModPackageID),
+    Apply(ModPackageID),
+    RemovePackage(ModPackageID),
+    SelectBackup(BackupID),
+    RestoreBackup(BackupID),
+    DeleteBackup(BackupID),
+    CreateBackup,
+    SelectCreateFiles,
+    ExportPackage,
+    DismissOrCancel,
+    ConfirmOperation,
+}
+
+impl ModControlAction {
+    fn activate(self, frame: &mut AppFrame, cx: &mut Context<AppFrame>) {
+        match self {
+            Self::SelectSection(section) => frame.select_mod_section(section, cx),
+            Self::Refresh => frame.start_mod_scan(cx),
+            Self::ImportPackage => frame.import_mod_package(cx),
+            Self::SelectInstallation(installation_id) => {
+                frame.select_mod_installation(installation_id, cx);
+            }
+            Self::Uninstall(installation_id) => {
+                frame.request_mod_uninstall(installation_id, cx);
+            }
+            Self::SelectPackage(package_id) => frame.select_mod_package(package_id, cx),
+            Self::Apply(package_id) => frame.request_mod_apply(package_id, cx),
+            Self::RemovePackage(package_id) => {
+                frame.request_mod_package_removal(package_id, cx);
+            }
+            Self::SelectBackup(backup_id) => frame.select_mod_backup(backup_id, cx),
+            Self::RestoreBackup(backup_id) => {
+                frame.request_mod_backup_restore(backup_id, cx);
+            }
+            Self::DeleteBackup(backup_id) => {
+                frame.request_mod_backup_deletion(backup_id, cx);
+            }
+            Self::CreateBackup => frame.create_mod_backup(cx),
+            Self::SelectCreateFiles => frame.select_mod_create_files(cx),
+            Self::ExportPackage => frame.export_mod_package(cx),
+            Self::DismissOrCancel => frame.dismiss_or_cancel_mod_operation(cx),
+            Self::ConfirmOperation => frame.confirm_mod_operation(cx),
+        }
+    }
+}
+
 pub(crate) fn render(
     theme: &Theme,
     model: &ModViewModel,
     initial_focus: &FocusHandle,
+    inputs: &ModFormInputs,
     cx: &mut Context<AppFrame>,
 ) -> Stateful<Div> {
     div()
         .id("mods-route")
+        .debug_selector(|| "mods-route".to_owned())
         .size_full()
         .flex()
         .bg(theme.background)
         .child(section_rail(theme, model, initial_focus, cx))
-        .child(route_body(theme, model, cx))
+        .child(route_body(theme, model, inputs, cx))
 }
 
 fn section_rail(
@@ -610,14 +713,21 @@ fn section_rail(
         .iter()
         .map(|section| {
             let target = section.section;
-            components::rail_item(theme, section.element_id, section.label, section.selected)
-                .tab_index(0)
-                .when(target == ModSection::Installed, |item| {
-                    item.track_focus(initial_focus)
-                })
-                .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.select_mod_section(target, cx);
-                }))
+            let selector = section.element_id.to_owned();
+            let item =
+                components::rail_item(theme, section.element_id, section.label, section.selected)
+                    .debug_selector(move || selector)
+                    .tab_index(0)
+                    .focus(move |style| {
+                        style
+                            .border_color(theme.accent)
+                            .bg(theme.accent_dim)
+                            .text_color(theme.accent)
+                    })
+                    .when(target == ModSection::Installed, |item| {
+                        item.track_focus(initial_focus)
+                    });
+            bind_mod_control(item, ModControlAction::SelectSection(target), cx)
         })
         .collect::<Vec<_>>();
     let root = model
@@ -670,11 +780,16 @@ fn section_rail(
         )
 }
 
-fn route_body(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>) -> Stateful<Div> {
+fn route_body(
+    theme: &Theme,
+    model: &ModViewModel,
+    inputs: &ModFormInputs,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
     let rows = model
         .rows
         .iter()
-        .map(|row| render_row(theme, row))
+        .map(|row| render_row(theme, row, cx))
         .collect::<Vec<_>>();
     let issues = model
         .issues
@@ -683,6 +798,7 @@ fn route_body(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>) -
         .collect::<Vec<_>>();
     div()
         .id("mods-scroll")
+        .debug_selector(|| "mods-scroll".to_owned())
         .flex_1()
         .min_w_0()
         .min_h_0()
@@ -701,15 +817,19 @@ fn route_body(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>) -
                     model
                         .pending_confirmation
                         .as_ref()
-                        .map(|confirmation| confirmation_panel(theme, confirmation)),
+                        .map(|confirmation| confirmation_panel(theme, confirmation, cx)),
                 )
                 .children(
                     model
                         .progress
                         .as_ref()
-                        .map(|progress| progress_panel(theme, progress)),
+                        .map(|progress| progress_panel(theme, progress, cx)),
                 )
-                .child(render_content(theme, model, rows))
+                .children(
+                    (model.section == ModSection::Backups)
+                        .then(|| backup_creation_panel(theme, model, inputs, cx)),
+                )
+                .child(render_content(theme, model, rows, inputs, cx))
                 .children((!issues.is_empty()).then(|| {
                     components::surface(theme)
                         .w_full()
@@ -729,15 +849,22 @@ fn route_body(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>) -
 }
 
 fn route_header(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>) -> Div {
-    let import = availability_button(
+    let import = mod_action_button(
         theme,
         "mods-import-package".to_owned(),
         "Import ZIP",
         &model.import_action,
+        ModControlAction::ImportPackage,
+        cx,
     );
-    let refresh = components::toolbar_button(theme, "mods-refresh", "Refresh", true)
-        .tab_index(0)
-        .on_click(cx.listener(|frame, _, _, cx| frame.start_mod_scan(cx)));
+    let refresh = mod_action_button(
+        theme,
+        "mods-refresh".to_owned(),
+        "Refresh",
+        &ModActionAvailability::enabled(),
+        ModControlAction::Refresh,
+        cx,
+    );
     div()
         .w_full()
         .flex()
@@ -781,17 +908,69 @@ fn route_header(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>)
         )
 }
 
-fn confirmation_panel(theme: &Theme, confirmation: &str) -> Div {
+fn confirmation_panel(
+    theme: &Theme,
+    confirmation: &ModConfirmationModel,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
     components::surface(theme)
+        .id("mods-confirmation")
+        .debug_selector(|| "mods-confirmation".to_owned())
         .w_full()
-        .p(px(14.0))
+        .p(px(16.0))
         .border_color(theme.accent)
-        .text_color(theme.text)
-        .child(confirmation.to_owned())
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .child(
+            div()
+                .text_color(theme.text)
+                .text_size(px(16.0))
+                .child(confirmation.title.clone()),
+        )
+        .child(
+            div()
+                .text_color(theme.text_dim)
+                .child(confirmation.consequence.clone()),
+        )
+        .child(
+            div()
+                .flex()
+                .gap(px(8.0))
+                .child(mod_action_button(
+                    theme,
+                    "mods-confirmation-dismiss".to_owned(),
+                    "Cancel",
+                    &ModActionAvailability::enabled(),
+                    ModControlAction::DismissOrCancel,
+                    cx,
+                ))
+                .child(mod_action_button(
+                    theme,
+                    "mods-confirmation-accept".to_owned(),
+                    "Confirm",
+                    &ModActionAvailability::enabled(),
+                    ModControlAction::ConfirmOperation,
+                    cx,
+                )),
+        )
 }
 
-fn progress_panel(theme: &Theme, progress: &ModProgressModel) -> Div {
+fn progress_panel(
+    theme: &Theme,
+    progress: &ModProgressModel,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
+    let cancel = if progress.can_cancel {
+        ModActionAvailability::enabled()
+    } else if progress.cancel_requested {
+        ModActionAvailability::disabled("Cancellation was requested.")
+    } else {
+        ModActionAvailability::disabled("This phase must finish without interruption.")
+    };
     components::surface(theme)
+        .id("mods-progress")
+        .debug_selector(|| "mods-progress".to_owned())
         .w_full()
         .p(px(16.0))
         .flex()
@@ -821,9 +1000,67 @@ fn progress_panel(theme: &Theme, progress: &ModProgressModel) -> Div {
                 .text_color(theme.accent)
                 .child("Cancellation requested")
         }))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(mod_action_button(
+                    theme,
+                    "mods-progress-cancel".to_owned(),
+                    "Cancel operation",
+                    &cancel,
+                    ModControlAction::DismissOrCancel,
+                    cx,
+                ))
+                .children(cancel.reason.map(|reason| {
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(theme.text_dim)
+                        .child(reason)
+                })),
+        )
 }
 
-fn render_content(theme: &Theme, model: &ModViewModel, rows: Vec<AnyElement>) -> Div {
+fn backup_creation_panel(
+    theme: &Theme,
+    model: &ModViewModel,
+    inputs: &ModFormInputs,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
+    components::surface(theme)
+        .id("mods-backup-create")
+        .debug_selector(|| "mods-backup-create".to_owned())
+        .w_full()
+        .p(px(16.0))
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .child(status_title(theme, "Create a full backup"))
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(theme.text_dim)
+                .child("Optional label"),
+        )
+        .child(inputs.backup_label.clone())
+        .child(mod_action_line(
+            theme,
+            "mods-backup-create-action".to_owned(),
+            "Create backup",
+            &model.create_backup_action,
+            ModControlAction::CreateBackup,
+            cx,
+        ))
+}
+
+fn render_content(
+    theme: &Theme,
+    model: &ModViewModel,
+    rows: Vec<AnyElement>,
+    inputs: &ModFormInputs,
+    cx: &mut Context<AppFrame>,
+) -> Div {
     let surface = components::surface(theme)
         .w_full()
         .p(px(20.0))
@@ -848,101 +1085,151 @@ fn render_content(theme: &Theme, model: &ModViewModel, rows: Vec<AnyElement>) ->
             .child(status_title(theme, title))
             .child(div().text_color(theme.text_dim).child(detail.clone())),
         ModContentState::Ready if model.section == ModSection::Create => {
-            render_create(theme, &model.create)
+            render_create(theme, &model.create, inputs, cx)
         }
         ModContentState::Ready => surface.children(rows),
     }
 }
 
-fn render_row(theme: &Theme, row: &ModRowModel) -> AnyElement {
+fn render_row(theme: &Theme, row: &ModRowModel, cx: &mut Context<AppFrame>) -> AnyElement {
     match row {
-        ModRowModel::Installed(row) => render_installed_row(theme, row).into_any_element(),
-        ModRowModel::Library(row) => render_library_row(theme, row).into_any_element(),
-        ModRowModel::Backup(row) => render_backup_row(theme, row).into_any_element(),
+        ModRowModel::Installed(row) => render_installed_row(theme, row, cx).into_any_element(),
+        ModRowModel::Library(row) => render_library_row(theme, row, cx).into_any_element(),
+        ModRowModel::Backup(row) => render_backup_row(theme, row, cx).into_any_element(),
     }
 }
 
-fn render_installed_row(theme: &Theme, row: &InstalledRowModel) -> Stateful<Div> {
+fn render_installed_row(
+    theme: &Theme,
+    row: &InstalledRowModel,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
     let paths = row.paths.iter().take(3).cloned().collect::<Vec<_>>();
-    row_shell(theme, &row.element_id, row.selected)
-        .child(row_heading(theme, &row.name, &row.version, row.health))
-        .child(
-            div()
-                .text_color(theme.text_dim)
-                .child(row.secondary.clone()),
-        )
-        .children(paths.into_iter().map(|path| {
-            div()
-                .text_size(px(12.0))
-                .text_color(theme.text_dim)
-                .child(path)
-        }))
-        .child(availability_line(
-            theme,
-            format!("{}-uninstall", row.element_id),
-            "Uninstall",
-            &row.action,
-        ))
+    bind_mod_control(
+        row_shell(theme, &row.element_id, row.selected),
+        ModControlAction::SelectInstallation(row.installation_id),
+        cx,
+    )
+    .child(row_heading(theme, &row.name, &row.version, row.health))
+    .child(
+        div()
+            .text_color(theme.text_dim)
+            .child(row.secondary.clone()),
+    )
+    .children(paths.into_iter().map(|path| {
+        div()
+            .text_size(px(12.0))
+            .text_color(theme.text_dim)
+            .child(path)
+    }))
+    .child(mod_action_line(
+        theme,
+        format!("{}-uninstall", row.element_id),
+        "Uninstall",
+        &row.action,
+        ModControlAction::Uninstall(row.installation_id),
+        cx,
+    ))
 }
 
-fn render_library_row(theme: &Theme, row: &LibraryRowModel) -> Stateful<Div> {
-    row_shell(theme, &row.element_id, row.selected)
-        .child(row_heading(theme, &row.name, &row.version, &row.game))
-        .child(
-            div()
-                .text_color(theme.text_dim)
-                .child(row.secondary.clone()),
-        )
-        .children(row.author.as_ref().map(|author| {
-            div()
-                .text_size(px(12.0))
-                .text_color(theme.text_dim)
-                .child(format!("By {author}"))
-        }))
-        .children(row.description.as_ref().map(|description| {
-            div()
-                .text_size(px(12.0))
-                .text_color(theme.text_dim)
-                .child(description.clone())
-        }))
-        .child(availability_line(
-            theme,
-            format!("{}-apply", row.element_id),
-            "Apply",
-            &row.action,
-        ))
+fn render_library_row(
+    theme: &Theme,
+    row: &LibraryRowModel,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
+    bind_mod_control(
+        row_shell(theme, &row.element_id, row.selected),
+        ModControlAction::SelectPackage(row.package_id),
+        cx,
+    )
+    .child(row_heading(theme, &row.name, &row.version, &row.game))
+    .child(
+        div()
+            .text_color(theme.text_dim)
+            .child(row.secondary.clone()),
+    )
+    .children(row.author.as_ref().map(|author| {
+        div()
+            .text_size(px(12.0))
+            .text_color(theme.text_dim)
+            .child(format!("By {author}"))
+    }))
+    .children(row.description.as_ref().map(|description| {
+        div()
+            .text_size(px(12.0))
+            .text_color(theme.text_dim)
+            .child(description.clone())
+    }))
+    .child(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(mod_action_line(
+                theme,
+                format!("{}-apply", row.element_id),
+                "Apply",
+                &row.apply,
+                ModControlAction::Apply(row.package_id),
+                cx,
+            ))
+            .child(mod_action_line(
+                theme,
+                format!("{}-remove", row.element_id),
+                "Remove from library",
+                &row.remove,
+                ModControlAction::RemovePackage(row.package_id),
+                cx,
+            )),
+    )
 }
 
-fn render_backup_row(theme: &Theme, row: &BackupRowModel) -> Stateful<Div> {
-    row_shell(theme, &row.element_id, row.selected)
-        .child(row_heading(theme, &row.label, "", &row.game))
-        .child(
-            div()
-                .text_color(theme.text_dim)
-                .child(row.secondary.clone()),
-        )
-        .child(
-            div()
-                .flex()
-                .gap(px(8.0))
-                .child(availability_button(
-                    theme,
-                    format!("{}-restore", row.element_id),
-                    "Restore",
-                    &row.restore,
-                ))
-                .child(availability_button(
-                    theme,
-                    format!("{}-delete", row.element_id),
-                    "Delete",
-                    &row.delete,
-                )),
-        )
+fn render_backup_row(
+    theme: &Theme,
+    row: &BackupRowModel,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
+    bind_mod_control(
+        row_shell(theme, &row.element_id, row.selected),
+        ModControlAction::SelectBackup(row.backup_id),
+        cx,
+    )
+    .child(row_heading(theme, &row.label, "", &row.game))
+    .child(
+        div()
+            .text_color(theme.text_dim)
+            .child(row.secondary.clone()),
+    )
+    .child(
+        div()
+            .flex()
+            .gap(px(8.0))
+            .child(mod_action_button(
+                theme,
+                format!("{}-restore", row.element_id),
+                "Restore",
+                &row.restore,
+                ModControlAction::RestoreBackup(row.backup_id),
+                cx,
+            ))
+            .child(mod_action_button(
+                theme,
+                format!("{}-delete", row.element_id),
+                "Delete",
+                &row.delete,
+                ModControlAction::DeleteBackup(row.backup_id),
+                cx,
+            )),
+    )
 }
 
 fn row_shell(theme: &Theme, id: &str, selected: bool) -> Stateful<Div> {
+    let selector = id.to_owned();
+    let hover = theme.surface;
     div()
         .id(SharedString::from(id.to_owned()))
+        .debug_selector(move || selector)
+        .tab_index(0)
         .w_full()
         .p(px(16.0))
         .flex()
@@ -956,6 +1243,9 @@ fn row_shell(theme: &Theme, id: &str, selected: bool) -> Stateful<Div> {
         } else {
             theme.raised
         })
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .focus(move |style| style.border_color(theme.accent).bg(theme.accent_dim))
 }
 
 fn row_heading(theme: &Theme, name: &str, version: &str, badge: &str) -> Div {
@@ -980,17 +1270,19 @@ fn row_heading(theme: &Theme, name: &str, version: &str, badge: &str) -> Div {
         )
 }
 
-fn availability_line(
+fn mod_action_line(
     theme: &Theme,
     id: String,
     label: &'static str,
     action: &ModActionAvailability,
+    command: ModControlAction,
+    cx: &mut Context<AppFrame>,
 ) -> Div {
     div()
         .flex()
         .items_center()
         .gap(px(8.0))
-        .child(availability_button(theme, id, label, action))
+        .child(mod_action_button(theme, id, label, action, command, cx))
         .children(action.reason.as_ref().map(|reason| {
             div()
                 .text_size(px(12.0))
@@ -1006,8 +1298,10 @@ fn availability_button(
     action: &ModActionAvailability,
 ) -> Stateful<Div> {
     let hover = theme.raised;
+    let selector = id.clone();
     div()
         .id(SharedString::from(id))
+        .debug_selector(move || selector)
         .h(px(32.0))
         .px(px(12.0))
         .flex()
@@ -1026,17 +1320,47 @@ fn availability_button(
                 .tab_index(0)
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover))
+                .focus(move |style| style.border_color(theme.accent).bg(theme.accent_dim))
         })
         .when(!action.enabled, |button| button.opacity(0.45))
         .child(label)
 }
 
-fn render_create(theme: &Theme, model: &ModCreateModel) -> Div {
+fn mod_action_button(
+    theme: &Theme,
+    id: String,
+    label: &'static str,
+    availability: &ModActionAvailability,
+    command: ModControlAction,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
+    let button = availability_button(theme, id, label, availability);
+    if availability.enabled {
+        bind_mod_control(button, command, cx)
+    } else {
+        button
+    }
+}
+
+fn bind_mod_control(
+    control: Stateful<Div>,
+    command: ModControlAction,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
+    control.on_click(cx.listener(move |frame, _, _, cx| command.activate(frame, cx)))
+}
+
+fn render_create(
+    theme: &Theme,
+    model: &ModCreateModel,
+    inputs: &ModFormInputs,
+    cx: &mut Context<AppFrame>,
+) -> Div {
     let fields = [
-        ("Name", model.name.as_str(), "Required"),
-        ("Version", model.version.as_str(), "Required"),
-        ("Author", model.author.as_str(), "Optional"),
-        ("Description", model.description.as_str(), "Optional"),
+        ("Name", inputs.name.clone()),
+        ("Version", inputs.version.clone()),
+        ("Author", inputs.author.clone()),
+        ("Description", inputs.description.clone()),
     ];
     components::surface(theme)
         .w_full()
@@ -1044,7 +1368,7 @@ fn render_create(theme: &Theme, model: &ModCreateModel) -> Div {
         .flex()
         .flex_col()
         .gap(px(12.0))
-        .children(fields.into_iter().map(|(label, value, placeholder)| {
+        .children(fields.into_iter().map(|(label, input)| {
             div()
                 .flex()
                 .flex_col()
@@ -1055,38 +1379,28 @@ fn render_create(theme: &Theme, model: &ModCreateModel) -> Div {
                         .text_color(theme.text_dim)
                         .child(label),
                 )
-                .child(
-                    div()
-                        .h(px(38.0))
-                        .px(px(11.0))
-                        .flex()
-                        .items_center()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.raised)
-                        .text_color(if value.is_empty() {
-                            theme.text_dim
-                        } else {
-                            theme.text
-                        })
-                        .child(if value.is_empty() {
-                            placeholder.to_owned()
-                        } else {
-                            value.to_owned()
-                        }),
-                )
+                .child(input)
         }))
         .child(
             div()
                 .text_color(theme.text_dim)
                 .child(format!("{} selected files", model.selected_file_count)),
         )
-        .child(availability_line(
+        .child(mod_action_line(
+            theme,
+            "mods-create-select-files".to_owned(),
+            "Select game files",
+            &model.select_files,
+            ModControlAction::SelectCreateFiles,
+            cx,
+        ))
+        .child(mod_action_line(
             theme,
             "mods-create-export".to_owned(),
             "Export package",
             &model.export,
+            ModControlAction::ExportPackage,
+            cx,
         ))
 }
 
@@ -1280,7 +1594,8 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("shared.sox")
         );
-        assert!(ready.action.enabled);
+        assert!(ready.apply.enabled);
+        assert!(ready.remove.enabled);
         assert_eq!(ready.author.as_deref(), Some("Forgeworks"));
         assert_eq!(
             ready.description.as_deref(),
@@ -1364,7 +1679,7 @@ mod tests {
     }
 
     fn action_reason(row: &super::LibraryRowModel) -> &str {
-        row.action
+        row.apply
             .reason
             .as_deref()
             .expect("expected a disabled-action reason")

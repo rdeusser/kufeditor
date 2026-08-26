@@ -3,7 +3,111 @@
     reason = "controlled save fixture dimensions and offsets make failures fatal"
 )]
 
-use std::mem::size_of;
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    mem::size_of,
+    path::{Path, PathBuf},
+};
+
+use gpui::{Context, PathPromptOptions, Task};
+
+use crate::{
+    frame::{
+        AppFrame,
+        mods::{ModPathPromptResult, ModPathsPromptResult, ModPromptLauncher},
+    },
+    mod_status::ModPromptKind,
+};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ModPathsPromptRequest {
+    pub(crate) kind: ModPromptKind,
+    pub(crate) initial_directory: Option<PathBuf>,
+    pub(crate) files: bool,
+    pub(crate) directories: bool,
+    pub(crate) multiple: bool,
+    pub(crate) prompt: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ModExportPromptRequest {
+    pub(crate) directory: PathBuf,
+    pub(crate) suggested_name: Option<String>,
+}
+
+#[derive(Default)]
+pub(crate) struct ControlledModPromptLauncher {
+    paths_results: RefCell<VecDeque<ModPathsPromptResult>>,
+    export_results: RefCell<VecDeque<ModPathPromptResult>>,
+    paths_requests: RefCell<Vec<ModPathsPromptRequest>>,
+    export_requests: RefCell<Vec<ModExportPromptRequest>>,
+}
+
+impl ControlledModPromptLauncher {
+    pub(crate) fn queue_paths(&self, result: ModPathsPromptResult) {
+        self.paths_results.borrow_mut().push_back(result);
+    }
+
+    pub(crate) fn queue_export(&self, result: ModPathPromptResult) {
+        self.export_results.borrow_mut().push_back(result);
+    }
+
+    pub(crate) fn paths_requests(&self) -> Vec<ModPathsPromptRequest> {
+        self.paths_requests.borrow().clone()
+    }
+
+    pub(crate) fn export_requests(&self) -> Vec<ModExportPromptRequest> {
+        self.export_requests.borrow().clone()
+    }
+}
+
+impl ModPromptLauncher for ControlledModPromptLauncher {
+    fn launch_paths(
+        &self,
+        kind: ModPromptKind,
+        initial_directory: Option<PathBuf>,
+        options: PathPromptOptions,
+        _: &mut Context<AppFrame>,
+    ) -> Task<ModPathsPromptResult> {
+        self.paths_requests
+            .borrow_mut()
+            .push(ModPathsPromptRequest {
+                kind,
+                initial_directory,
+                files: options.files,
+                directories: options.directories,
+                multiple: options.multiple,
+                prompt: options.prompt.map(|prompt| prompt.to_string()),
+            });
+        Task::ready(
+            self.paths_results
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(ModPathsPromptResult::Canceled),
+        )
+    }
+
+    fn launch_export(
+        &self,
+        directory: &Path,
+        suggested_name: Option<&str>,
+        _: &mut Context<AppFrame>,
+    ) -> Task<ModPathPromptResult> {
+        self.export_requests
+            .borrow_mut()
+            .push(ModExportPromptRequest {
+                directory: directory.to_path_buf(),
+                suggested_name: suggested_name.map(ToOwned::to_owned),
+            });
+        Task::ready(
+            self.export_results
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(ModPathPromptResult::Canceled),
+        )
+    }
+}
 
 const CONTEXT_SIZE: usize = 0x438;
 const MAIN_SIZE: usize = 0x154;

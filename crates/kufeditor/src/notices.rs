@@ -121,6 +121,7 @@ pub(crate) enum NoticeSource {
     Browse(Game),
     Discovery,
     Catalog,
+    Mods,
 }
 
 struct NoticeSlot {

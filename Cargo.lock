@@ -2891,6 +2891,7 @@ dependencies = [
 name = "kufeditor"
 version = "0.1.0"
 dependencies = [
+ "async-channel 2.5.0",
  "gpui",
  "kufeditor-game",
  "kufeditor-mods",

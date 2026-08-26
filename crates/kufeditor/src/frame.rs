@@ -2,6 +2,7 @@ use std::{
     cell::Cell,
     path::{Path, PathBuf},
     rc::Rc,
+    sync::{Arc, atomic::AtomicBool},
 };
 
 use gpui::prelude::*;
@@ -48,11 +49,12 @@ mod crusaders_catalog;
 mod discovery;
 #[path = "discovery_status.rs"]
 pub(crate) mod discovery_status;
-mod mods;
+pub(crate) mod mods;
 mod save;
 mod settings;
 mod stg;
 use self::discovery::{BrowsePromptLauncher, PlatformBrowsePromptLauncher};
+use self::mods::{ModFormInputs, ModPromptLauncher, PlatformModPromptLauncher};
 use self::settings::protected_settings_notice;
 
 #[cfg(test)]
@@ -791,6 +793,8 @@ pub struct AppFrame {
     mod_service: ModService,
     mods: ModPresentationState,
     mods_focus: FocusHandle,
+    mod_inputs: ModFormInputs,
+    mod_cancellation: Option<Arc<AtomicBool>>,
     recent_files: kufeditor_workspace::RecentFiles,
     catalog: CatalogSession<NameDictionary, CatalogRequestError>,
     crusaders_catalog: CrusadersCatalogSession,
@@ -806,6 +810,7 @@ pub struct AppFrame {
     open_prompt_launcher: Rc<dyn OpenPromptLauncher>,
     open_path_loader: Rc<dyn OpenPathLoader>,
     browse_prompt_launcher: Rc<dyn BrowsePromptLauncher>,
+    mod_prompt_launcher: Rc<dyn ModPromptLauncher>,
     #[cfg(test)]
     task_launches: TaskLaunchCounts,
 }
@@ -827,6 +832,8 @@ impl AppFrame {
         let mod_service = ModService::new(mod_stores.clone());
         let mut mods = ModPresentationState::default();
         let _ = mods.set_context(active_game, 0);
+        let theme = Theme::forged_steel();
+        let mod_inputs = ModFormInputs::new(&theme, cx);
         let settings = SettingsWritePump::new(path, persistence);
         let mut notices = NoticeCenter::default();
         if let Some(warning) = warning {
@@ -844,7 +851,7 @@ impl AppFrame {
         Self {
             workspace: Workspace::new(),
             shell: ShellState::with_game(active_game),
-            theme: Theme::forged_steel(),
+            theme,
             focus: cx.focus_handle(),
             active_document: None,
             selections: RecordSelections::default(),
@@ -864,6 +871,8 @@ impl AppFrame {
             mod_service,
             mods,
             mods_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            mod_inputs,
+            mod_cancellation: None,
             recent_files,
             catalog: CatalogSession::default(),
             crusaders_catalog: CrusadersCatalogSession::default(),
@@ -879,6 +888,7 @@ impl AppFrame {
             open_prompt_launcher: Rc::new(PlatformOpenPromptLauncher),
             open_path_loader: Rc::new(FileSystemOpenPathLoader),
             browse_prompt_launcher: Rc::new(PlatformBrowsePromptLauncher),
+            mod_prompt_launcher: Rc::new(PlatformModPromptLauncher),
             #[cfg(test)]
             task_launches: TaskLaunchCounts::default(),
         }
@@ -2269,7 +2279,8 @@ impl AppFrame {
             }
             Area::Mods => {
                 let model = views::mods::project_mods(&self.mods);
-                views::mods::render(&self.theme, &model, &self.mods_focus, cx).into_any_element()
+                views::mods::render(&self.theme, &model, &self.mods_focus, &self.mod_inputs, cx)
+                    .into_any_element()
             }
             Area::Patches => views::patches::render(&self.theme).into_any_element(),
             Area::Settings => {
@@ -2973,7 +2984,9 @@ impl Focusable for AppFrame {
 
 impl Render for AppFrame {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let key_context = if self.save_editor_is_visible() {
+        let key_context = if self.shell.area() == Area::Mods {
+            "KufEditor Mods"
+        } else if self.save_editor_is_visible() {
             "KufEditor SaveEditor"
         } else if self.stg_editor_is_visible() {
             "KufEditor STGEditor"
@@ -2996,6 +3009,9 @@ impl Render for AppFrame {
             .on_action(cx.listener(Self::focus_previous_save_control))
             .on_action(cx.listener(Self::focus_next_stg_control))
             .on_action(cx.listener(Self::focus_previous_stg_control))
+            .on_action(cx.listener(Self::focus_next_mod_control))
+            .on_action(cx.listener(Self::focus_previous_mod_control))
+            .on_action(cx.listener(Self::cancel_mod_operation))
             .on_action(cx.listener(Self::open_action))
             .on_action(cx.listener(Self::save_action))
             .on_action(cx.listener(Self::save_all_action))
