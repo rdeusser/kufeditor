@@ -5,6 +5,8 @@ use crate::RelativeGamePath;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModProgressPhase {
     InspectingPackage,
+    CopyingPackage,
+    PublishingPackage,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,4 +19,12 @@ pub struct ModProgress {
 
 pub trait ModProgressReporter {
     fn report(&mut self, progress: &ModProgress) -> ControlFlow<()>;
+}
+
+pub(crate) struct ContinueProgress;
+
+impl ModProgressReporter for ContinueProgress {
+    fn report(&mut self, _: &ModProgress) -> ControlFlow<()> {
+        ControlFlow::Continue(())
+    }
 }

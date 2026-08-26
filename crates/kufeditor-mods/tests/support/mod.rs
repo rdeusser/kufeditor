@@ -4,6 +4,12 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[allow(
+    dead_code,
+    reason = "shared integration support is not used by every test binary"
+)]
+pub mod package;
+
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
 pub struct TestDirectory {

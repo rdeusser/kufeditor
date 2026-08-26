@@ -1,12 +1,18 @@
 //! Mod packages, backups, installation, and restoration.
 
 mod error;
+mod library;
 mod manifest;
+mod package;
 mod path;
 mod progress;
 
-pub use error::{GameRootErrorKind, ManifestErrorKind, ModError, RelativeGamePathErrorKind};
+pub use error::{
+    GameRootErrorKind, ManifestErrorKind, ModError, PackageErrorKind, RelativeGamePathErrorKind,
+};
+pub use library::{ImportedMod, ImportedModDisposition, ModLibraryIssue, ModLibraryScan};
 pub use manifest::{ModManifest, ModMetadata, ModTimestamp};
+pub use package::ModPackageInfo;
 pub use path::{
     BackupID, GameRoot, GameRootKey, ModPackageID, ModStorePaths, OperationID, RelativeGamePath,
 };
@@ -39,5 +45,21 @@ impl Default for ModLimits {
             max_relative_path_bytes: 4_096,
             max_relative_path_components: 128,
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ModService {
+    paths: ModStorePaths,
+    limits: ModLimits,
+}
+
+impl ModService {
+    pub fn new(paths: ModStorePaths) -> Self {
+        Self::with_limits(paths, ModLimits::default())
+    }
+
+    pub const fn with_limits(paths: ModStorePaths, limits: ModLimits) -> Self {
+        Self { paths, limits }
     }
 }
