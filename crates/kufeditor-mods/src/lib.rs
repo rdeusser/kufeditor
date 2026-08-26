@@ -13,9 +13,12 @@ mod transaction;
 pub use error::{
     GameRootErrorKind, InstallationConflictKind, InstalledFileErrorKind, ManifestErrorKind,
     ModError, PackageErrorKind, RegistryErrorKind, RelativeGamePathErrorKind, SourceFileErrorKind,
-    TargetPathErrorKind,
+    TargetPathErrorKind, UninstallErrorKind,
 };
-pub use install::{ApplyModReport, ApplyModRequest};
+pub use install::{
+    ApplyModReport, ApplyModRequest, ChangedInstalledFile, ChangedInstalledFiles,
+    InstalledFileChangeKind, UninstallModReport, UninstallModRequest,
+};
 pub use library::{ImportedMod, ImportedModDisposition, ModLibraryIssue, ModLibraryScan};
 pub use manifest::{ModManifest, ModMetadata, ModTimestamp};
 pub use package::{CreateModRequest, CreatedMod, ModPackageInfo};

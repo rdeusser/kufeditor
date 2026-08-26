@@ -8,19 +8,26 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tempfile::NamedTempFile;
+use tempfile::{Builder as TempBuilder, NamedTempFile};
 use zip::ZipArchive;
 
 use crate::{
-    FileSHA256, GameRoot, GameRootErrorKind, GameRootKey, InstallationID, InstalledFile, ModError,
-    ModLimits, ModPackageID, ModPackageInfo, ModProgress, ModProgressPhase, ModProgressReporter,
+    ChangedInstalledFile, ChangedInstalledFiles, FileSHA256, GameRoot, GameRootErrorKind,
+    GameRootKey, InstallationID, InstalledFile, InstalledFileChangeKind, ModError, ModLimits,
+    ModPackageID, ModPackageInfo, ModProgress, ModProgressPhase, ModProgressReporter,
     ModStorePaths, ModTimestamp, OperationID, PackageErrorKind, RelativeGamePath,
-    TargetPathErrorKind, library::prepare_mod_store_root, manifest::game_name,
-    package::inspect_package, progress::ContinueProgress,
+    TargetPathErrorKind, UninstallErrorKind,
+    library::prepare_mod_store_root,
+    manifest::{game_name, parse_game},
+    package::inspect_package,
+    progress::ContinueProgress,
+    registry::InstallationRecord,
 };
 
 const OPERATION_VERSION: u64 = 1;
+const MAX_OPERATION_BYTES: usize = 16 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 static NEXT_OPERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -653,16 +660,16 @@ impl FileTransaction {
             package_id: self.package_id.to_string(),
             kind: OperationKind::Apply,
             state: self.state,
-            game: game_name(self.root.game()),
+            game: game_name(self.root.game()).to_owned(),
             configured_root: self.root.configured_path().to_string_lossy().into_owned(),
             canonical_root: self.root.canonical_path().to_string_lossy().into_owned(),
             root_key: self.root.key().to_string(),
-            installed_at: self.installed_at.as_str(),
+            installed_at: self.installed_at.as_str().to_owned(),
             files: self
                 .files
                 .iter()
                 .map(|file| OperationFileImage {
-                    path: file.path.as_str(),
+                    path: file.path.as_str().to_owned(),
                     installed_sha256: file.installed_sha256.map(|digest| digest.to_string()),
                     original_existed: file.original_existed,
                     original_sha256: file.original_sha256.map(|digest| digest.to_string()),
@@ -672,7 +679,7 @@ impl FileTransaction {
             created_directories: self
                 .created_directories
                 .iter()
-                .map(RelativeGamePath::as_str)
+                .map(|path| path.as_str().to_owned())
                 .collect(),
         };
         let mut bytes = serde_json::to_vec_pretty(&image).map_err(|error| {
@@ -688,6 +695,724 @@ impl FileTransaction {
             &self.directory.join("operation-v1.json"),
             &bytes,
         )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct UninstallTransaction {
+    root: GameRoot,
+    directory: PathBuf,
+    installation_id: InstallationID,
+    files: Vec<UninstallFile>,
+    created_directories: Vec<RelativeGamePath>,
+    staging_directory: Option<PathBuf>,
+    restored_indices: Vec<usize>,
+    restored_paths: Vec<RelativeGamePath>,
+    removed_paths: Vec<RelativeGamePath>,
+}
+
+#[derive(Debug)]
+struct UninstallFile {
+    path: RelativeGamePath,
+    installed_sha256: FileSHA256,
+    original_existed: bool,
+    original_sha256: Option<FileSHA256>,
+}
+
+impl UninstallTransaction {
+    pub(crate) fn load(
+        stores: &ModStorePaths,
+        root: &GameRoot,
+        record: &InstallationRecord,
+        limits: &ModLimits,
+    ) -> Result<Self, ModError> {
+        let installation_id = record.installation_id;
+        let operations = stores.operations();
+        require_uninstall_directory(&operations, installation_id)?;
+        let directory = operations.join(record.operation_id.to_string());
+        require_uninstall_directory(&directory, installation_id)?;
+        let image_path = directory.join("operation-v1.json");
+        let image = read_operation_image(&image_path, installation_id)?;
+        let (files, mut created_directories) =
+            validate_operation_image(&directory, &image, root, record, limits)?;
+        created_directories.sort_by(|left, right| {
+            left.component_count()
+                .cmp(&right.component_count())
+                .then_with(|| left.portable_key().cmp(right.portable_key()))
+        });
+        Ok(Self {
+            root: root.clone(),
+            directory,
+            installation_id,
+            files,
+            created_directories,
+            staging_directory: None,
+            restored_indices: Vec::new(),
+            restored_paths: Vec::new(),
+            removed_paths: Vec::new(),
+        })
+    }
+
+    pub(crate) fn stage_installed(
+        &mut self,
+        limits: &ModLimits,
+        progress: &mut impl ModProgressReporter,
+    ) -> Result<(), ModError> {
+        let temporary = TempBuilder::new()
+            .prefix("uninstall-")
+            .tempdir_in(&self.directory)
+            .map_err(|error| {
+                ModError::io("create uninstall staging directory", &self.directory, error)
+            })?;
+        let files_root = temporary.path().join("files");
+        create_owned_directory(&files_root, "create uninstall file staging")?;
+        let mut changes = Vec::new();
+        let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
+        for (index, file) in self.files.iter().enumerate() {
+            let inspection = inspect_target(&self.root, &file.path, limits)?;
+            if inspection.exists {
+                let digest = copy_stable_file(
+                    &inspection.target,
+                    &files_root.join(file.path.as_ref()),
+                    limits.max_file_bytes,
+                    "stage installed file for uninstall rollback",
+                )?;
+                if digest != file.installed_sha256 {
+                    changes.push(ChangedInstalledFile::new(
+                        file.path.clone(),
+                        InstalledFileChangeKind::Modified,
+                    ));
+                }
+            } else {
+                changes.push(ChangedInstalledFile::new(
+                    file.path.clone(),
+                    InstalledFileChangeKind::Missing,
+                ));
+            }
+            let completed = u64::try_from(index.saturating_add(1)).unwrap_or(u64::MAX);
+            if progress
+                .report(&ModProgress {
+                    phase: ModProgressPhase::StagingUninstall,
+                    completed,
+                    total,
+                    path: Some(file.path.clone()),
+                })
+                .is_break()
+            {
+                return Err(ModError::Canceled {
+                    operation: "mod uninstall",
+                });
+            }
+        }
+        if !changes.is_empty() {
+            return Err(changed_installed_files(self.installation_id, changes));
+        }
+
+        write_uninstall_staging_image(temporary.path(), self.installation_id, &self.files)?;
+        let staging_directory = temporary.keep();
+        self.staging_directory = Some(staging_directory);
+        let changes = self.current_changes(limits)?;
+        if !changes.is_empty() {
+            self.remove_staging()?;
+            return Err(changed_installed_files(self.installation_id, changes));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_originals(
+        &mut self,
+        limits: &ModLimits,
+        progress: &mut impl ModProgressReporter,
+        failpoint: &TransactionFailpoint,
+    ) -> Result<(), ModError> {
+        let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
+        if progress
+            .report(&ModProgress {
+                phase: ModProgressPhase::RestoringFiles,
+                completed: 0,
+                total,
+                path: None,
+            })
+            .is_break()
+        {
+            return Err(ModError::Canceled {
+                operation: "mod uninstall",
+            });
+        }
+        let changes = self.current_changes(limits)?;
+        if !changes.is_empty() {
+            return Err(changed_installed_files(self.installation_id, changes));
+        }
+
+        for index in 0..self.files.len() {
+            self.verify_installed_file(index, limits)?;
+            let file = self
+                .files
+                .get(index)
+                .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+            let path = file.path.clone();
+            let target = self.root.canonical_path().join(path.as_ref());
+            if file.original_existed {
+                let expected = file
+                    .original_sha256
+                    .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+                publish_file(
+                    &self.before_path(&path),
+                    &target,
+                    expected,
+                    limits.max_file_bytes,
+                )?;
+                self.restored_paths.push(path.clone());
+            } else {
+                validate_rollback_target(&target)?;
+                fs::remove_file(&target)
+                    .map_err(|error| ModError::io("remove installed mod file", &target, error))?;
+                sync_parent_directory(&target)?;
+                self.removed_paths.push(path.clone());
+            }
+            self.restored_indices.push(index);
+            failpoint.check_committed_paths(self.restored_indices.len(), &target)?;
+            let completed = u64::try_from(index.saturating_add(1)).unwrap_or(u64::MAX);
+            if progress
+                .report(&ModProgress {
+                    phase: ModProgressPhase::RestoringFiles,
+                    completed,
+                    total,
+                    path: Some(path),
+                })
+                .is_break()
+            {
+                return Err(ModError::Canceled {
+                    operation: "mod uninstall",
+                });
+            }
+        }
+        self.remove_owned_empty_directories()
+    }
+
+    pub(crate) fn recover_error(
+        &mut self,
+        error: ModError,
+        progress: &mut impl ModProgressReporter,
+        failpoint: &TransactionFailpoint,
+    ) -> ModError {
+        if self.restored_indices.is_empty() {
+            return match self.remove_staging() {
+                Ok(()) => error,
+                Err(cleanup_error) => cleanup_error,
+            };
+        }
+
+        let committed = self.restored_paths_in_order();
+        let restored_set = self
+            .restored_indices
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        let unchanged = self
+            .files
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !restored_set.contains(index))
+            .map(|(_, file)| file.path.clone())
+            .collect::<Vec<_>>();
+        let rollback_indices = self
+            .restored_indices
+            .iter()
+            .rev()
+            .copied()
+            .collect::<Vec<_>>();
+        let total = u64::try_from(rollback_indices.len()).unwrap_or(u64::MAX);
+        let mut rolled_back = Vec::new();
+        let mut rollback_failed = Vec::new();
+        for (attempt_index, index) in rollback_indices.into_iter().enumerate() {
+            let path = match self.files.get(index) {
+                Some(file) => file.path.clone(),
+                None => continue,
+            };
+            let rollback_result =
+                if failpoint.fails_rollback_attempt(attempt_index.saturating_add(1)) {
+                    Err(injected_error(
+                        "roll back uninstalled file",
+                        &self.root.canonical_path().join(path.as_ref()),
+                    ))
+                } else {
+                    self.restore_installed(index)
+                };
+            match rollback_result {
+                Ok(()) => rolled_back.push(path.clone()),
+                Err(_) => rollback_failed.push(path.clone()),
+            }
+            let completed = u64::try_from(attempt_index.saturating_add(1)).unwrap_or(u64::MAX);
+            let _ = progress.report(&ModProgress {
+                phase: ModProgressPhase::RollingBack,
+                completed,
+                total,
+                path: Some(path),
+            });
+        }
+        ModError::transaction(
+            "mod uninstall",
+            error,
+            RecoveryReport {
+                committed,
+                rolled_back,
+                rollback_failed,
+                unchanged,
+            },
+        )
+    }
+
+    pub(crate) fn restored_paths(&self) -> &[RelativeGamePath] {
+        &self.restored_paths
+    }
+
+    pub(crate) fn removed_paths(&self) -> &[RelativeGamePath] {
+        &self.removed_paths
+    }
+
+    pub(crate) fn finish_success(self) -> Result<(), ModError> {
+        let operations = self.directory.parent().map(Path::to_path_buf);
+        fs::remove_dir_all(&self.directory).map_err(|error| {
+            ModError::io(
+                "remove completed installation recovery",
+                &self.directory,
+                error,
+            )
+        })?;
+        if let Some(operations) = operations {
+            sync_directory(&operations)?;
+        }
+        Ok(())
+    }
+
+    fn current_changes(&self, limits: &ModLimits) -> Result<Vec<ChangedInstalledFile>, ModError> {
+        let mut changes = Vec::new();
+        for file in &self.files {
+            let inspection = inspect_target(&self.root, &file.path, limits)?;
+            if !inspection.exists {
+                changes.push(ChangedInstalledFile::new(
+                    file.path.clone(),
+                    InstalledFileChangeKind::Missing,
+                ));
+                continue;
+            }
+            let digest = hash_stable_file(&inspection.target, limits.max_file_bytes)?;
+            if digest != file.installed_sha256 {
+                changes.push(ChangedInstalledFile::new(
+                    file.path.clone(),
+                    InstalledFileChangeKind::Modified,
+                ));
+            }
+        }
+        Ok(changes)
+    }
+
+    fn verify_installed_file(&self, index: usize, limits: &ModLimits) -> Result<(), ModError> {
+        let file = self
+            .files
+            .get(index)
+            .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+        let inspection = inspect_target(&self.root, &file.path, limits)?;
+        let kind = if inspection.exists {
+            let digest = hash_stable_file(&inspection.target, limits.max_file_bytes)?;
+            (digest != file.installed_sha256).then_some(InstalledFileChangeKind::Modified)
+        } else {
+            Some(InstalledFileChangeKind::Missing)
+        };
+        if let Some(kind) = kind {
+            Err(changed_installed_files(
+                self.installation_id,
+                vec![ChangedInstalledFile::new(file.path.clone(), kind)],
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn restore_installed(&self, index: usize) -> Result<(), ModError> {
+        let file = self
+            .files
+            .get(index)
+            .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+        self.prepare_rollback_parent(&file.path)?;
+        let target = self.root.canonical_path().join(file.path.as_ref());
+        validate_rollback_target(&target)?;
+        let staged = self.staging_path(&file.path)?;
+        publish_file(&staged, &target, file.installed_sha256, u64::MAX)
+    }
+
+    fn prepare_rollback_parent(&self, path: &RelativeGamePath) -> Result<(), ModError> {
+        let parent = path.as_ref().parent().unwrap_or_else(|| Path::new(""));
+        let mut current = self.root.canonical_path().to_path_buf();
+        let mut relative = PathBuf::new();
+        for component in parent.components() {
+            current.push(component.as_os_str());
+            relative.push(component.as_os_str());
+            match fs::symlink_metadata(&current) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink() {
+                        return Err(ModError::target(current, TargetPathErrorKind::SymbolicLink));
+                    }
+                    if !metadata.is_dir() {
+                        return Err(ModError::target(
+                            current,
+                            TargetPathErrorKind::ParentNotDirectory,
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    let relative_text = relative.to_string_lossy().replace('\\', "/");
+                    if !self
+                        .created_directories
+                        .iter()
+                        .any(|directory| directory.as_str() == relative_text)
+                    {
+                        return Err(ModError::target(current, TargetPathErrorKind::Changed));
+                    }
+                    fs::create_dir(&current).map_err(|error| {
+                        ModError::io("recreate installed-file directory", &current, error)
+                    })?;
+                }
+                Err(error) => {
+                    return Err(ModError::io(
+                        "inspect installed-file directory for rollback",
+                        current,
+                        error,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_owned_empty_directories(&self) -> Result<(), ModError> {
+        for relative in self.created_directories.iter().rev() {
+            let directory = self.root.canonical_path().join(relative.as_ref());
+            match fs::remove_dir(&directory) {
+                Ok(()) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                Err(error) => {
+                    return Err(ModError::io(
+                        "remove empty installed-file directory",
+                        directory,
+                        error,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_staging(&mut self) -> Result<(), ModError> {
+        let Some(staging) = self.staging_directory.take() else {
+            return Ok(());
+        };
+        fs::remove_dir_all(&staging)
+            .map_err(|error| ModError::io("remove uninstall staging", staging, error))
+    }
+
+    fn restored_paths_in_order(&self) -> Vec<RelativeGamePath> {
+        self.restored_indices
+            .iter()
+            .filter_map(|index| self.files.get(*index))
+            .map(|file| file.path.clone())
+            .collect()
+    }
+
+    fn before_path(&self, path: &RelativeGamePath) -> PathBuf {
+        self.directory.join("before").join(path.as_ref())
+    }
+
+    fn staging_path(&self, path: &RelativeGamePath) -> Result<PathBuf, ModError> {
+        self.staging_directory
+            .as_ref()
+            .map(|directory| directory.join("files").join(path.as_ref()))
+            .ok_or_else(|| {
+                ModError::io(
+                    "resolve uninstall staging file",
+                    &self.directory,
+                    io::Error::new(io::ErrorKind::NotFound, "uninstall staging is missing"),
+                )
+            })
+    }
+}
+
+fn read_operation_image(
+    path: &Path,
+    installation_id: InstallationID,
+) -> Result<OperationImage, ModError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(ModError::uninstall(
+                installation_id,
+                Some(path.to_path_buf()),
+                UninstallErrorKind::MissingRecoveryImage,
+            ));
+        }
+        Err(error) => return Err(ModError::io("inspect operation image", path, error)),
+    };
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() > MAX_OPERATION_BYTES as u64
+    {
+        return Err(ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::InvalidRecoveryImage,
+        ));
+    }
+    let before_stamp = file_stamp(&metadata);
+    let file =
+        File::open(path).map_err(|error| ModError::io("open operation image", path, error))?;
+    let opened = file
+        .metadata()
+        .map_err(|error| ModError::io("inspect open operation image", path, error))?;
+    if file_stamp(&opened) != before_stamp {
+        return Err(ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::InvalidRecoveryImage,
+        ));
+    }
+    let mut bytes = Vec::with_capacity(
+        usize::try_from(metadata.len())
+            .unwrap_or(MAX_OPERATION_BYTES)
+            .min(MAX_OPERATION_BYTES),
+    );
+    file.take((MAX_OPERATION_BYTES as u64).saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| ModError::io("read operation image", path, error))?;
+    let after = fs::symlink_metadata(path)
+        .map_err(|error| ModError::io("reinspect operation image", path, error))?;
+    if bytes.len() > MAX_OPERATION_BYTES
+        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) != metadata.len()
+        || after.file_type().is_symlink()
+        || !after.is_file()
+        || file_stamp(&after) != before_stamp
+    {
+        return Err(ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::InvalidRecoveryImage,
+        ));
+    }
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| {
+        ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::InvalidRecoveryImage,
+        )
+    })?;
+    let Some(version) = value.get("formatVersion").and_then(Value::as_u64) else {
+        return Err(ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::InvalidRecoveryImage,
+        ));
+    };
+    if version != OPERATION_VERSION {
+        return Err(ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::UnsupportedOperationVersion,
+        ));
+    }
+    serde_json::from_value(value).map_err(|_| {
+        ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::InvalidRecoveryImage,
+        )
+    })
+}
+
+fn validate_operation_image(
+    directory: &Path,
+    image: &OperationImage,
+    root: &GameRoot,
+    record: &InstallationRecord,
+    limits: &ModLimits,
+) -> Result<(Vec<UninstallFile>, Vec<RelativeGamePath>), ModError> {
+    let invalid = || {
+        ModError::uninstall(
+            record.installation_id,
+            Some(directory.join("operation-v1.json")),
+            UninstallErrorKind::InvalidRecoveryImage,
+        )
+    };
+    if OperationID::parse(&image.operation_id).ok() != Some(record.operation_id)
+        || InstallationID::parse(&image.installation_id).ok() != Some(record.installation_id)
+        || ModPackageID::parse(&image.package_id).ok() != Some(record.package_id)
+        || image.kind != OperationKind::Apply
+        || image.state != OperationState::Committed
+        || parse_game(&image.game).ok() != Some(record.game)
+        || image.configured_root != record.configured_root.to_string_lossy()
+        || image.canonical_root != record.canonical_root.to_string_lossy()
+        || GameRootKey::parse(&image.root_key).ok() != Some(record.root_key)
+        || image.installed_at != record.installed_at.as_str()
+        || record.root_key != root.key()
+        || image.files.len() != record.files.len()
+    {
+        return Err(invalid());
+    }
+
+    let mut files = Vec::with_capacity(image.files.len());
+    for (file_image, installed) in image.files.iter().zip(&record.files) {
+        let path = RelativeGamePath::parse(&file_image.path, limits).map_err(|_| invalid())?;
+        let installed_sha256 = file_image
+            .installed_sha256
+            .as_deref()
+            .and_then(|value| FileSHA256::parse(value).ok())
+            .ok_or_else(&invalid)?;
+        let original_existed = file_image.original_existed.ok_or_else(&invalid)?;
+        let original_sha256 = file_image
+            .original_sha256
+            .as_deref()
+            .map(FileSHA256::parse)
+            .transpose()
+            .map_err(|_| invalid())?;
+        if path != *installed.path()
+            || installed_sha256 != installed.installed_sha256()
+            || original_existed != installed.original_existed()
+            || original_existed != original_sha256.is_some()
+            || !file_image.committed
+        {
+            return Err(invalid());
+        }
+        if let Some(expected) = original_sha256 {
+            let before = require_owned_recovery_file(
+                &directory.join("before"),
+                &path,
+                record.installation_id,
+            )?;
+            let actual = hash_stable_file(&before, limits.max_file_bytes).map_err(|_| invalid())?;
+            if actual != expected {
+                return Err(invalid());
+            }
+        }
+        files.push(UninstallFile {
+            path,
+            installed_sha256,
+            original_existed,
+            original_sha256,
+        });
+    }
+
+    let mut portable_directories = HashSet::with_capacity(image.created_directories.len());
+    let mut created_directories = Vec::with_capacity(image.created_directories.len());
+    for value in &image.created_directories {
+        let path = RelativeGamePath::parse(value, limits).map_err(|_| invalid())?;
+        let prefix = format!("{}/", path.as_str());
+        if !portable_directories.insert(path.portable_key().to_owned())
+            || !files
+                .iter()
+                .any(|file| file.path.as_str().starts_with(&prefix))
+        {
+            return Err(invalid());
+        }
+        created_directories.push(path);
+    }
+    Ok((files, created_directories))
+}
+
+fn require_uninstall_directory(
+    path: &Path,
+    installation_id: InstallationID,
+) -> Result<(), ModError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(ModError::uninstall(
+                installation_id,
+                Some(path.to_path_buf()),
+                UninstallErrorKind::MissingRecoveryImage,
+            ));
+        }
+        Err(error) => return Err(ModError::io("inspect recovery directory", path, error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(ModError::uninstall(
+            installation_id,
+            Some(path.to_path_buf()),
+            UninstallErrorKind::InvalidRecoveryImage,
+        ));
+    }
+    Ok(())
+}
+
+fn require_owned_recovery_file(
+    root: &Path,
+    path: &RelativeGamePath,
+    installation_id: InstallationID,
+) -> Result<PathBuf, ModError> {
+    require_uninstall_directory(root, installation_id)?;
+    let mut current = root.to_path_buf();
+    for (index, component) in path.as_str().split('/').enumerate() {
+        current.push(component);
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(ModError::uninstall(
+                    installation_id,
+                    Some(current),
+                    UninstallErrorKind::MissingRecoveryImage,
+                ));
+            }
+            Err(error) => {
+                return Err(ModError::io("inspect recovery file", current, error));
+            }
+        };
+        let is_file = index.saturating_add(1) == path.component_count();
+        let valid = !metadata.file_type().is_symlink()
+            && ((is_file && metadata.is_file()) || (!is_file && metadata.is_dir()));
+        if !valid {
+            return Err(ModError::uninstall(
+                installation_id,
+                Some(current),
+                UninstallErrorKind::InvalidRecoveryImage,
+            ));
+        }
+    }
+    Ok(current)
+}
+
+fn write_uninstall_staging_image(
+    directory: &Path,
+    installation_id: InstallationID,
+    files: &[UninstallFile],
+) -> Result<(), ModError> {
+    let mut bytes = serde_json::to_vec_pretty(&serde_json::json!({
+        "formatVersion": 1,
+        "installationID": installation_id.to_string(),
+        "files": files.iter().map(|file| serde_json::json!({
+            "path": file.path.as_str(),
+            "installedSHA256": file.installed_sha256.to_string(),
+        })).collect::<Vec<_>>(),
+    }))
+    .map_err(|error| {
+        ModError::io(
+            "serialize uninstall staging image",
+            directory,
+            io::Error::new(io::ErrorKind::InvalidData, error),
+        )
+    })?;
+    bytes.push(b'\n');
+    publish_control_file(directory, &directory.join("uninstall-v1.json"), &bytes)
+}
+
+fn changed_installed_files(
+    installation: InstallationID,
+    files: Vec<ChangedInstalledFile>,
+) -> ModError {
+    ModError::ChangedInstalledFiles {
+        installation,
+        changes: Box::new(ChangedInstalledFiles::new(files)),
     }
 }
 
@@ -1223,9 +1948,9 @@ fn injected_error(operation: &'static str, path: &Path) -> ModError {
     )
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OperationImage<'a> {
+struct OperationImage {
     format_version: u64,
     #[serde(rename = "operationID")]
     operation_id: String,
@@ -1235,25 +1960,25 @@ struct OperationImage<'a> {
     package_id: String,
     kind: OperationKind,
     state: OperationState,
-    game: &'static str,
+    game: String,
     configured_root: String,
     canonical_root: String,
     root_key: String,
-    installed_at: &'a str,
-    files: Vec<OperationFileImage<'a>>,
-    created_directories: Vec<&'a str>,
+    installed_at: String,
+    files: Vec<OperationFileImage>,
+    created_directories: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum OperationKind {
     Apply,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OperationFileImage<'a> {
-    path: &'a str,
+struct OperationFileImage {
+    path: String,
     #[serde(rename = "installedSHA256", skip_serializing_if = "Option::is_none")]
     installed_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

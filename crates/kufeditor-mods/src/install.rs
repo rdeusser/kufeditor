@@ -1,17 +1,104 @@
 use std::io;
 
 use crate::{
-    GameRoot, InstallationConflictKind, InstalledMod, InstalledModStatus, ModError, ModPackageID,
-    ModProgress, ModProgressPhase, ModProgressReporter, ModService, PackageErrorKind,
-    RelativeGamePath,
+    GameRoot, InstallationConflictKind, InstallationID, InstalledMod, InstalledModStatus, ModError,
+    ModPackageID, ModProgress, ModProgressPhase, ModProgressReporter, ModService, PackageErrorKind,
+    RelativeGamePath, UninstallErrorKind,
     library::existing_package_directory,
     package::inspect_package,
     registry::{
         InstallationPlanConflict, InstallationRecord, installation_plan_conflict,
         load_installation_records, store_installations_with_hook,
     },
-    transaction::{FileTransaction, TransactionFailpoint, validate_game_root},
+    transaction::{
+        FileTransaction, TransactionFailpoint, UninstallTransaction, validate_game_root,
+    },
 };
+
+#[derive(Clone, Copy, Debug)]
+pub struct UninstallModRequest<'a> {
+    root: &'a GameRoot,
+    installation_id: InstallationID,
+}
+
+impl<'a> UninstallModRequest<'a> {
+    pub const fn new(root: &'a GameRoot, installation_id: InstallationID) -> Self {
+        Self {
+            root,
+            installation_id,
+        }
+    }
+
+    pub const fn root(&self) -> &GameRoot {
+        self.root
+    }
+
+    pub const fn installation_id(&self) -> InstallationID {
+        self.installation_id
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InstalledFileChangeKind {
+    Modified,
+    Missing,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChangedInstalledFile {
+    path: RelativeGamePath,
+    kind: InstalledFileChangeKind,
+}
+
+impl ChangedInstalledFile {
+    pub(crate) const fn new(path: RelativeGamePath, kind: InstalledFileChangeKind) -> Self {
+        Self { path, kind }
+    }
+
+    pub const fn path(&self) -> &RelativeGamePath {
+        &self.path
+    }
+
+    pub const fn kind(&self) -> InstalledFileChangeKind {
+        self.kind
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChangedInstalledFiles {
+    files: Vec<ChangedInstalledFile>,
+}
+
+impl ChangedInstalledFiles {
+    pub(crate) const fn new(files: Vec<ChangedInstalledFile>) -> Self {
+        Self { files }
+    }
+
+    pub fn files(&self) -> &[ChangedInstalledFile] {
+        &self.files
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UninstallModReport {
+    installation_id: InstallationID,
+    restored_paths: Vec<RelativeGamePath>,
+    removed_paths: Vec<RelativeGamePath>,
+}
+
+impl UninstallModReport {
+    pub const fn installation_id(&self) -> InstallationID {
+        self.installation_id
+    }
+
+    pub fn restored_paths(&self) -> &[RelativeGamePath] {
+        &self.restored_paths
+    }
+
+    pub fn removed_paths(&self) -> &[RelativeGamePath] {
+        &self.removed_paths
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct ApplyModRequest<'a> {
@@ -56,6 +143,109 @@ impl ModService {
         progress: &mut impl ModProgressReporter,
     ) -> Result<ApplyModReport, ModError> {
         self.apply_with_failpoint(request, progress, &TransactionFailpoint::default())
+    }
+
+    pub fn uninstall(
+        &self,
+        request: UninstallModRequest<'_>,
+        progress: &mut impl ModProgressReporter,
+    ) -> Result<UninstallModReport, ModError> {
+        self.uninstall_with_failpoint(request, progress, &TransactionFailpoint::default())
+    }
+
+    fn uninstall_with_failpoint(
+        &self,
+        request: UninstallModRequest<'_>,
+        progress: &mut impl ModProgressReporter,
+        failpoint: &TransactionFailpoint,
+    ) -> Result<UninstallModReport, ModError> {
+        validate_game_root(request.root)?;
+        report_uninstall_planning(progress, 0)?;
+        let records = load_installation_records(&self.paths, &self.limits)?;
+        let Some(record) = records
+            .iter()
+            .find(|record| record.installation_id == request.installation_id)
+            .cloned()
+        else {
+            return Err(ModError::uninstall(
+                request.installation_id,
+                None,
+                UninstallErrorKind::MissingInstallation,
+            ));
+        };
+        if record.root_key != request.root.key() {
+            return Err(ModError::uninstall(
+                request.installation_id,
+                Some(request.root.canonical_path().to_path_buf()),
+                UninstallErrorKind::WrongRoot,
+            ));
+        }
+        let mut transaction =
+            UninstallTransaction::load(&self.paths, request.root, &record, &self.limits)?;
+        report_uninstall_planning(progress, 1)?;
+        transaction.stage_installed(&self.limits, progress)?;
+
+        let mut records = match load_installation_records(&self.paths, &self.limits) {
+            Ok(records) => records,
+            Err(error) => return Err(transaction.recover_error(error, progress, failpoint)),
+        };
+        let Some(record_index) = records
+            .iter()
+            .position(|candidate| candidate.installation_id == request.installation_id)
+        else {
+            let error = ModError::uninstall(
+                request.installation_id,
+                None,
+                UninstallErrorKind::MissingInstallation,
+            );
+            return Err(transaction.recover_error(error, progress, failpoint));
+        };
+        if records.get(record_index) != Some(&record) {
+            let error = ModError::uninstall(
+                request.installation_id,
+                Some(self.paths.installation_registry()),
+                UninstallErrorKind::InvalidRecoveryImage,
+            );
+            return Err(transaction.recover_error(error, progress, failpoint));
+        }
+        if let Err(error) = transaction.restore_originals(&self.limits, progress, failpoint) {
+            return Err(transaction.recover_error(error, progress, failpoint));
+        }
+        records.remove(record_index);
+
+        if progress
+            .report(&ModProgress {
+                phase: ModProgressPhase::PublishingUninstall,
+                completed: 0,
+                total: 1,
+                path: None,
+            })
+            .is_break()
+        {
+            let error = ModError::Canceled {
+                operation: "mod uninstall",
+            };
+            return Err(transaction.recover_error(error, progress, failpoint));
+        }
+        if let Err(error) = store_installations_with_hook(&self.paths, &records, |path| {
+            failpoint.check_registry_publication(path)
+        }) {
+            return Err(transaction.recover_error(error, progress, failpoint));
+        }
+        let _ = progress.report(&ModProgress {
+            phase: ModProgressPhase::PublishingUninstall,
+            completed: 1,
+            total: 1,
+            path: None,
+        });
+        let restored_paths = transaction.restored_paths().to_vec();
+        let removed_paths = transaction.removed_paths().to_vec();
+        transaction.finish_success()?;
+        Ok(UninstallModReport {
+            installation_id: request.installation_id,
+            restored_paths,
+            removed_paths,
+        })
     }
 
     fn apply_with_failpoint(
@@ -217,6 +407,27 @@ fn report_planning(
     {
         Err(ModError::Canceled {
             operation: "mod apply",
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn report_uninstall_planning(
+    progress: &mut impl ModProgressReporter,
+    completed: u64,
+) -> Result<(), ModError> {
+    if progress
+        .report(&ModProgress {
+            phase: ModProgressPhase::PlanningUninstall,
+            completed,
+            total: 1,
+            path: None,
+        })
+        .is_break()
+    {
+        Err(ModError::Canceled {
+            operation: "mod uninstall",
         })
     } else {
         Ok(())
@@ -451,6 +662,147 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn every_uninstall_restore_failure_returns_to_the_exact_installed_state_in_reverse_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for restored_count in 1..=3 {
+            let fixture = ApplyFixture::new()?;
+            let installation_id = fixture.install()?;
+            let registry_before = fs::read(fixture.stores.installation_registry())?;
+
+            let error = fixture
+                .service
+                .uninstall_with_failpoint(
+                    super::UninstallModRequest::new(&fixture.root, installation_id),
+                    &mut ContinueProgress,
+                    &TransactionFailpoint::after_committed_paths(restored_count),
+                )
+                .expect_err("the restore failpoint must stop uninstall");
+            let recovery = recovery(&error)?;
+
+            fixture.assert_installed_game()?;
+            assert_eq!(
+                path_strings(recovery.committed()),
+                ["a.sox", "b.sox", "c.sox"]
+                    .get(..restored_count)
+                    .ok_or("invalid restored-path fixture range")?
+            );
+            assert_eq!(
+                path_strings(recovery.rolled_back()),
+                ["c.sox", "b.sox", "a.sox"]
+                    .get((3 - restored_count)..)
+                    .ok_or("invalid uninstall rollback fixture range")?
+            );
+            assert!(recovery.rollback_failed().is_empty());
+            assert_eq!(
+                path_strings(recovery.unchanged()),
+                ["a.sox", "b.sox", "c.sox"]
+                    .get(restored_count..)
+                    .ok_or("invalid uninstall unchanged fixture range")?
+            );
+            assert_eq!(
+                fs::read(fixture.stores.installation_registry())?,
+                registry_before
+            );
+            fixture.assert_retained_uninstall_staging()?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn uninstall_registry_failure_restores_every_installed_file()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let fixture = ApplyFixture::new()?;
+        let installation_id = fixture.install()?;
+        let registry_before = fs::read(fixture.stores.installation_registry())?;
+
+        let error = fixture
+            .service
+            .uninstall_with_failpoint(
+                super::UninstallModRequest::new(&fixture.root, installation_id),
+                &mut ContinueProgress,
+                &TransactionFailpoint::at_registry_publication(),
+            )
+            .expect_err("the registry failpoint must stop uninstall");
+        let recovery = recovery(&error)?;
+
+        fixture.assert_installed_game()?;
+        assert_eq!(
+            path_strings(recovery.committed()),
+            ["a.sox", "b.sox", "c.sox"]
+        );
+        assert_eq!(
+            path_strings(recovery.rolled_back()),
+            ["c.sox", "b.sox", "a.sox"]
+        );
+        assert!(recovery.rollback_failed().is_empty());
+        assert!(recovery.unchanged().is_empty());
+        assert_eq!(
+            fs::read(fixture.stores.installation_registry())?,
+            registry_before
+        );
+        fixture.assert_retained_uninstall_staging()?;
+        Ok(())
+    }
+
+    #[test]
+    fn uninstall_rollback_failure_is_reported_without_skipping_other_paths()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let fixture = ApplyFixture::new()?;
+        let installation_id = fixture.install()?;
+        let failpoint = TransactionFailpoint::after_committed_paths(3).with_rollback_attempt(2);
+
+        let error = fixture
+            .service
+            .uninstall_with_failpoint(
+                super::UninstallModRequest::new(&fixture.root, installation_id),
+                &mut ContinueProgress,
+                &failpoint,
+            )
+            .expect_err("the restore failpoint must stop uninstall");
+        let recovery = recovery(&error)?;
+
+        assert_eq!(fs::read(fixture.root_path.join("a.sox"))?, b"new-a");
+        assert!(!fixture.root_path.join("b.sox").exists());
+        assert_eq!(fs::read(fixture.root_path.join("c.sox"))?, b"new-c");
+        assert_eq!(path_strings(recovery.rolled_back()), ["c.sox", "a.sox"]);
+        assert_eq!(path_strings(recovery.rollback_failed()), ["b.sox"]);
+        fixture.assert_retained_uninstall_staging()?;
+        Ok(())
+    }
+
+    #[test]
+    fn uninstall_cancellation_cleans_before_writes_and_rolls_back_after_writes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (phase, completed, retains_staging) in [
+            (ModProgressPhase::PlanningUninstall, 0, false),
+            (ModProgressPhase::StagingUninstall, 1, false),
+            (ModProgressPhase::RestoringFiles, 0, false),
+            (ModProgressPhase::RestoringFiles, 1, true),
+            (ModProgressPhase::PublishingUninstall, 0, true),
+        ] {
+            let fixture = ApplyFixture::new()?;
+            let installation_id = fixture.install()?;
+            let mut progress = CancelAt { phase, completed };
+
+            let error = fixture
+                .service
+                .uninstall(
+                    super::UninstallModRequest::new(&fixture.root, installation_id),
+                    &mut progress,
+                )
+                .expect_err("the selected progress point must cancel uninstall");
+
+            fixture.assert_installed_game()?;
+            assert_eq!(error.recovery_report().is_some(), retains_staging);
+            assert_eq!(
+                fixture.uninstall_staging_count()?,
+                usize::from(retains_staging)
+            );
+        }
+        Ok(())
+    }
+
     fn recovery(error: &ModError) -> Result<&RecoveryReport, Box<dyn std::error::Error>> {
         error
             .recovery_report()
@@ -517,6 +869,68 @@ mod tests {
             assert!(!self.root_path.join("b.sox").exists());
             assert_eq!(fs::read(self.root_path.join("c.sox"))?, b"old-c");
             Ok(())
+        }
+
+        fn install(&self) -> Result<crate::InstallationID, Box<dyn std::error::Error>> {
+            Ok(self
+                .service
+                .apply(
+                    ApplyModRequest::new(&self.root, self.package),
+                    &mut ContinueProgress,
+                )?
+                .installation()
+                .installation_id())
+        }
+
+        fn assert_installed_game(&self) -> Result<(), Box<dyn std::error::Error>> {
+            assert_eq!(fs::read(self.root_path.join("a.sox"))?, b"new-a");
+            assert_eq!(fs::read(self.root_path.join("b.sox"))?, b"new-b");
+            assert_eq!(fs::read(self.root_path.join("c.sox"))?, b"new-c");
+            Ok(())
+        }
+
+        fn assert_retained_uninstall_staging(&self) -> Result<(), Box<dyn std::error::Error>> {
+            let operation = fs::read_dir(self.stores.operations())?
+                .next()
+                .transpose()?
+                .ok_or("missing retained apply operation")?
+                .path();
+            let staging = fs::read_dir(operation)?
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("uninstall-")
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(staging.len(), 1);
+            assert!(
+                staging
+                    .first()
+                    .ok_or("missing retained uninstall staging")?
+                    .path()
+                    .join("uninstall-v1.json")
+                    .is_file()
+            );
+            Ok(())
+        }
+
+        fn uninstall_staging_count(&self) -> Result<usize, Box<dyn std::error::Error>> {
+            let operation = fs::read_dir(self.stores.operations())?
+                .next()
+                .transpose()?
+                .ok_or("missing retained apply operation")?
+                .path();
+            Ok(fs::read_dir(operation)?
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("uninstall-")
+                })
+                .count())
         }
 
         fn assert_one_retained_operation(&self) -> Result<(), Box<dyn std::error::Error>> {

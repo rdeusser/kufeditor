@@ -3,7 +3,7 @@ use std::{io, path::PathBuf};
 use kufeditor_game::Game;
 use thiserror::Error;
 
-use crate::{InstallationID, RecoveryReport, RelativeGamePath};
+use crate::{ChangedInstalledFiles, InstallationID, RecoveryReport, RelativeGamePath};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RelativeGamePathErrorKind {
@@ -229,6 +229,29 @@ pub enum TargetPathErrorKind {
     TooLarge,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UninstallErrorKind {
+    MissingInstallation,
+    WrongRoot,
+    MissingRecoveryImage,
+    InvalidRecoveryImage,
+    UnsupportedOperationVersion,
+}
+
+impl std::fmt::Display for UninstallErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingInstallation => "the installation does not exist",
+            Self::WrongRoot => "the installation belongs to another game root",
+            Self::MissingRecoveryImage => "the installation recovery image is missing",
+            Self::InvalidRecoveryImage => "the installation recovery image is invalid",
+            Self::UnsupportedOperationVersion => {
+                "the installation recovery image version is unsupported"
+            }
+        })
+    }
+}
+
 impl std::fmt::Display for TargetPathErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
@@ -324,6 +347,17 @@ pub enum ModError {
         path: PathBuf,
         kind: TargetPathErrorKind,
     },
+    #[error("cannot uninstall {installation}: {kind}")]
+    InvalidUninstall {
+        installation: InstallationID,
+        path: Option<PathBuf>,
+        kind: UninstallErrorKind,
+    },
+    #[error("cannot uninstall {installation}: installed files changed")]
+    ChangedInstalledFiles {
+        installation: InstallationID,
+        changes: Box<ChangedInstalledFiles>,
+    },
     #[error("could not read ZIP package {path:?}: {source}")]
     ZIP {
         path: PathBuf,
@@ -354,6 +388,14 @@ impl ModError {
     pub fn recovery_report(&self) -> Option<&RecoveryReport> {
         match self {
             Self::Transaction { recovery, .. } => Some(recovery.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn changed_installed_files(&self) -> Option<&ChangedInstalledFiles> {
+        match self {
+            Self::ChangedInstalledFiles { changes, .. } => Some(changes.as_ref()),
+            Self::Transaction { source, .. } => source.changed_installed_files(),
             _ => None,
         }
     }
@@ -426,6 +468,18 @@ impl ModError {
             operation,
             source: Box::new(source),
             recovery: Box::new(recovery),
+        }
+    }
+
+    pub(crate) fn uninstall(
+        installation: InstallationID,
+        path: Option<PathBuf>,
+        kind: UninstallErrorKind,
+    ) -> Self {
+        Self::InvalidUninstall {
+            installation,
+            path,
+            kind,
         }
     }
 }
