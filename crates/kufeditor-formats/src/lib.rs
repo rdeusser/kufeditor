@@ -29,11 +29,11 @@ pub use schema::{SOXSchema, SchemaDocument, SpecialNameRef};
 pub use skill::{SkillDocument, SkillField, SkillTextField};
 pub use sox::{SOXDocument, parse_sox};
 pub use stg::{
-    STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice, STGEditor, STGFieldAccess,
-    STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
+    STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice, STGDocument, STGEditor,
+    STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
     STGNumberTarget, STGParameterTarget, STGScriptKind, STGScriptTarget, STGSkillField,
-    STGSkillOwner, STGText, STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup,
-    STGValueTarget,
+    STGSkillOwner, STGTailStatus, STGText, STGTextTarget, STGUnitField, STGUnitFloatField,
+    STGUnitGroup, STGValueTarget,
 };
 pub use string_table::{SOXStringTableDocument, SOXStringTableLayout};
 pub use text::{TextSOXDocument, TextSOXField};

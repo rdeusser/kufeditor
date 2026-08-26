@@ -573,6 +573,9 @@ pub enum STGParseError {
     #[error("STG source capacity {capacity} exceeds the {maximum}-byte limit")]
     SourceCapacityTooLarge { capacity: usize, maximum: usize },
 
+    #[error("invalid STG magic at offset {offset}: found {actual:#010X}")]
+    InvalidMagic { offset: usize, actual: u32 },
+
     #[error("STG prefix preflight failed: {0}")]
     PrefixPreflight(#[source] STGPreflightError),
 

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::indexing_slicing,
+    reason = "synthetic STG fixtures expose checked offsets for direct wire corruption"
+)]
+
 use std::collections::HashSet;
 
 #[path = "support/stg.rs"]
@@ -5,12 +10,12 @@ mod stg_support;
 
 use kufeditor_formats::{
     DiagnosticLocation, FormatError, STGAbilityOwner, STGAreaField, STGAreaFloatField,
-    STGCleaveError, STGCleaveErrorKind, STGCollection, STGEditor, STGEncodeError, STGFieldAccess,
-    STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
+    STGCleaveError, STGCleaveErrorKind, STGCollection, STGDocument, STGEditor, STGEncodeError,
+    STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
     STGNumberTarget, STGParameterTarget, STGParseError, STGPreflightError, STGRebaseError,
     STGRegion, STGScriptKind, STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralLocation,
-    STGTailFailure, STGTarget, STGText, STGTextEncoding, STGTextError, STGTextTarget, STGUnitField,
-    STGUnitFloatField, STGUnitGroup, STGValueKind, STGValueTarget,
+    STGTailFailure, STGTailStatus, STGTarget, STGText, STGTextEncoding, STGTextError,
+    STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValueKind, STGValueTarget,
 };
 use stg_support::{complete_stg_fixture, empty_stg_fixture, stg_prefix_fixture};
 
@@ -29,6 +34,227 @@ fn synthetic_stg_fixture_names_every_recursive_count_and_value_offset() {
     assert!(offsets.footer_count < offsets.suffix);
     assert_eq!(offsets.suffix + 4, fixture.bytes.len());
     assert_eq!(empty_stg_fixture().len(), stg_prefix_fixture(0).len() + 20);
+}
+
+#[test]
+fn stg_parse_accepts_a_complete_two_phase_document() {
+    let fixture = complete_stg_fixture();
+    let document = STGDocument::parse(fixture.bytes.clone()).unwrap();
+
+    assert_eq!(document.unit_count(), 1);
+    assert_eq!(document.area_count(), Some(1));
+    assert_eq!(document.variable_count(), Some(4));
+    assert_eq!(document.event_block_count(), Some(2));
+    assert_eq!(document.footer_count(), Some(2));
+    assert_eq!(
+        document.tail_status(),
+        STGTailStatus::Parsed {
+            suffix: &fixture.bytes[fixture.offsets.suffix..],
+        }
+    );
+}
+
+#[test]
+fn stg_parse_rejects_invalid_or_incomplete_prefixes() {
+    let bad_magic = 999_u32.to_le_bytes().to_vec();
+    assert_eq!(
+        stg_parse_error(bad_magic),
+        STGParseError::InvalidMagic {
+            offset: 0,
+            actual: 999,
+        }
+    );
+
+    let mut truncated_header = stg_prefix_fixture(0);
+    truncated_header.truncate(4 + 619);
+    assert_eq!(
+        stg_parse_error(truncated_header),
+        STGParseError::PrefixPreflight(STGPreflightError::Truncated {
+            region: STGRegion::Header,
+            offset: 4,
+            needed: 620,
+            remaining: 619,
+        })
+    );
+
+    let mut missing_unit_count = stg_prefix_fixture(0);
+    missing_unit_count.truncate(4 + 620);
+    assert_eq!(
+        stg_parse_error(missing_unit_count),
+        STGParseError::PrefixPreflight(STGPreflightError::Truncated {
+            region: STGRegion::Units,
+            offset: 624,
+            needed: 4,
+            remaining: 0,
+        })
+    );
+
+    let mut truncated_unit = stg_prefix_fixture(1);
+    truncated_unit.truncate(truncated_unit.len() - 1);
+    assert_eq!(
+        stg_parse_error(truncated_unit),
+        STGParseError::PrefixPreflight(STGPreflightError::ImpossibleCount {
+            region: STGRegion::Units,
+            offset: 624,
+            count: 1,
+            minimum_item_size: 544,
+            remaining: 543,
+        })
+    );
+
+    let mut impossible_units = stg_prefix_fixture(0);
+    impossible_units[624..628].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(
+        stg_parse_error(impossible_units),
+        STGParseError::PrefixPreflight(STGPreflightError::ImpossibleCount {
+            region: STGRegion::Units,
+            offset: 624,
+            count: u32::MAX,
+            minimum_item_size: 544,
+            remaining: 0,
+        })
+    );
+}
+
+#[test]
+fn stg_parse_accepts_zero_units_and_keeps_fixed_text_as_raw_bytes() {
+    let empty = STGDocument::parse(empty_stg_fixture()).unwrap();
+    assert_eq!(empty.unit_count(), 0);
+    assert!(matches!(
+        empty.tail_status(),
+        STGTailStatus::Parsed { suffix } if suffix == [0, 0, 0, 0]
+    ));
+
+    let mut fixture = complete_stg_fixture();
+    fixture.bytes[4 + 68] = 0xff;
+    fixture.bytes[628] = 0x81;
+    let document = STGDocument::parse(fixture.bytes).unwrap();
+    assert_eq!(document.unit_count(), 1);
+    assert!(matches!(
+        document.tail_status(),
+        STGTailStatus::Parsed { .. }
+    ));
+}
+
+#[test]
+fn stg_parse_falls_back_to_the_exact_raw_tail_for_every_recursive_count() {
+    let fixture = complete_stg_fixture();
+    let cases = [
+        (fixture.offsets.area_count, STGRegion::Areas),
+        (fixture.offsets.variable_count, STGRegion::Variables),
+        (fixture.offsets.event_block_count, STGRegion::EventBlocks),
+        (fixture.offsets.event_count, STGRegion::Events),
+        (fixture.offsets.condition_count, STGRegion::Conditions),
+        (fixture.offsets.action_count, STGRegion::Actions),
+        (
+            fixture.offsets.condition_parameter_count,
+            STGRegion::Parameters,
+        ),
+        (
+            fixture.offsets.variable_string_length,
+            STGRegion::Parameters,
+        ),
+        (fixture.offsets.footer_count, STGRegion::Footer),
+    ];
+
+    for (offset, region) in cases {
+        let mut bytes = fixture.bytes.clone();
+        bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        let expected_tail = bytes[fixture.offsets.tail_start..].to_vec();
+        let document = STGDocument::parse(bytes).unwrap();
+
+        match document.tail_status() {
+            STGTailStatus::Raw {
+                bytes,
+                failure:
+                    STGTailFailure::Preflight(STGPreflightError::ImpossibleCount {
+                        region: actual_region,
+                        offset: actual_offset,
+                        ..
+                    }),
+            } => {
+                assert_eq!(*actual_region, region);
+                assert_eq!(*actual_offset, offset);
+                assert_eq!(bytes, expected_tail);
+            }
+            actual => panic!("unexpected tail status for {region} at {offset}: {actual:?}"),
+        }
+    }
+}
+
+#[test]
+fn stg_parse_falls_back_for_unknown_variable_and_script_parameter_tags() {
+    let fixture = complete_stg_fixture();
+
+    for offset in [
+        fixture.offsets.variable_integer_type,
+        fixture.offsets.condition_integer_type,
+    ] {
+        let mut bytes = fixture.bytes.clone();
+        bytes[offset..offset + 4].copy_from_slice(&99_u32.to_le_bytes());
+        let expected_tail = bytes[fixture.offsets.tail_start..].to_vec();
+        let document = STGDocument::parse(bytes).unwrap();
+
+        assert_eq!(
+            document.tail_status(),
+            STGTailStatus::Raw {
+                bytes: &expected_tail,
+                failure: &STGTailFailure::Preflight(STGPreflightError::UnknownParameterType {
+                    offset,
+                    tag: 99
+                }),
+            }
+        );
+    }
+}
+
+#[test]
+fn stg_parse_distinguishes_missing_empty_and_garbage_tails() {
+    let prefix = stg_prefix_fixture(0);
+    let tail_start = prefix.len();
+    let missing = STGDocument::parse(prefix.clone()).unwrap();
+    assert_eq!(
+        missing.tail_status(),
+        STGTailStatus::Raw {
+            bytes: &[],
+            failure: &STGTailFailure::Preflight(STGPreflightError::Truncated {
+                region: STGRegion::Areas,
+                offset: tail_start,
+                needed: 4,
+                remaining: 0,
+            }),
+        }
+    );
+
+    let empty = STGDocument::parse(empty_stg_fixture()).unwrap();
+    assert!(matches!(
+        empty.tail_status(),
+        STGTailStatus::Parsed { suffix } if suffix == [0, 0, 0, 0]
+    ));
+
+    let mut garbage = prefix;
+    garbage.extend_from_slice(&[1, 2, 3]);
+    let raw = STGDocument::parse(garbage).unwrap();
+    assert!(matches!(
+        raw.tail_status(),
+        STGTailStatus::Raw {
+            bytes: [1, 2, 3],
+            failure: STGTailFailure::Preflight(STGPreflightError::Truncated {
+                region: STGRegion::Areas,
+                offset,
+                needed: 4,
+                remaining: 3,
+            }),
+        } if *offset == tail_start
+    ));
+}
+
+fn stg_parse_error(bytes: Vec<u8>) -> STGParseError {
+    match STGDocument::parse(bytes) {
+        Err(FormatError::STGParse(error)) => error,
+        Err(other) => panic!("unexpected STG error: {other}"),
+        Ok(_) => panic!("expected STG parse failure"),
+    }
 }
 
 #[test]
