@@ -13,11 +13,12 @@ mod stg_support;
 use kufeditor_formats::{
     Diagnostic, DiagnosticLocation, FormatError, STGAbilityOwner, STGAreaField, STGAreaFloatField,
     STGCleaveError, STGCleaveErrorKind, STGCollection, STGDocument, STGEditor, STGEncodeError,
-    STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
-    STGNumberTarget, STGParameterTarget, STGParseError, STGPreflightError, STGRebaseError,
-    STGRegion, STGScriptKind, STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralLocation,
-    STGTailFailure, STGTailStatus, STGTarget, STGText, STGTextEncoding, STGTextError, STGTextImage,
-    STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValueKind, STGValueTarget,
+    STGEventTarget, STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField,
+    STGHeaderTextField, STGMutation, STGNumberTarget, STGParameterTarget, STGParseError,
+    STGPreflightError, STGRebaseError, STGReferenceKind, STGRegion, STGScriptKind, STGScriptTarget,
+    STGSkillField, STGSkillOwner, STGStructuralEdit, STGStructuralLocation, STGTailFailure,
+    STGTailStatus, STGTarget, STGText, STGTextEncoding, STGTextError, STGTextImage, STGTextTarget,
+    STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue, STGValueKind, STGValueTarget,
     Severity,
 };
 use stg_support::{complete_stg_fixture, empty_stg_fixture, stg_prefix_fixture};
@@ -939,6 +940,7 @@ fn stg_validation_matches_legacy_unit_rules_and_typed_locations() {
     write_u32_at(&mut bytes, second + 32, 42);
     bytes[second + 87] = 100;
 
+    let tail_start = bytes.len();
     let document = STGDocument::parse(bytes).unwrap();
     assert_eq!(
         document.diagnostics(),
@@ -996,6 +998,14 @@ fn stg_validation_matches_legacy_unit_rules_and_typed_locations() {
                 }),
                 "Level outside typical range (1-99)"
             ),
+            stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGTail {
+                    region: STGRegion::Areas,
+                    offset: tail_start,
+                },
+                "STG tail is preserved as raw bytes"
+            ),
         ],
     );
 }
@@ -1015,17 +1025,28 @@ fn stg_validation_worldmap_boundary_exempts_20_and_0xff() {
         bytes[start + 87] = 1;
     }
 
+    let tail_start = bytes.len();
     let document = STGDocument::parse(bytes).unwrap();
     assert_eq!(
         document.diagnostics(),
-        [stg_diagnostic(
-            Severity::Warning,
-            DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
-                unit: 1,
-                field: STGUnitField::LeaderWorldmapID,
-            }),
-            "Worldmap ID may cause post-mission issues",
-        )],
+        [
+            stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                    unit: 1,
+                    field: STGUnitField::LeaderWorldmapID,
+                }),
+                "Worldmap ID may cause post-mission issues",
+            ),
+            stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGTail {
+                    region: STGRegion::Areas,
+                    offset: tail_start,
+                },
+                "STG tail is preserved as raw bytes",
+            ),
+        ],
     );
 }
 
@@ -1724,6 +1745,1099 @@ fn stg_prefix_mutations_preserve_raw_tails_and_reject_tail_targets() {
     assert_eq!(document.float(unit_float).unwrap().to_bits(), 0x3f80_0000);
     assert_eq!(document.number(unit_number).unwrap(), 42);
     assert_raw_tail(&document, &expected_tail);
+}
+
+#[test]
+fn stg_events_project_blocks_scripts_parameters_and_catalog_metadata() {
+    let fixture = complete_stg_fixture();
+    let document = STGDocument::parse(fixture.bytes).unwrap();
+
+    let first_block = document.event_block(0).unwrap();
+    assert_eq!(first_block.header, 0x0102_0304);
+    assert_eq!(first_block.event_count, 2);
+    let empty_block = document.event_block(1).unwrap();
+    assert_eq!(empty_block.header, 0x0506_0708);
+    assert_eq!(empty_block.event_count, 0);
+
+    let event_target = STGEventTarget { block: 0, event: 0 };
+    let event = document.event(event_target).unwrap();
+    assert_eq!(event.target, event_target);
+    assert_eq!(event.id, 500);
+    assert_eq!(event.description.decoded(), Some("Primary Event"));
+    assert_eq!(event.condition_count, 1);
+    assert_eq!(event.action_count, 1);
+
+    let condition_target = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let condition = document.script(condition_target).unwrap();
+    assert_eq!(condition.target, condition_target);
+    assert_eq!(condition.id, 19);
+    assert_eq!(condition.name, Some("CON_VAR"));
+    assert_eq!(condition.parameter_count, 2);
+    assert_eq!(condition.expected_parameter_count, Some(3));
+    assert_eq!(condition.label().to_string(), "CON_VAR");
+
+    let integer_target = STGParameterTarget {
+        script: condition_target,
+        parameter: 0,
+    };
+    assert_eq!(
+        document.parameter(integer_target).unwrap(),
+        kufeditor_formats::STGParameter {
+            target: integer_target,
+            hint: Some("VariableID"),
+            reference: Some(STGReferenceKind::Variable),
+            value: STGValue::Integer(23),
+        }
+    );
+    let float_target = STGParameterTarget {
+        script: condition_target,
+        parameter: 1,
+    };
+    assert_eq!(
+        document.parameter(float_target).unwrap().value,
+        STGValue::Float(STGFloatValue::from_bits((-0.0_f32).to_bits()))
+    );
+
+    let action_target = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Action,
+        script: 0,
+    };
+    let string_target = STGParameterTarget {
+        script: action_target,
+        parameter: 0,
+    };
+    assert_eq!(
+        document.parameter(string_target).unwrap().value,
+        STGValue::String(STGText::Decoded("action".into()))
+    );
+    let enum_target = STGParameterTarget {
+        script: action_target,
+        parameter: 1,
+    };
+    assert_eq!(
+        document.parameter(enum_target).unwrap().value,
+        STGValue::Enum(-3)
+    );
+
+    let mut unknown_fixture = complete_stg_fixture();
+    let condition_type = unknown_fixture.offsets.condition_parameter_count - 4;
+    unknown_fixture.bytes[condition_type..condition_type + 4]
+        .copy_from_slice(&9_999_u32.to_le_bytes());
+    let unknown = STGDocument::parse(unknown_fixture.bytes).unwrap();
+    let script = unknown.script(condition_target).unwrap();
+    assert_eq!(script.id, 9_999);
+    assert_eq!(script.name, None);
+    assert_eq!(script.expected_parameter_count, None);
+    assert_eq!(script.label().to_string(), "Unknown condition 9999");
+    assert_eq!(
+        unknown.parameter(integer_target).unwrap().hint,
+        None,
+        "unknown scripts must not borrow hints from another catalog entry"
+    );
+}
+
+#[test]
+fn stg_structure_inserts_removes_and_restores_exact_subtrees() {
+    let mut empty = STGDocument::parse(empty_stg_fixture()).unwrap();
+    let undo_insert = changed_structure(empty.insert_event(0, 0).unwrap());
+    let expected_undo_insert = undo_insert.clone();
+    assert_eq!(empty.event_block_count(), Some(1));
+    assert_eq!(empty.event_block(0).unwrap().header, 0);
+    let inserted = empty.event(STGEventTarget { block: 0, event: 0 }).unwrap();
+    assert_eq!(inserted.id, 0);
+    assert_eq!(inserted.description.decoded(), Some("New Event"));
+    assert_eq!((inserted.condition_count, inserted.action_count), (0, 0));
+
+    let redo_insert = changed_structure(empty.restore_structure(undo_insert).unwrap());
+    assert_eq!(empty.event_block_count(), Some(0));
+    let undo_again = changed_structure(empty.restore_structure(redo_insert).unwrap());
+    assert_eq!(undo_again, expected_undo_insert);
+    assert_eq!(empty.event_block_count(), Some(1));
+    changed_structure(empty.restore_structure(undo_again).unwrap());
+    assert_eq!(empty.event_block_count(), Some(0));
+
+    let mut direct_remove = STGDocument::parse(empty_stg_fixture()).unwrap();
+    changed_structure(direct_remove.insert_event(0, 0).unwrap());
+    let restore_removed = changed_structure(direct_remove.remove_event(0, 0).unwrap());
+    assert_eq!(direct_remove.event_block_count(), Some(1));
+    assert_eq!(direct_remove.event_block(0).unwrap().event_count, 0);
+    changed_structure(direct_remove.restore_structure(restore_removed).unwrap());
+    assert_eq!(direct_remove.event_block(0).unwrap().event_count, 1);
+
+    let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let block_one_before = document.event_block(1).unwrap();
+    let undo_event = changed_structure(document.insert_event(0, 1).unwrap());
+    assert_eq!(document.event_block(0).unwrap().event_count, 3);
+    assert_eq!(
+        document
+            .event(STGEventTarget { block: 0, event: 1 })
+            .unwrap()
+            .id,
+        0
+    );
+    assert_eq!(document.event_block(1).unwrap(), block_one_before);
+    let redo_event = changed_structure(document.restore_structure(undo_event).unwrap());
+    assert_eq!(document.event_block(0).unwrap().event_count, 2);
+    assert_eq!(document.event_block(1).unwrap(), block_one_before);
+    changed_structure(document.restore_structure(redo_event).unwrap());
+
+    let condition_target = STGScriptTarget {
+        block: 0,
+        event: 1,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let undo_condition = changed_structure(document.insert_script(condition_target, 27).unwrap());
+    let condition = document.script(condition_target).unwrap();
+    assert_eq!(condition.name, Some("CON_ALWAYS_TRUE"));
+    assert_eq!(condition.parameter_count, 0);
+    let redo_condition = changed_structure(document.restore_structure(undo_condition).unwrap());
+    assert_eq!(
+        document
+            .event(STGEventTarget { block: 0, event: 1 })
+            .unwrap()
+            .condition_count,
+        0
+    );
+    changed_structure(document.restore_structure(redo_condition).unwrap());
+
+    let action_target = STGScriptTarget {
+        kind: STGScriptKind::Action,
+        ..condition_target
+    };
+    let undo_action = changed_structure(document.insert_script(action_target, 7).unwrap());
+    assert_eq!(document.script(action_target).unwrap().parameter_count, 3);
+    for parameter in 0..3 {
+        assert_eq!(
+            document
+                .parameter(STGParameterTarget {
+                    script: action_target,
+                    parameter,
+                })
+                .unwrap()
+                .value,
+            STGValue::Integer(0)
+        );
+    }
+    let redo_action = changed_structure(document.restore_structure(undo_action).unwrap());
+    assert_eq!(document.event_block(1).unwrap(), block_one_before);
+    changed_structure(document.restore_structure(redo_action).unwrap());
+
+    let removed_action = changed_structure(document.remove_script(action_target).unwrap());
+    assert_eq!(
+        document
+            .event(STGEventTarget { block: 0, event: 1 })
+            .unwrap()
+            .action_count,
+        0
+    );
+    changed_structure(document.restore_structure(removed_action).unwrap());
+    assert_eq!(document.script(action_target).unwrap().parameter_count, 3);
+    assert_eq!(document.event_block(1).unwrap(), block_one_before);
+}
+
+#[test]
+fn stg_structure_changes_script_and_value_types_with_exact_undo() {
+    let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let condition = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+
+    let repair = changed_structure(document.change_script_type(condition, 19).unwrap());
+    assert_eq!(document.script(condition).unwrap().parameter_count, 3);
+    assert_eq!(
+        document
+            .parameter(STGParameterTarget {
+                script: condition,
+                parameter: 0,
+            })
+            .unwrap()
+            .value,
+        STGValue::Integer(23)
+    );
+    assert_eq!(
+        document
+            .parameter(STGParameterTarget {
+                script: condition,
+                parameter: 1,
+            })
+            .unwrap()
+            .value,
+        STGValue::Float(STGFloatValue::from_bits((-0.0_f32).to_bits()))
+    );
+    assert_eq!(
+        document
+            .parameter(STGParameterTarget {
+                script: condition,
+                parameter: 2,
+            })
+            .unwrap()
+            .value,
+        STGValue::Integer(0)
+    );
+    assert_eq!(
+        document.change_script_type(condition, 19).unwrap(),
+        STGMutation::Unchanged
+    );
+
+    let redo_repair = changed_structure(document.restore_structure(repair).unwrap());
+    assert_eq!(document.script(condition).unwrap().parameter_count, 2);
+    changed_structure(document.restore_structure(redo_repair).unwrap());
+    assert_eq!(document.script(condition).unwrap().parameter_count, 3);
+
+    for (type_id, expected_count) in [(27, 0), (8, 1), (0, 2), (1, 3)] {
+        let mut candidate = document.clone();
+        changed_structure(candidate.change_script_type(condition, type_id).unwrap());
+        assert_eq!(
+            candidate.script(condition).unwrap().parameter_count,
+            expected_count
+        );
+    }
+
+    let float_value = STGValueTarget::ScriptParameter(STGParameterTarget {
+        script: condition,
+        parameter: 1,
+    });
+    let float_bits = (-0.0_f32).to_bits();
+    let undo_value = changed_structure(
+        document
+            .change_value_type(float_value, STGValueKind::String)
+            .unwrap(),
+    );
+    assert_eq!(
+        document.value(float_value).unwrap(),
+        STGValue::String(STGText::Decoded("".into()))
+    );
+    let redo_value = changed_structure(document.restore_structure(undo_value).unwrap());
+    assert_eq!(
+        document.value(float_value).unwrap(),
+        STGValue::Float(STGFloatValue::from_bits(float_bits))
+    );
+    changed_structure(document.restore_structure(redo_value).unwrap());
+    assert_eq!(
+        document.value(float_value).unwrap(),
+        STGValue::String(STGText::Decoded("".into()))
+    );
+
+    match document.change_script_type(condition, 9_999) {
+        Err(FormatError::STGUnknownScriptType {
+            kind: STGScriptKind::Condition,
+            id: 9_999,
+        }) => {}
+        Err(other) => panic!("unexpected unknown-script error: {other}"),
+        Ok(_) => panic!("expected an unknown-script rejection"),
+    }
+}
+
+#[test]
+fn stg_structure_removes_first_middle_and_last_events_with_exact_restore() {
+    for removed_index in 0..3 {
+        let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+        changed_structure(document.insert_event(0, 2).unwrap());
+        let before = event_ids(&document, 0);
+        assert_eq!(before, vec![500, 501, 0]);
+
+        let undo = changed_structure(document.remove_event(0, removed_index).unwrap());
+        let mut expected = before.clone();
+        expected.remove(removed_index);
+        assert_eq!(event_ids(&document, 0), expected);
+
+        let redo = changed_structure(document.restore_structure(undo).unwrap());
+        assert_eq!(event_ids(&document, 0), before);
+        changed_structure(document.restore_structure(redo).unwrap());
+        assert_eq!(event_ids(&document, 0), expected);
+    }
+}
+
+#[test]
+fn stg_structure_repairs_both_script_kinds_and_unknown_types() {
+    let condition = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let action = STGScriptTarget {
+        kind: STGScriptKind::Action,
+        ..condition
+    };
+
+    for (target, shapes) in [
+        (condition, [(27, 0), (8, 1), (0, 2), (1, 3)]),
+        (action, [(22, 0), (8, 1), (10, 2), (7, 3)]),
+    ] {
+        for (type_id, expected_count) in shapes {
+            let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+            let undo = changed_structure(document.change_script_type(target, type_id).unwrap());
+            assert_eq!(
+                document.script(target).unwrap().parameter_count,
+                expected_count
+            );
+            changed_structure(document.restore_structure(undo).unwrap());
+        }
+    }
+
+    let fixture = complete_stg_fixture();
+    let mut longer = fixture.bytes;
+    longer
+        [fixture.offsets.condition_parameter_count..fixture.offsets.condition_parameter_count + 4]
+        .copy_from_slice(&4_u32.to_le_bytes());
+    let mut extra = Vec::new();
+    extra.extend_from_slice(&0_u32.to_le_bytes());
+    extra.extend_from_slice(&77_i32.to_le_bytes());
+    extra.extend_from_slice(&0_u32.to_le_bytes());
+    extra.extend_from_slice(&88_i32.to_le_bytes());
+    longer.splice(
+        fixture.offsets.action_count..fixture.offsets.action_count,
+        extra,
+    );
+    let mut document = STGDocument::parse(longer).unwrap();
+    let undo = changed_structure(document.change_script_type(condition, 19).unwrap());
+    assert_eq!(document.script(condition).unwrap().parameter_count, 3);
+    assert_eq!(
+        document
+            .parameter(STGParameterTarget {
+                script: condition,
+                parameter: 2,
+            })
+            .unwrap()
+            .value,
+        STGValue::Integer(77)
+    );
+    changed_structure(document.restore_structure(undo).unwrap());
+    assert_eq!(document.script(condition).unwrap().parameter_count, 4);
+
+    let mut unknown_fixture = complete_stg_fixture();
+    let type_offset = unknown_fixture.offsets.condition_parameter_count - 4;
+    unknown_fixture.bytes[type_offset..type_offset + 4].copy_from_slice(&9_999_u32.to_le_bytes());
+    let mut unknown = STGDocument::parse(unknown_fixture.bytes).unwrap();
+    let undo = changed_structure(unknown.change_script_type(condition, 2).unwrap());
+    assert_eq!(
+        unknown.script(condition).unwrap().name,
+        Some("CON_TROOP_IN_AREA")
+    );
+    assert_eq!(unknown.script(condition).unwrap().parameter_count, 2);
+    changed_structure(unknown.restore_structure(undo).unwrap());
+    assert_eq!(unknown.script(condition).unwrap().id, 9_999);
+}
+
+#[test]
+fn stg_structure_changes_every_value_kind_for_variables_and_scripts() {
+    let condition = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let action = STGScriptTarget {
+        kind: STGScriptKind::Action,
+        ..condition
+    };
+    let sources = [
+        (
+            STGValueTarget::VariableInitial { variable: 0 },
+            STGValueKind::Integer,
+            ExpectedSTGValue::Integer(-12),
+        ),
+        (
+            STGValueTarget::VariableInitial { variable: 1 },
+            STGValueKind::Float,
+            ExpectedSTGValue::Float(17.25_f32.to_bits()),
+        ),
+        (
+            STGValueTarget::VariableInitial { variable: 2 },
+            STGValueKind::String,
+            ExpectedSTGValue::String("variable"),
+        ),
+        (
+            STGValueTarget::VariableInitial { variable: 3 },
+            STGValueKind::Enum,
+            ExpectedSTGValue::Enum(7),
+        ),
+        (
+            STGValueTarget::ScriptParameter(STGParameterTarget {
+                script: condition,
+                parameter: 0,
+            }),
+            STGValueKind::Integer,
+            ExpectedSTGValue::Integer(23),
+        ),
+        (
+            STGValueTarget::ScriptParameter(STGParameterTarget {
+                script: condition,
+                parameter: 1,
+            }),
+            STGValueKind::Float,
+            ExpectedSTGValue::Float((-0.0_f32).to_bits()),
+        ),
+        (
+            STGValueTarget::ScriptParameter(STGParameterTarget {
+                script: action,
+                parameter: 0,
+            }),
+            STGValueKind::String,
+            ExpectedSTGValue::String("action"),
+        ),
+        (
+            STGValueTarget::ScriptParameter(STGParameterTarget {
+                script: action,
+                parameter: 1,
+            }),
+            STGValueKind::Enum,
+            ExpectedSTGValue::Enum(-3),
+        ),
+    ];
+
+    for (target, original_kind, original) in sources {
+        for replacement_kind in [
+            STGValueKind::Integer,
+            STGValueKind::Float,
+            STGValueKind::String,
+            STGValueKind::Enum,
+        ] {
+            if replacement_kind == original_kind {
+                continue;
+            }
+            let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+            let undo = changed_structure(
+                document
+                    .change_value_type(target, replacement_kind)
+                    .unwrap(),
+            );
+            assert_default_stg_value(&document.value(target).unwrap(), replacement_kind);
+            changed_structure(document.restore_structure(undo).unwrap());
+            original.assert_eq(&document.value(target).unwrap());
+        }
+    }
+}
+
+#[test]
+fn stg_structure_supports_multi_entry_and_scalar_interleaved_undo() {
+    let mut document = STGDocument::parse(empty_stg_fixture()).unwrap();
+    let undo_event = changed_structure(document.insert_event(0, 0).unwrap());
+    let script = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let undo_script = changed_structure(document.insert_script(script, 27).unwrap());
+    let redo_script = changed_structure(document.restore_structure(undo_script).unwrap());
+    let redo_event = changed_structure(document.restore_structure(undo_event).unwrap());
+    assert_eq!(document.event_block_count(), Some(0));
+    changed_structure(document.restore_structure(redo_event).unwrap());
+    changed_structure(document.restore_structure(redo_script).unwrap());
+    assert_eq!(document.script(script).unwrap().id, 27);
+
+    let mut scalar_interleaved = STGDocument::parse(empty_stg_fixture()).unwrap();
+    let undo_event = changed_structure(scalar_interleaved.insert_event(0, 0).unwrap());
+    let id = STGNumberTarget::EventID { block: 0, event: 0 };
+    let previous = match scalar_interleaved.set_number(id, 42).unwrap() {
+        STGMutation::Changed { previous } => previous,
+        STGMutation::Unchanged => panic!("expected scalar change"),
+    };
+    scalar_interleaved.set_number(id, previous).unwrap();
+    changed_structure(scalar_interleaved.restore_structure(undo_event).unwrap());
+    assert_eq!(scalar_interleaved.event_block_count(), Some(0));
+}
+
+#[test]
+fn stg_structure_previews_history_charge_before_allocating_an_inverse() {
+    let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let script = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Action,
+        script: 0,
+    };
+    let edit = STGStructuralEdit::RemoveScript { target: script };
+    let preview = document.preview_structure(edit).unwrap();
+    assert!(preview.is_changed());
+    assert_eq!(preview.edit(), edit);
+    assert!(preview.retained_bytes() > 0);
+
+    let mut prospective = document.clone();
+    let inverse = changed_structure(
+        prospective
+            .apply_structure_preview(preview.clone())
+            .unwrap(),
+    );
+    assert_eq!(inverse.retained_bytes(), preview.retained_bytes());
+    assert_eq!(document.script(script).unwrap().id, 55);
+
+    let string = STGTextTarget::ParameterString {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script,
+            parameter: 0,
+        }),
+    };
+    document.set_text(string, "changed".to_owned()).unwrap();
+    assert_structural_state_mismatch(
+        document.apply_structure_preview(preview),
+        STGStructuralLocation::Script(script),
+    );
+    assert_eq!(document.text(string).unwrap().decoded(), Some("changed"));
+
+    let neutral = document
+        .preview_structure(STGStructuralEdit::ChangeScriptType {
+            target: script,
+            type_id: 55,
+        })
+        .unwrap();
+    assert!(!neutral.is_changed());
+    assert_eq!(neutral.retained_bytes(), 0);
+    assert_eq!(
+        document.apply_structure_preview(neutral).unwrap(),
+        STGMutation::Unchanged
+    );
+
+    let foreign = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let foreign_preview = foreign.preview_structure(edit).unwrap();
+    assert!(matches!(
+        document.apply_structure_preview(foreign_preview),
+        Err(FormatError::STGStructuralLineageMismatch)
+    ));
+}
+
+#[test]
+fn stg_structure_rejects_stale_images_and_raw_tails_atomically() {
+    let mut document = STGDocument::parse(empty_stg_fixture()).unwrap();
+    let inverse = changed_structure(document.insert_event(0, 0).unwrap());
+    let id_target = STGNumberTarget::EventID { block: 0, event: 0 };
+    document.set_number(id_target, 42).unwrap();
+    match document.restore_structure(inverse) {
+        Err(FormatError::STGStructuralStateMismatch {
+            location: STGStructuralLocation::Event { block: 0, event: 0 },
+        }) => {}
+        Err(other) => panic!("unexpected stale-image error: {other}"),
+        Ok(_) => panic!("expected a stale-image rejection"),
+    }
+    assert_eq!(document.number(id_target).unwrap(), 42);
+    assert_eq!(document.event_block(0).unwrap().event_count, 1);
+
+    let mut raw_bytes = stg_prefix_fixture(0);
+    raw_bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+    let mut raw = STGDocument::parse(raw_bytes).unwrap();
+    match raw.insert_event(0, 0) {
+        Err(FormatError::STGStructureUnavailable {
+            location: STGStructuralLocation::Event { block: 0, event: 0 },
+        }) => {}
+        Err(other) => panic!("unexpected raw-tail structure error: {other}"),
+        Ok(_) => panic!("expected raw-tail structural rejection"),
+    }
+}
+
+#[test]
+fn stg_structure_rejects_foreign_and_exact_subtree_mismatches() {
+    let mut first = STGDocument::parse(empty_stg_fixture()).unwrap();
+    let foreign = changed_structure(first.insert_event(0, 0).unwrap());
+    let mut second = STGDocument::parse(empty_stg_fixture()).unwrap();
+    changed_structure(second.insert_event(0, 0).unwrap());
+    assert!(matches!(
+        second.restore_structure(foreign),
+        Err(FormatError::STGStructuralLineageMismatch)
+    ));
+    assert_eq!(second.event_block(0).unwrap().event_count, 1);
+
+    let mut script_document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let script = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let script_inverse = changed_structure(script_document.change_script_type(script, 19).unwrap());
+    let added_parameter = STGValueTarget::ScriptParameter(STGParameterTarget {
+        script,
+        parameter: 2,
+    });
+    script_document
+        .set_number(
+            STGNumberTarget::ParameterInteger {
+                value: added_parameter,
+            },
+            91,
+        )
+        .unwrap();
+    assert_structural_state_mismatch(
+        script_document.restore_structure(script_inverse),
+        STGStructuralLocation::Script(script),
+    );
+    assert_eq!(
+        script_document
+            .number(STGNumberTarget::ParameterInteger {
+                value: added_parameter,
+            })
+            .unwrap(),
+        91
+    );
+
+    let mut value_document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let value = STGValueTarget::VariableInitial { variable: 0 };
+    let value_inverse = changed_structure(
+        value_document
+            .change_value_type(value, STGValueKind::Float)
+            .unwrap(),
+    );
+    let float_target = STGFloatTarget::Parameter { value };
+    let replacement = STGFloatValue::from_bits(0x7fc0_1234);
+    value_document.set_float(float_target, replacement).unwrap();
+    assert_structural_state_mismatch(
+        value_document.restore_structure(value_inverse),
+        STGStructuralLocation::Value(value),
+    );
+    assert_eq!(value_document.float(float_target).unwrap(), replacement);
+}
+
+#[test]
+fn stg_structure_rejects_every_command_for_an_opaque_tail() {
+    let mut bytes = stg_prefix_fixture(0);
+    bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+    let mut document = STGDocument::parse(bytes).unwrap();
+    let event = STGEventTarget { block: 0, event: 0 };
+    let script = STGScriptTarget {
+        block: 0,
+        event: 0,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    let value = STGValueTarget::VariableInitial { variable: 0 };
+
+    let event_location = STGStructuralLocation::Event {
+        block: event.block,
+        event: event.event,
+    };
+    assert_structure_unavailable(document.insert_event(0, 0), event_location);
+    assert_structure_unavailable(document.remove_event(0, 0), event_location);
+    assert_structure_unavailable(
+        document.insert_script(script, 9_999),
+        STGStructuralLocation::Script(script),
+    );
+    assert_structure_unavailable(
+        document.remove_script(script),
+        STGStructuralLocation::Script(script),
+    );
+    assert_structure_unavailable(
+        document.change_script_type(script, 9_999),
+        STGStructuralLocation::Script(script),
+    );
+    assert_structure_unavailable(
+        document.change_value_type(value, STGValueKind::String),
+        STGStructuralLocation::Value(value),
+    );
+    assert!(matches!(document.tail_status(), STGTailStatus::Raw { .. }));
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the expected diagnostic matrix is easier to audit beside its synthetic corruptions"
+)]
+fn stg_references_report_duplicate_shapes_text_and_missing_ids() {
+    let fixture = complete_stg_fixture();
+    let offsets = fixture.offsets;
+    let mut bytes = fixture.bytes;
+
+    bytes[offsets.variable_float_type - 4..offsets.variable_float_type]
+        .copy_from_slice(&100_u32.to_le_bytes());
+    let second_event = offsets.action_enum_type + 8;
+    bytes[second_event + 64..second_event + 68].copy_from_slice(&500_u32.to_le_bytes());
+    let action_type = offsets.action_parameter_count - 4;
+    bytes[action_type..action_type + 4].copy_from_slice(&9_999_u32.to_le_bytes());
+    bytes[offsets.action_string_type + 8] = 0xff;
+
+    let duplicate_area = bytes[offsets.area_description..offsets.area_description + 84].to_vec();
+    bytes.splice(
+        offsets.area_description + 84..offsets.area_description + 84,
+        duplicate_area,
+    );
+    bytes[offsets.area_count..offsets.area_count + 4].copy_from_slice(&2_u32.to_le_bytes());
+
+    let mut document = STGDocument::parse(bytes).unwrap();
+    let missing_refs = STGScriptTarget {
+        block: 0,
+        event: 1,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    changed_structure(document.insert_script(missing_refs, 2).unwrap());
+    for parameter in 0..2 {
+        document
+            .set_number(
+                STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                        script: missing_refs,
+                        parameter,
+                    }),
+                },
+                999,
+            )
+            .unwrap();
+    }
+    let missing_trigger = STGScriptTarget {
+        kind: STGScriptKind::Action,
+        script: 0,
+        ..missing_refs
+    };
+    changed_structure(document.insert_script(missing_trigger, 0).unwrap());
+    document
+        .set_number(
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: missing_trigger,
+                    parameter: 0,
+                }),
+            },
+            999,
+        )
+        .unwrap();
+
+    let diagnostics = document.diagnostics();
+    for expected in [
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGNumber(STGNumberTarget::Area {
+                area: 0,
+                field: STGAreaField::AreaID,
+            }),
+            message: "Duplicate area ID",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGNumber(STGNumberTarget::VariableID { variable: 0 }),
+            message: "Duplicate variable ID",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGNumber(STGNumberTarget::EventID {
+                block: 0,
+                event: 0,
+            }),
+            message: "Duplicate event ID",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGScript(STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Condition,
+                script: 0,
+            }),
+            message: "Condition parameter count differs from catalog",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGScript(STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Action,
+                script: 0,
+            }),
+            message: "Unknown action type",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGText(STGTextTarget::ParameterString {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 0,
+                    },
+                    parameter: 0,
+                }),
+            }),
+            message: "String parameter is not valid CP949",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGNumber(STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: missing_refs,
+                    parameter: 0,
+                }),
+            }),
+            message: "Missing troop reference",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGNumber(STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: missing_refs,
+                    parameter: 1,
+                }),
+            }),
+            message: "Missing area reference",
+        },
+        Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGNumber(STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: missing_trigger,
+                    parameter: 0,
+                }),
+            }),
+            message: "Missing trigger reference",
+        },
+    ] {
+        assert!(
+            diagnostics.contains(&expected),
+            "missing diagnostic {expected:?} in {diagnostics:#?}"
+        );
+    }
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "Missing variable reference"
+            && diagnostic.location
+                == DiagnosticLocation::STGNumber(STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                        script: STGScriptTarget {
+                            block: 0,
+                            event: 0,
+                            kind: STGScriptKind::Condition,
+                            script: 0,
+                        },
+                        parameter: 0,
+                    }),
+                })
+    }));
+}
+
+#[test]
+fn stg_references_compare_signed_payloads_as_exact_unsigned_id_bits() {
+    let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    document
+        .set_number(
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::UniqueID,
+            },
+            i64::from(u32::MAX),
+        )
+        .unwrap();
+    document
+        .set_number(
+            STGNumberTarget::Area {
+                area: 0,
+                field: STGAreaField::AreaID,
+            },
+            i64::from(u32::MAX),
+        )
+        .unwrap();
+    document
+        .set_number(
+            STGNumberTarget::EventID { block: 0, event: 0 },
+            i64::from(u32::MAX),
+        )
+        .unwrap();
+
+    let condition = STGScriptTarget {
+        block: 0,
+        event: 1,
+        kind: STGScriptKind::Condition,
+        script: 0,
+    };
+    changed_structure(document.insert_script(condition, 2).unwrap());
+    for parameter in 0..2 {
+        document
+            .set_number(
+                STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                        script: condition,
+                        parameter,
+                    }),
+                },
+                -1,
+            )
+            .unwrap();
+    }
+    let trigger = STGScriptTarget {
+        kind: STGScriptKind::Action,
+        script: 0,
+        ..condition
+    };
+    changed_structure(document.insert_script(trigger, 0).unwrap());
+    document
+        .set_number(
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: trigger,
+                    parameter: 0,
+                }),
+            },
+            -1,
+        )
+        .unwrap();
+
+    let locations = [
+        STGParameterTarget {
+            script: condition,
+            parameter: 0,
+        },
+        STGParameterTarget {
+            script: condition,
+            parameter: 1,
+        },
+        STGParameterTarget {
+            script: trigger,
+            parameter: 0,
+        },
+    ];
+    let diagnostics = document.diagnostics();
+    assert!(diagnostics.iter().all(|diagnostic| {
+        !locations.iter().any(|target| {
+            diagnostic.location
+                == DiagnosticLocation::STGNumber(STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::ScriptParameter(*target),
+                })
+                && diagnostic.message.starts_with("Missing ")
+        })
+    }));
+}
+
+#[test]
+fn stg_references_warn_when_the_tail_is_preserved_raw() {
+    let mut bytes = stg_prefix_fixture(0);
+    let tail_start = bytes.len();
+    bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+    let document = STGDocument::parse(bytes).unwrap();
+    assert_eq!(
+        document.diagnostics(),
+        vec![Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGTail {
+                region: STGRegion::Areas,
+                offset: tail_start,
+            },
+            message: "STG tail is preserved as raw bytes",
+        }]
+    );
+}
+
+#[test]
+fn stg_references_bound_the_diagnostic_result() {
+    let bytes = stg_prefix_fixture(2_500);
+    let tail_start = bytes.len();
+    let document = STGDocument::parse(bytes).unwrap();
+    let diagnostics = document.diagnostics();
+    assert_eq!(diagnostics.len(), 4_096);
+    assert_eq!(
+        diagnostics.get(diagnostics.len() - 2),
+        Some(&Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGTail {
+                region: STGRegion::Areas,
+                offset: tail_start,
+            },
+            message: "STG tail is preserved as raw bytes",
+        })
+    );
+    assert_eq!(
+        diagnostics.last(),
+        Some(&Diagnostic {
+            severity: Severity::Warning,
+            location: DiagnosticLocation::STGDocument,
+            message: "Additional STG diagnostics were omitted",
+        })
+    );
+}
+
+fn changed_structure(
+    mutation: STGMutation<kufeditor_formats::STGStructuralImage>,
+) -> kufeditor_formats::STGStructuralImage {
+    match mutation {
+        STGMutation::Changed { previous } => previous,
+        STGMutation::Unchanged => panic!("expected an STG structural change"),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ExpectedSTGValue {
+    Integer(i32),
+    Float(u32),
+    String(&'static str),
+    Enum(i32),
+}
+
+impl ExpectedSTGValue {
+    fn assert_eq(self, actual: &STGValue<'_>) {
+        match self {
+            Self::Integer(expected) => assert_eq!(actual, &STGValue::Integer(expected)),
+            Self::Float(expected) => {
+                assert_eq!(actual, &STGValue::Float(STGFloatValue::from_bits(expected)));
+            }
+            Self::String(expected) => {
+                assert_eq!(actual, &STGValue::String(STGText::Decoded(expected.into())));
+            }
+            Self::Enum(expected) => assert_eq!(actual, &STGValue::Enum(expected)),
+        }
+    }
+}
+
+fn assert_default_stg_value(actual: &STGValue<'_>, kind: STGValueKind) {
+    match kind {
+        STGValueKind::Integer => assert_eq!(actual, &STGValue::Integer(0)),
+        STGValueKind::Float => {
+            assert_eq!(actual, &STGValue::Float(STGFloatValue::from_bits(0)));
+        }
+        STGValueKind::String => {
+            assert_eq!(actual, &STGValue::String(STGText::Decoded("".into())));
+        }
+        STGValueKind::Enum => assert_eq!(actual, &STGValue::Enum(0)),
+    }
+}
+
+fn event_ids(document: &STGDocument, block: usize) -> Vec<u32> {
+    let count = document
+        .event_block(block)
+        .unwrap_or_else(|error| panic!("failed to read test event block {block}: {error}"))
+        .event_count;
+    (0..count)
+        .map(|event| {
+            document
+                .event(STGEventTarget { block, event })
+                .unwrap_or_else(|error| {
+                    panic!("failed to read test event {block}:{event}: {error}")
+                })
+                .id
+        })
+        .collect()
+}
+
+fn assert_structure_unavailable<T>(
+    result: Result<T, FormatError>,
+    expected_location: STGStructuralLocation,
+) {
+    match result {
+        Err(FormatError::STGStructureUnavailable { location }) => {
+            assert_eq!(location, expected_location);
+        }
+        Err(other) => panic!("unexpected opaque-tail error: {other}"),
+        Ok(_) => panic!("expected an opaque-tail structural rejection"),
+    }
+}
+
+fn assert_structural_state_mismatch<T>(
+    result: Result<T, FormatError>,
+    expected_location: STGStructuralLocation,
+) {
+    match result {
+        Err(FormatError::STGStructuralStateMismatch { location }) => {
+            assert_eq!(location, expected_location);
+        }
+        Err(other) => panic!("unexpected structural-state error: {other}"),
+        Ok(_) => panic!("expected a structural-state rejection"),
+    }
 }
 
 fn changed_text_image(mutation: STGMutation<STGTextImage>) -> STGTextImage {

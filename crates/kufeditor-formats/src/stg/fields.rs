@@ -1,3 +1,7 @@
+use std::fmt;
+
+use super::text::STGText;
+
 const I32_BOUNDS: (i64, i64) = (i32::MIN as i64, i32::MAX as i64);
 const U32_BOUNDS: (i64, i64) = (0, u32::MAX as i64);
 const U8_BOUNDS: (i64, i64) = (0, u8::MAX as i64);
@@ -168,6 +172,21 @@ pub enum STGScriptKind {
     Action,
 }
 
+impl fmt::Display for STGScriptKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Condition => "condition",
+            Self::Action => "action",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct STGEventTarget {
+    pub block: usize,
+    pub event: usize,
+}
+
 impl STGScriptKind {
     pub const fn label(self) -> &'static str {
         match self {
@@ -195,6 +214,82 @@ pub struct STGParameterTarget {
 pub enum STGValueTarget {
     VariableInitial { variable: usize },
     ScriptParameter(STGParameterTarget),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum STGReferenceKind {
+    Troop,
+    Area,
+    Variable,
+    Event,
+    Trigger,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum STGValue<'a> {
+    Integer(i32),
+    Float(STGFloatValue),
+    String(STGText<'a>),
+    Enum(i32),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct STGEventBlock {
+    pub header: u32,
+    pub event_count: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct STGEvent<'a> {
+    pub target: STGEventTarget,
+    pub description: STGText<'a>,
+    pub id: u32,
+    pub condition_count: usize,
+    pub action_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct STGScript {
+    pub target: STGScriptTarget,
+    pub id: u32,
+    pub name: Option<&'static str>,
+    pub parameter_count: usize,
+    pub expected_parameter_count: Option<usize>,
+}
+
+impl STGScript {
+    pub const fn label(self) -> STGScriptLabel {
+        match self.name {
+            Some(name) => STGScriptLabel::Known(name),
+            None => STGScriptLabel::Unknown {
+                kind: self.target.kind,
+                id: self.id,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum STGScriptLabel {
+    Known(&'static str),
+    Unknown { kind: STGScriptKind, id: u32 },
+}
+
+impl fmt::Display for STGScriptLabel {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Known(name) => formatter.write_str(name),
+            Self::Unknown { kind, id } => write!(formatter, "Unknown {kind} {id}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct STGParameter<'a> {
+    pub target: STGParameterTarget,
+    pub hint: Option<&'static str>,
+    pub reference: Option<STGReferenceKind>,
+    pub value: STGValue<'a>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

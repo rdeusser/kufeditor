@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::{
     diagnostic::{Diagnostic, DiagnosticLocation, Severity},
@@ -14,20 +17,13 @@ use crate::{
 
 use super::{
     STGAbilityOwner, STGAreaField, STGAreaFloatField, STGDocument, STGFloatTarget, STGFloatValue,
-    STGFooterField, STGHeaderTextField, STGModel, STGMutation, STGNumberTarget, STGScriptKind,
-    STGSkillField, STGSkillOwner, STGTail, STGText, STGTextImage, STGTextTarget, STGUnitField,
-    STGUnitFloatField, STGValueTarget, retained_model_bytes,
+    STGFooterField, STGHeaderTextField, STGModel, STGMutation, STGNumberTarget, STGParameterTarget,
+    STGParsedTail, STGReferenceKind, STGScriptKind, STGScriptTarget, STGSkillField, STGSkillOwner,
+    STGTail, STGText, STGTextImage, STGTextTarget, STGUnitField, STGUnitFloatField, STGValueTarget,
+    catalog, retained_model_bytes,
     text::{self, STGTextImageKind},
     wire,
 };
-
-#[cfg(test)]
-#[allow(
-    dead_code,
-    reason = "the shared integration fixture exposes offsets used by other STG test modules"
-)]
-#[path = "../../tests/support/stg.rs"]
-mod stg_test_support;
 
 impl STGDocument {
     pub fn number(&self, target: STGNumberTarget) -> Result<i64, FormatError> {
@@ -56,74 +52,30 @@ impl STGDocument {
         assign_number(Arc::make_mut(&mut prospective), target, value)?;
         validate_actual_model(&prospective, projected, super::preflight::MODEL_LIMIT)?;
         self.model = prospective;
+        self.revision = Arc::new(());
         Ok(STGMutation::Changed { previous })
     }
 
     pub fn diagnostics(&self) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-        let mut remaining_unit_ids = HashMap::new();
-        for unit in &self.model.units {
-            *remaining_unit_ids.entry(unit.unique_id).or_insert(0_usize) += 1;
-        }
+        let mut diagnostics = DiagnosticCollector::new();
+        diagnose_units(&self.model.units, &mut diagnostics);
 
-        for (unit_index, unit) in self.model.units.iter().enumerate() {
-            let has_later_duplicate = match remaining_unit_ids.get_mut(&unit.unique_id) {
-                Some(remaining) => {
-                    *remaining -= 1;
-                    *remaining > 0
-                }
-                None => unreachable!("every STG unit ID was counted before validation"),
-            };
-            if unit.name.first().copied() == Some(0) {
-                diagnostics.push(stg_diagnostic(
+        let tail = match &self.model.tail {
+            STGTail::Parsed(tail) => tail,
+            STGTail::Raw { failure, .. } => {
+                diagnostics.push_required(stg_diagnostic(
                     Severity::Warning,
-                    DiagnosticLocation::STGText(STGTextTarget::UnitName { unit: unit_index }),
-                    "Unit has no name",
+                    DiagnosticLocation::STGTail {
+                        region: failure.region(),
+                        offset: failure.offset(),
+                    },
+                    "STG tail is preserved as raw bytes",
                 ));
+                return diagnostics.finish();
             }
-            if unit.ucd > 3 {
-                diagnostics.push(unit_number_diagnostic(
-                    Severity::Error,
-                    unit_index,
-                    STGUnitField::UCD,
-                    "Invalid UCD value",
-                ));
-            }
-            if unit.leader_level == 0 || unit.leader_level > 99 {
-                diagnostics.push(unit_number_diagnostic(
-                    Severity::Warning,
-                    unit_index,
-                    STGUnitField::LeaderLevel,
-                    "Level outside typical range (1-99)",
-                ));
-            }
-            if unit.leader_worldmap_id != u8::MAX && unit.leader_worldmap_id > 20 {
-                diagnostics.push(unit_number_diagnostic(
-                    Severity::Warning,
-                    unit_index,
-                    STGUnitField::LeaderWorldmapID,
-                    "Worldmap ID may cause post-mission issues",
-                ));
-            }
-            if has_later_duplicate {
-                diagnostics.push(unit_number_diagnostic(
-                    Severity::Error,
-                    unit_index,
-                    STGUnitField::UniqueID,
-                    "Duplicate unique ID",
-                ));
-            }
-            if unit.officer_count > 2 {
-                diagnostics.push(unit_number_diagnostic(
-                    Severity::Error,
-                    unit_index,
-                    STGUnitField::OfficerCount,
-                    "Officer count exceeds maximum of 2",
-                ));
-            }
-        }
-
-        diagnostics
+        };
+        diagnose_parsed_tail(&self.model, tail, &mut diagnostics);
+        diagnostics.finish()
     }
 
     pub fn text(&self, target: STGTextTarget) -> Result<STGText<'_>, FormatError> {
@@ -181,6 +133,7 @@ impl STGDocument {
         *float_slot_mut(Arc::make_mut(&mut prospective), target)? = f32::from_bits(value.to_bits());
         validate_actual_model(&prospective, projected, super::preflight::MODEL_LIMIT)?;
         self.model = prospective;
+        self.revision = Arc::new(());
         Ok(STGMutation::Changed { previous })
     }
 
@@ -265,7 +218,377 @@ impl STGDocument {
         validate_actual_model(&prospective, projected_model, model_limit)?;
         validate_actual_output(&prospective, projected_output, output_limit)?;
         self.model = prospective;
+        self.revision = Arc::new(());
         Ok(STGMutation::Changed { previous })
+    }
+}
+
+const MAX_STG_DIAGNOSTICS: usize = 4_096;
+const STG_DIAGNOSTIC_PAYLOAD_LIMIT: usize = MAX_STG_DIAGNOSTICS - 1;
+
+struct DiagnosticCollector {
+    diagnostics: Vec<Diagnostic>,
+    omitted: bool,
+}
+
+impl DiagnosticCollector {
+    const fn new() -> Self {
+        Self {
+            diagnostics: Vec::new(),
+            omitted: false,
+        }
+    }
+
+    fn push(&mut self, diagnostic: Diagnostic) {
+        if self.diagnostics.len() < STG_DIAGNOSTIC_PAYLOAD_LIMIT {
+            self.diagnostics.push(diagnostic);
+        } else {
+            self.omitted = true;
+        }
+    }
+
+    fn push_required(&mut self, diagnostic: Diagnostic) {
+        if self.diagnostics.len() == STG_DIAGNOSTIC_PAYLOAD_LIMIT {
+            let _ = self.diagnostics.pop();
+            self.omitted = true;
+        }
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn finish(mut self) -> Vec<Diagnostic> {
+        if self.omitted {
+            self.diagnostics.push(stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGDocument,
+                "Additional STG diagnostics were omitted",
+            ));
+        }
+        self.diagnostics
+    }
+}
+
+struct STGReferenceIndex {
+    troops: HashSet<u32>,
+    areas: HashSet<u32>,
+    variables: HashSet<u32>,
+    events: HashSet<u32>,
+}
+
+impl STGReferenceIndex {
+    fn new(model: &STGModel, tail: &STGParsedTail) -> Self {
+        Self {
+            troops: model.units.iter().map(|unit| unit.unique_id).collect(),
+            areas: tail.areas.iter().map(|area| area.area_id).collect(),
+            variables: tail
+                .variables
+                .iter()
+                .map(|variable| variable.variable_id)
+                .collect(),
+            events: tail
+                .event_blocks
+                .iter()
+                .flat_map(|block| block.events.iter().map(|event| event.event_id))
+                .collect(),
+        }
+    }
+
+    fn contains(&self, kind: STGReferenceKind, id: u32) -> bool {
+        match kind {
+            STGReferenceKind::Troop => self.troops.contains(&id),
+            STGReferenceKind::Area => self.areas.contains(&id),
+            STGReferenceKind::Variable => self.variables.contains(&id),
+            STGReferenceKind::Event | STGReferenceKind::Trigger => self.events.contains(&id),
+        }
+    }
+}
+
+fn diagnose_units(units: &[UnitBlock], diagnostics: &mut DiagnosticCollector) {
+    let mut remaining_ids = HashMap::new();
+    for unit in units {
+        *remaining_ids.entry(unit.unique_id).or_insert(0_usize) += 1;
+    }
+
+    for (unit_index, unit) in units.iter().enumerate() {
+        let has_later_duplicate = match remaining_ids.get_mut(&unit.unique_id) {
+            Some(remaining) => {
+                *remaining -= 1;
+                *remaining > 0
+            }
+            None => unreachable!("every STG unit ID was counted before validation"),
+        };
+        if unit.name.first().copied() == Some(0) {
+            diagnostics.push(stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGText(STGTextTarget::UnitName { unit: unit_index }),
+                "Unit has no name",
+            ));
+        }
+        if unit.ucd > 3 {
+            diagnostics.push(unit_number_diagnostic(
+                Severity::Error,
+                unit_index,
+                STGUnitField::UCD,
+                "Invalid UCD value",
+            ));
+        }
+        if unit.leader_level == 0 || unit.leader_level > 99 {
+            diagnostics.push(unit_number_diagnostic(
+                Severity::Warning,
+                unit_index,
+                STGUnitField::LeaderLevel,
+                "Level outside typical range (1-99)",
+            ));
+        }
+        if unit.leader_worldmap_id != u8::MAX && unit.leader_worldmap_id > 20 {
+            diagnostics.push(unit_number_diagnostic(
+                Severity::Warning,
+                unit_index,
+                STGUnitField::LeaderWorldmapID,
+                "Worldmap ID may cause post-mission issues",
+            ));
+        }
+        if has_later_duplicate {
+            diagnostics.push(unit_number_diagnostic(
+                Severity::Error,
+                unit_index,
+                STGUnitField::UniqueID,
+                "Duplicate unique ID",
+            ));
+        }
+        if unit.officer_count > 2 {
+            diagnostics.push(unit_number_diagnostic(
+                Severity::Error,
+                unit_index,
+                STGUnitField::OfficerCount,
+                "Officer count exceeds maximum of 2",
+            ));
+        }
+    }
+}
+
+fn diagnose_parsed_tail(
+    model: &STGModel,
+    tail: &STGParsedTail,
+    diagnostics: &mut DiagnosticCollector,
+) {
+    diagnose_tail_ids_and_text(tail, diagnostics);
+    let references = STGReferenceIndex::new(model, tail);
+    diagnose_event_scripts(tail, &references, diagnostics);
+}
+
+fn diagnose_tail_ids_and_text(tail: &STGParsedTail, diagnostics: &mut DiagnosticCollector) {
+    diagnose_duplicate_ids(
+        tail.areas.iter().enumerate().map(|(area, entry)| {
+            (
+                DiagnosticLocation::STGNumber(STGNumberTarget::Area {
+                    area,
+                    field: STGAreaField::AreaID,
+                }),
+                entry.area_id,
+            )
+        }),
+        "Duplicate area ID",
+        diagnostics,
+    );
+    diagnose_duplicate_ids(
+        tail.variables.iter().enumerate().map(|(variable, entry)| {
+            (
+                DiagnosticLocation::STGNumber(STGNumberTarget::VariableID { variable }),
+                entry.variable_id,
+            )
+        }),
+        "Duplicate variable ID",
+        diagnostics,
+    );
+    diagnose_duplicate_ids(
+        tail.event_blocks
+            .iter()
+            .enumerate()
+            .flat_map(|(block, entry)| {
+                entry.events.iter().enumerate().map(move |(event, entry)| {
+                    (
+                        DiagnosticLocation::STGNumber(STGNumberTarget::EventID { block, event }),
+                        entry.event_id,
+                    )
+                })
+            }),
+        "Duplicate event ID",
+        diagnostics,
+    );
+
+    for (variable, entry) in tail.variables.iter().enumerate() {
+        diagnose_parameter_text(
+            &entry.initial_value,
+            STGValueTarget::VariableInitial { variable },
+            diagnostics,
+        );
+    }
+}
+
+fn diagnose_event_scripts(
+    tail: &STGParsedTail,
+    references: &STGReferenceIndex,
+    diagnostics: &mut DiagnosticCollector,
+) {
+    for (block, event_block) in tail.event_blocks.iter().enumerate() {
+        for (event, entry) in event_block.events.iter().enumerate() {
+            for (script, condition) in entry.conditions.iter().enumerate() {
+                diagnose_script(
+                    STGScriptTarget {
+                        block,
+                        event,
+                        kind: STGScriptKind::Condition,
+                        script,
+                    },
+                    condition.type_id,
+                    &condition.params,
+                    references,
+                    diagnostics,
+                );
+            }
+            for (script, action) in entry.actions.iter().enumerate() {
+                diagnose_script(
+                    STGScriptTarget {
+                        block,
+                        event,
+                        kind: STGScriptKind::Action,
+                        script,
+                    },
+                    action.type_id,
+                    &action.params,
+                    references,
+                    diagnostics,
+                );
+            }
+        }
+    }
+}
+
+fn diagnose_duplicate_ids<I>(
+    entries: I,
+    message: &'static str,
+    diagnostics: &mut DiagnosticCollector,
+) where
+    I: Clone + Iterator<Item = (DiagnosticLocation, u32)>,
+{
+    let mut remaining = HashMap::new();
+    for (_, id) in entries.clone() {
+        *remaining.entry(id).or_insert(0_usize) += 1;
+    }
+    for (location, id) in entries {
+        let has_later_duplicate = match remaining.get_mut(&id) {
+            Some(count) => {
+                *count -= 1;
+                *count > 0
+            }
+            None => unreachable!("every STG ID was counted before validation"),
+        };
+        if has_later_duplicate {
+            diagnostics.push(stg_diagnostic(Severity::Warning, location, message));
+        }
+    }
+}
+
+fn diagnose_script(
+    target: STGScriptTarget,
+    type_id: u32,
+    parameters: &[StgParamValue],
+    references: &STGReferenceIndex,
+    diagnostics: &mut DiagnosticCollector,
+) {
+    let info = match target.kind {
+        STGScriptKind::Condition => catalog::condition(type_id),
+        STGScriptKind::Action => catalog::action(type_id),
+    };
+    let unknown_message = match target.kind {
+        STGScriptKind::Condition => "Unknown condition type",
+        STGScriptKind::Action => "Unknown action type",
+    };
+    let shape_message = match target.kind {
+        STGScriptKind::Condition => "Condition parameter count differs from catalog",
+        STGScriptKind::Action => "Action parameter count differs from catalog",
+    };
+    match info {
+        Some(info) => {
+            if usize::try_from(info.parameter_count).ok() != Some(parameters.len()) {
+                diagnostics.push(stg_diagnostic(
+                    Severity::Warning,
+                    DiagnosticLocation::STGScript(target),
+                    shape_message,
+                ));
+            }
+        }
+        None => diagnostics.push(stg_diagnostic(
+            Severity::Warning,
+            DiagnosticLocation::STGScript(target),
+            unknown_message,
+        )),
+    }
+
+    for (parameter, value) in parameters.iter().enumerate() {
+        let value_target = STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: target,
+            parameter,
+        });
+        diagnose_parameter_text(value, value_target, diagnostics);
+
+        let Some(reference) = info
+            .and_then(|entry| entry.parameter_hints.get(parameter))
+            .filter(|hint| !hint.is_empty())
+            .and_then(|hint| super::structure::reference_kind(hint))
+        else {
+            continue;
+        };
+        let Some(id) = parameter_id_bits(value) else {
+            continue;
+        };
+        if references.contains(reference, id) {
+            continue;
+        }
+        diagnostics.push(stg_diagnostic(
+            Severity::Warning,
+            DiagnosticLocation::STGNumber(STGNumberTarget::ParameterInteger {
+                value: value_target,
+            }),
+            missing_reference_message(reference),
+        ));
+    }
+}
+
+fn diagnose_parameter_text(
+    value: &StgParamValue,
+    target: STGValueTarget,
+    diagnostics: &mut DiagnosticCollector,
+) {
+    let StgParamValueValue::StgStringParam(value) = &value.value else {
+        return;
+    };
+    if text::decode(&value.value, STGTextEncoding::CP949)
+        .raw()
+        .is_some()
+    {
+        diagnostics.push(stg_diagnostic(
+            Severity::Warning,
+            DiagnosticLocation::STGText(STGTextTarget::ParameterString { value: target }),
+            "String parameter is not valid CP949",
+        ));
+    }
+}
+
+fn parameter_id_bits(value: &StgParamValue) -> Option<u32> {
+    match (value.type_tag, &value.value) {
+        (0 | 3, StgParamValueValue::I32(value)) => Some(u32::from_ne_bytes(value.to_ne_bytes())),
+        _ => None,
+    }
+}
+
+const fn missing_reference_message(reference: STGReferenceKind) -> &'static str {
+    match reference {
+        STGReferenceKind::Troop => "Missing troop reference",
+        STGReferenceKind::Area => "Missing area reference",
+        STGReferenceKind::Variable => "Missing variable reference",
+        STGReferenceKind::Event => "Missing event reference",
+        STGReferenceKind::Trigger => "Missing trigger reference",
     }
 }
 
@@ -1542,10 +1865,12 @@ fn item_mut<T>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::ops::Range;
 
-    use super::stg_test_support::{STGFixtureOffsets, complete_stg_fixture, stg_prefix_fixture};
+    use super::super::stg_test_support::{
+        STGFixtureOffsets, complete_stg_fixture, stg_prefix_fixture,
+    };
     use super::*;
 
     #[test]
@@ -2268,7 +2593,7 @@ mod tests {
         assert_eq!(test_wire_image(&document), before);
     }
 
-    fn test_wire_image(document: &STGDocument) -> Vec<u8> {
+    pub(crate) fn test_wire_image(document: &STGDocument) -> Vec<u8> {
         let model = &document.model;
         let mut bytes = Vec::new();
         push_u32(&mut bytes, model.magic);

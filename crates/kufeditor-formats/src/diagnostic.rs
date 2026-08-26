@@ -37,6 +37,7 @@ impl fmt::Display for DiagnosticField {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum DiagnosticLocation {
+    STGDocument,
     Record {
         record: usize,
         field: DiagnosticField,
@@ -80,7 +81,8 @@ impl DiagnosticLocation {
                 | STGTextTarget::AreaDescription { area: record }
                 | STGTextTarget::VariableName { variable: record },
             ) => Some(record),
-            Self::Save(
+            Self::STGDocument
+            | Self::Save(
                 SaveNumberTarget::CampaignIndex
                 | SaveNumberTarget::Main(_)
                 | SaveNumberTarget::SelectedUnit
@@ -105,6 +107,7 @@ impl DiagnosticLocation {
 
     pub const fn label(self) -> &'static str {
         match self {
+            Self::STGDocument => "STG Document",
             Self::Record { field, .. } => field.label(),
             Self::Save(target) => target.label(),
             Self::STGNumber(target) => target.label(),
@@ -118,7 +121,8 @@ impl DiagnosticLocation {
     pub const fn stg_tail(self) -> Option<(STGRegion, usize)> {
         match self {
             Self::STGTail { region, offset } => Some((region, offset)),
-            Self::Record { .. }
+            Self::STGDocument
+            | Self::Record { .. }
             | Self::Save(_)
             | Self::STGNumber(_)
             | Self::STGFloat(_)

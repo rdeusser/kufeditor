@@ -13,8 +13,8 @@ use crate::{
     schema::SOXSchema,
     skill::SkillTextField,
     stg::{
-        STGFloatTarget, STGNumberTarget, STGParameterTarget, STGScriptTarget, STGTextTarget,
-        STGValueTarget,
+        STGFloatTarget, STGNumberTarget, STGParameterTarget, STGScriptKind, STGScriptTarget,
+        STGTextTarget, STGValueTarget,
     },
     string_table::SOXStringTableLayout,
 };
@@ -661,6 +661,7 @@ pub enum STGTarget {
     Script(STGScriptTarget),
     Parameter(STGParameterTarget),
     Value(STGValueTarget),
+    Structure(STGStructuralLocation),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -724,6 +725,7 @@ pub enum STGStructuralLocation {
     Event { block: usize, event: usize },
     Script(STGScriptTarget),
     Parameter(STGParameterTarget),
+    Value(STGValueTarget),
 }
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -869,6 +871,26 @@ pub enum FormatError {
         expected: STGStructuralLocation,
         actual: STGStructuralLocation,
     },
+
+    #[error("STG structural state no longer matches the image at {location:?}")]
+    STGStructuralStateMismatch { location: STGStructuralLocation },
+
+    #[error("STG structural image belongs to another document lineage")]
+    STGStructuralLineageMismatch,
+
+    #[error(
+        "STG structural history charge changed after preview: projected {projected} bytes, actual {actual} bytes"
+    )]
+    STGStructuralChargeMismatch { projected: usize, actual: usize },
+
+    #[error("STG structural editing is unavailable for the raw tail at {location:?}")]
+    STGStructureUnavailable { location: STGStructuralLocation },
+
+    #[error("unknown STG {kind} type ID {id}")]
+    STGUnknownScriptType { kind: STGScriptKind, id: u32 },
+
+    #[error("STG event IDs are exhausted")]
+    STGEventIDExhausted,
 
     #[error("STG target {target:?} is read-only")]
     STGReadOnlyTarget { target: STGTarget },

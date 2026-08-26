@@ -3,8 +3,17 @@ pub mod catalog;
 mod fields;
 mod mutation;
 mod preflight;
+mod structure;
 mod text;
 mod wire;
+
+#[cfg(test)]
+#[allow(
+    dead_code,
+    reason = "the shared integration fixture exposes offsets used by multiple STG test modules"
+)]
+#[path = "../../tests/support/stg.rs"]
+mod stg_test_support;
 
 use std::{mem::size_of, ops::Range, sync::Arc};
 
@@ -20,11 +29,14 @@ use crate::{
 use preflight::{MODEL_LIMIT, SOURCE_LIMIT, STGAllocationBudget, STGTailPlan};
 
 pub use fields::{
-    STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice, STGEditor, STGFieldAccess,
-    STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
-    STGNumberTarget, STGParameterTarget, STGScriptKind, STGScriptTarget, STGSkillField,
-    STGSkillOwner, STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValueTarget,
+    STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice, STGEditor, STGEvent,
+    STGEventBlock, STGEventTarget, STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField,
+    STGHeaderTextField, STGMutation, STGNumberTarget, STGParameter, STGParameterTarget,
+    STGReferenceKind, STGScript, STGScriptKind, STGScriptLabel, STGScriptTarget, STGSkillField,
+    STGSkillOwner, STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue,
+    STGValueTarget,
 };
+pub use structure::{STGStructuralEdit, STGStructuralImage, STGStructuralPreview};
 pub use text::{STGText, STGTextImage};
 
 const MAGIC: u32 = 1_001;
@@ -39,6 +51,9 @@ pub struct STGDocument {
         reason = "the source image is retained for exact STG encoding and rebasing"
     )]
     source: Arc<Vec<u8>>,
+    lineage: Arc<()>,
+    state: Arc<()>,
+    revision: Arc<()>,
     model: Arc<STGModel>,
 }
 
@@ -179,6 +194,9 @@ impl STGDocument {
         debug_assert_eq!(wire::encoded_len(&model), Some(source.len()));
         Ok(Self {
             source,
+            lineage: Arc::new(()),
+            state: Arc::new(()),
+            revision: Arc::new(()),
             model: Arc::new(model),
         })
     }
