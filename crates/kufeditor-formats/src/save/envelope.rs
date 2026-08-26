@@ -31,7 +31,7 @@ pub(super) fn normalize(source: &[u8]) -> Result<NormalizedSave, SaveParseError>
 pub(super) fn retained_tail_length(source_length: usize, parsed_tail_length: usize) -> usize {
     source_length
         .checked_sub(PADDED_SIZE)
-        .map_or(parsed_tail_length, |length| length.min(parsed_tail_length))
+        .map_or(0, |length| length.min(parsed_tail_length))
 }
 
 pub(super) fn restore(

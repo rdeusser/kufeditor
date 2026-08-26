@@ -31,6 +31,7 @@ pub struct SaveFixtureOptions {
     pub context: bool,
     pub pad_to_32_kib: bool,
     pub tail: Vec<u8>,
+    pub post_padding_tail: Vec<u8>,
 }
 
 impl Default for SaveFixtureOptions {
@@ -40,6 +41,7 @@ impl Default for SaveFixtureOptions {
             context: true,
             pad_to_32_kib: true,
             tail: Vec::new(),
+            post_padding_tail: Vec::new(),
         }
     }
 }
@@ -67,6 +69,7 @@ pub fn save_fixture_with_arrays(
         context,
         pad_to_32_kib,
         tail,
+        post_padding_tail,
     } = options;
     let mut source = Vec::new();
 
@@ -97,10 +100,11 @@ pub fn save_fixture_with_arrays(
         append_u32(&mut source, 0);
     }
     append_u32(&mut source, 0);
+    source.extend(tail);
     if pad_to_32_kib && source.len() < PADDED_SIZE {
         source.resize(PADDED_SIZE, 0);
     }
-    source.extend(tail);
+    source.extend(post_padding_tail);
 
     if size_prefix {
         patch_size_prefix(&mut source);
@@ -115,6 +119,7 @@ pub fn complete_save_fixture(options: SaveFixtureOptions) -> Vec<u8> {
         context,
         pad_to_32_kib,
         tail,
+        post_padding_tail,
     } = options;
     let mut source = Vec::new();
 
@@ -142,10 +147,11 @@ pub fn complete_save_fixture(options: SaveFixtureOptions) -> Vec<u8> {
         append_i32(&mut source, slot - 1);
     }
     append_i32(&mut source, -2);
+    source.extend(tail);
     if pad_to_32_kib && source.len() < PADDED_SIZE {
         source.resize(PADDED_SIZE, 0);
     }
-    source.extend(tail);
+    source.extend(post_padding_tail);
 
     if size_prefix {
         patch_size_prefix(&mut source);

@@ -44,6 +44,7 @@ fn bad_save_magic_is_typed() {
         context: false,
         pad_to_32_kib: false,
         tail: Vec::new(),
+        post_padding_tail: Vec::new(),
     });
     source
         .get_mut(..4)
@@ -83,6 +84,7 @@ fn truncated_mandatory_save_regions_are_typed() {
         context: false,
         pad_to_32_kib: false,
         tail: Vec::new(),
+        post_padding_tail: Vec::new(),
     });
     units.truncate(350);
 
@@ -91,6 +93,7 @@ fn truncated_mandatory_save_regions_are_typed() {
         context: false,
         pad_to_32_kib: false,
         tail: Vec::new(),
+        post_padding_tail: Vec::new(),
     });
     roster.truncate(358);
 
@@ -99,6 +102,7 @@ fn truncated_mandatory_save_regions_are_typed() {
         context: false,
         pad_to_32_kib: false,
         tail: Vec::new(),
+        post_padding_tail: Vec::new(),
     });
     second_array.truncate(362);
 
@@ -107,6 +111,7 @@ fn truncated_mandatory_save_regions_are_typed() {
         context: false,
         pad_to_32_kib: false,
         tail: Vec::new(),
+        post_padding_tail: Vec::new(),
     });
     missions.truncate(372);
 
@@ -147,6 +152,7 @@ fn preflight_truncation_offsets_use_source_coordinates_for_every_envelope() {
             context,
             pad_to_32_kib: false,
             tail: Vec::new(),
+            post_padding_tail: Vec::new(),
         });
         truncate_save(&mut source, unit_count_offset + 2, size_prefix);
 
@@ -175,6 +181,7 @@ fn preflight_count_offsets_use_source_coordinates_for_every_envelope() {
             context,
             pad_to_32_kib: false,
             tail: Vec::new(),
+            post_padding_tail: Vec::new(),
         });
         patch_u32(&mut source, unit_count_offset, u32::MAX);
 
@@ -754,6 +761,7 @@ fn failed_save_rebase_is_strongly_atomic() {
         context: false,
         pad_to_32_kib: false,
         tail: live_tail.to_vec(),
+        post_padding_tail: Vec::new(),
     });
     let live_offsets = complete_save_offsets(false, false);
     patch_noncanonical_map_field(&mut source, live_offsets.main);
@@ -795,7 +803,11 @@ fn failed_save_rebase_is_strongly_atomic() {
     assert_eq!(live.number(skill_level).unwrap(), 77);
     assert_eq!(live.text(SaveTextField::MapName).unwrap(), "Live");
     assert_eq!(live.encode().unwrap(), before);
-    assert_eq!(before.get(0x8000..), Some(&live_tail[..]));
+    assert_eq!(before.len(), 0x8000);
+    assert_eq!(
+        before.get(live_offsets.tail..live_offsets.tail + live_tail.len()),
+        Some(&live_tail[..])
+    );
 
     live.set_number(skill_level, 8).unwrap();
     live.restore_text(SaveTextField::MapName, original_text);
@@ -807,7 +819,7 @@ fn successful_save_rebase_preserves_newer_live_edits() {
     let tail = [0xde, 0xad, 0, 0xbe, 0xef];
     let mut source = complete_save_fixture(SaveFixtureOptions {
         context: false,
-        tail: tail.to_vec(),
+        post_padding_tail: tail.to_vec(),
         ..SaveFixtureOptions::default()
     });
     let offsets = complete_save_offsets(true, false);
@@ -1638,75 +1650,183 @@ fn edited_padded_envelopes_keep_main_image_length_without_true_tail() {
 }
 
 #[test]
-fn edited_envelope_restores_flags_context_tail_padding_and_prefix_length() {
-    let tail = [0xde, 0xad, 0, 0xbe, 0xef];
-    for pad_to_32_kib in [false, true] {
-        for size_prefix in [false, true] {
-            for context in [false, true] {
-                let source = complete_save_fixture(SaveFixtureOptions {
-                    size_prefix,
-                    context,
-                    pad_to_32_kib,
-                    tail: tail.to_vec(),
-                });
-                let offsets = complete_save_offsets(size_prefix, context);
-                let mut document = SaveDocument::parse(source.clone()).unwrap();
-                assert!(matches!(
-                    document.set_number(
-                        SaveNumberTarget::Unit {
-                            unit: 0,
-                            field: SaveUnitField::SkillLevel
-                        },
-                        77,
-                    ),
-                    Ok(SaveMutation::Changed { previous: 8 })
-                ));
+fn edited_short_unprefixed_contextless_envelope_keeps_opaque_tail_before_padding() {
+    assert_edited_short_envelope_tail_order(false, false);
+}
 
-                let encoded = document.encode().unwrap();
+#[test]
+fn edited_short_prefixed_contextless_envelope_keeps_opaque_tail_before_padding() {
+    assert_edited_short_envelope_tail_order(true, false);
+}
 
-                assert_eq!(encoded.len(), 0x8000 + tail.len());
-                assert_eq!(read_u32(&encoded, offsets.magic), 0x6e);
-                if size_prefix {
-                    assert_eq!(read_u32(&encoded, 0), u32::try_from(encoded.len()).unwrap());
-                }
-                if let Some(context_start) = offsets.context {
-                    let context_end = context_start + 0x438;
-                    assert_eq!(
-                        encoded.get(context_start..context_end),
-                        source.get(context_start..context_end)
-                    );
-                }
+#[test]
+fn edited_short_unprefixed_context_envelope_keeps_opaque_tail_before_padding() {
+    assert_edited_short_envelope_tail_order(false, true);
+}
 
-                let edited = offsets.unit + 52;
-                assert_eq!(read_u32(&encoded, edited), 77);
-                assert_eq!(
-                    encoded.get(offsets.magic..edited),
-                    source.get(offsets.magic..edited)
-                );
-                assert_eq!(
-                    encoded.get(edited + 4..offsets.tail),
-                    source.get(edited + 4..offsets.tail)
-                );
-                assert!(
-                    encoded
-                        .get(offsets.tail..0x8000)
-                        .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
-                );
-                assert_eq!(encoded.get(0x8000..0x8000 + tail.len()), Some(&tail[..]));
+#[test]
+fn edited_short_prefixed_context_envelope_keeps_opaque_tail_before_padding() {
+    assert_edited_short_envelope_tail_order(true, true);
+}
 
-                let reparsed = SaveDocument::parse(encoded).unwrap();
-                assert_eq!(reparsed.has_size_prefix(), size_prefix);
-                assert_eq!(reparsed.has_context(), context);
-                assert_eq!(
-                    reparsed
-                        .number(SaveNumberTarget::Unit {
-                            unit: 0,
-                            field: SaveUnitField::SkillLevel,
-                        })
-                        .unwrap(),
+fn assert_edited_short_envelope_tail_order(size_prefix: bool, context: bool) {
+    let opaque_tail = [0xde, 0xad, 0xfa, 0xce];
+    let source = complete_save_fixture(SaveFixtureOptions {
+        size_prefix,
+        context,
+        pad_to_32_kib: false,
+        tail: opaque_tail.to_vec(),
+        post_padding_tail: Vec::new(),
+    });
+    let offsets = complete_save_offsets(size_prefix, context);
+    assert_eq!(source.len(), offsets.tail + opaque_tail.len());
+    assert_eq!(source.get(offsets.tail..), Some(&opaque_tail[..]));
+
+    let Ok(mut document) = SaveDocument::parse(source.clone()) else {
+        panic!("short save fixture did not parse");
+    };
+    let Ok(unchanged) = document.encode() else {
+        panic!("unchanged short save fixture did not encode");
+    };
+    assert_eq!(unchanged, source);
+    assert!(matches!(
+        document.set_number(
+            SaveNumberTarget::Unit {
+                unit: 0,
+                field: SaveUnitField::SkillLevel,
+            },
+            77,
+        ),
+        Ok(SaveMutation::Changed { previous: 8 })
+    ));
+
+    let Ok(encoded) = document.encode() else {
+        panic!("edited short save fixture did not encode");
+    };
+
+    assert_eq!(encoded.len(), 0x8000);
+    assert_eq!(
+        encoded.get(offsets.tail..offsets.tail + opaque_tail.len()),
+        Some(&opaque_tail[..])
+    );
+    assert!(
+        encoded
+            .get(offsets.tail + opaque_tail.len()..)
+            .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
+    );
+    if size_prefix {
+        assert_eq!(read_u32(&encoded, 0), 0x8000);
+    }
+
+    let Ok(mut reparsed) = SaveDocument::parse(encoded) else {
+        panic!("edited short save fixture did not reparse");
+    };
+    assert_eq!(reparsed.has_size_prefix(), size_prefix);
+    assert_eq!(reparsed.has_context(), context);
+    assert!(matches!(
+        reparsed.set_number(
+            SaveNumberTarget::Unit {
+                unit: 0,
+                field: SaveUnitField::SkillLevel,
+            },
+            78,
+        ),
+        Ok(SaveMutation::Changed { previous: 77 })
+    ));
+
+    let Ok(reencoded) = reparsed.encode() else {
+        panic!("reparsed short save fixture did not encode");
+    };
+    assert_eq!(reencoded.len(), 0x8000);
+    assert_eq!(
+        reencoded.get(offsets.tail..offsets.tail + opaque_tail.len()),
+        Some(&opaque_tail[..])
+    );
+    assert!(
+        reencoded
+            .get(offsets.tail + opaque_tail.len()..)
+            .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
+    );
+    if size_prefix {
+        assert_eq!(read_u32(&reencoded, 0), 0x8000);
+    }
+}
+
+#[test]
+fn edited_padded_envelope_restores_flags_tails_padding_and_prefix_length() {
+    let opaque_tail = [0xde, 0xad, 0xbe, 0xef];
+    let post_padding_tail = [0xa5, 0x5a, 0xc3];
+    for size_prefix in [false, true] {
+        for context in [false, true] {
+            let source = complete_save_fixture(SaveFixtureOptions {
+                size_prefix,
+                context,
+                pad_to_32_kib: true,
+                tail: opaque_tail.to_vec(),
+                post_padding_tail: post_padding_tail.to_vec(),
+            });
+            let offsets = complete_save_offsets(size_prefix, context);
+            let mut document = SaveDocument::parse(source.clone()).unwrap();
+            assert_eq!(document.encode().unwrap(), source);
+            assert!(matches!(
+                document.set_number(
+                    SaveNumberTarget::Unit {
+                        unit: 0,
+                        field: SaveUnitField::SkillLevel
+                    },
                     77,
+                ),
+                Ok(SaveMutation::Changed { previous: 8 })
+            ));
+
+            let encoded = document.encode().unwrap();
+
+            assert_eq!(encoded.len(), 0x8000 + post_padding_tail.len());
+            assert_eq!(read_u32(&encoded, offsets.magic), 0x6e);
+            if size_prefix {
+                assert_eq!(read_u32(&encoded, 0), u32::try_from(encoded.len()).unwrap());
+            }
+            if let Some(context_start) = offsets.context {
+                let context_end = context_start + 0x438;
+                assert_eq!(
+                    encoded.get(context_start..context_end),
+                    source.get(context_start..context_end)
                 );
             }
+
+            let edited = offsets.unit + 52;
+            assert_eq!(read_u32(&encoded, edited), 77);
+            assert_eq!(
+                encoded.get(offsets.magic..edited),
+                source.get(offsets.magic..edited)
+            );
+            assert_eq!(
+                encoded.get(edited + 4..offsets.tail),
+                source.get(edited + 4..offsets.tail)
+            );
+            assert_eq!(
+                encoded.get(offsets.tail..offsets.tail + opaque_tail.len()),
+                Some(&opaque_tail[..])
+            );
+            assert!(
+                encoded
+                    .get(offsets.tail + opaque_tail.len()..0x8000)
+                    .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
+            );
+            assert_eq!(encoded.get(0x8000..), Some(&post_padding_tail[..]));
+
+            let reparsed = SaveDocument::parse(encoded).unwrap();
+            assert_eq!(reparsed.has_size_prefix(), size_prefix);
+            assert_eq!(reparsed.has_context(), context);
+            assert_eq!(
+                reparsed
+                    .number(SaveNumberTarget::Unit {
+                        unit: 0,
+                        field: SaveUnitField::SkillLevel,
+                    })
+                    .unwrap(),
+                77,
+            );
         }
     }
 }
@@ -1719,7 +1839,7 @@ fn repeated_edits_keep_padded_envelope_length_and_tail_stable() {
             let source = complete_save_fixture(SaveFixtureOptions {
                 size_prefix,
                 context,
-                tail: tail.to_vec(),
+                post_padding_tail: tail.to_vec(),
                 ..SaveFixtureOptions::default()
             });
             let mut document = SaveDocument::parse(source).unwrap();
