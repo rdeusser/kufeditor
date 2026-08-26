@@ -1,7 +1,20 @@
 use gpui::{Action, App, KeyBinding, actions};
 use kufeditor_workspace::{DocumentID, SaveNumberTarget};
 
-actions!(kufeditor, [OpenFile, Save, SaveAll, SaveAs, Undo, Redo]);
+actions!(
+    kufeditor,
+    [
+        OpenFile,
+        Save,
+        SaveAll,
+        SaveAs,
+        Undo,
+        Redo,
+        FocusNextSaveControl,
+        FocusPreviousSaveControl,
+        ActivateSaveControl,
+    ]
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Action)]
 #[action(namespace = kufeditor, no_json)]
@@ -23,5 +36,9 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-z", Undo, None),
         KeyBinding::new("cmd-shift-z", Redo, None),
         KeyBinding::new("ctrl-shift-z", Redo, None),
+        KeyBinding::new("tab", FocusNextSaveControl, Some("SaveEditor")),
+        KeyBinding::new("shift-tab", FocusPreviousSaveControl, Some("SaveEditor")),
+        KeyBinding::new("enter", ActivateSaveControl, Some("SaveControl")),
+        KeyBinding::new("space", ActivateSaveControl, Some("SaveControl")),
     ]);
 }

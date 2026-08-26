@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "Task 11 connects this Task 10 projection surface to GPUI rendering"
-)]
-
 use std::{ops::Range, sync::Arc};
 
 use gpui::{
@@ -125,6 +120,7 @@ pub struct SaveUnitRowProjection {
     pub name_availability: SaveNameAvailability,
     pub role_value: i64,
     pub role: String,
+    pub is_officer: bool,
     pub skill_level: i64,
     pub character_id: i64,
 }
@@ -270,16 +266,12 @@ impl SaveRows {
     pub fn units(
         workspace: &Workspace,
         document: DocumentID,
-        dictionary: Option<&NameDictionary>,
-        filter: &str,
+        player_only: bool,
     ) -> SaveProjectionResult<Self> {
-        let filter = filter.trim();
-        let indices = if filter.is_empty() {
-            SaveRowIndices::Contiguous(workspace.save_unit_count(document)?)
+        let indices = if player_only {
+            SaveRowIndices::Filtered(player_unit_indices(workspace, document)?)
         } else {
-            SaveRowIndices::Filtered(visible_unit_indices(
-                workspace, document, dictionary, filter,
-            )?)
+            SaveRowIndices::Contiguous(workspace.save_unit_count(document)?)
         };
         Ok(Self {
             document,
@@ -337,10 +329,6 @@ impl SaveRows {
         self.len() == 0
     }
 
-    pub const fn kind(&self) -> SaveRowKind {
-        self.kind
-    }
-
     pub fn unit_visibility(&self) -> Option<SaveUnitVisibility<'_>> {
         if self.kind != SaveRowKind::Units {
             return None;
@@ -386,36 +374,6 @@ impl SaveRows {
                 })
             })
             .collect()
-    }
-
-    pub fn project_range(
-        &self,
-        workspace: &Workspace,
-        dictionary: Option<&NameDictionary>,
-        requested: Range<usize>,
-    ) -> SaveProjectionResult<Vec<SaveRowProjection>> {
-        self.project_range_with_observer(workspace, dictionary, requested, |_, _| {})
-    }
-
-    pub fn project_range_with_observer(
-        &self,
-        workspace: &Workspace,
-        dictionary: Option<&NameDictionary>,
-        requested: Range<usize>,
-        observe: impl FnOnce(SaveRowKind, Range<usize>),
-    ) -> SaveProjectionResult<Vec<SaveRowProjection>> {
-        let requested = bounded_range(requested, self.len());
-        observe(self.kind, requested.clone());
-        let mut projections = Vec::with_capacity(requested.len());
-        for location in self.locations(requested) {
-            projections.push(row_projection(
-                workspace,
-                self.document,
-                dictionary,
-                location,
-            )?);
-        }
-        Ok(projections)
     }
 }
 
@@ -532,29 +490,36 @@ pub fn unit_projection(
     })
 }
 
-pub fn visible_unit_indices(
+pub fn player_unit_indices(
     workspace: &Workspace,
     document: DocumentID,
-    dictionary: Option<&NameDictionary>,
-    filter: &str,
 ) -> SaveProjectionResult<Vec<usize>> {
     let unit_count = workspace.save_unit_count(document)?;
-    let filter = filter.trim().to_lowercase();
-    if filter.is_empty() {
-        return Ok((0..unit_count).collect());
-    }
-
     let mut visible = Vec::new();
+    let mut attached_to_player_leader = false;
     for unit in 0..unit_count {
-        let row = unit_row_projection(workspace, document, unit, dictionary)?;
-        let index_label = format!("unit {}", unit + 1);
-        if row.label.to_lowercase().contains(&filter)
-            || row.role.to_lowercase().contains(&filter)
-            || row.character_id.to_string().contains(&filter)
-            || row.skill_level.to_string().contains(&filter)
-            || index_label.contains(&filter)
-        {
-            visible.push(unit);
+        let role = workspace.save_number(
+            document,
+            SaveNumberTarget::Unit {
+                unit,
+                field: SaveUnitField::UCD,
+            },
+        )?;
+        match role {
+            0 => {
+                visible.push(unit);
+                attached_to_player_leader = true;
+            }
+            1 | 2 => {
+                if attached_to_player_leader {
+                    visible.push(unit);
+                }
+            }
+            3 => {
+                visible.push(unit);
+                attached_to_player_leader = false;
+            }
+            _ => attached_to_player_leader = false,
         }
     }
     Ok(visible)
@@ -656,7 +621,7 @@ pub fn save_section_model(
             workspace, document,
         )?)),
         SaveSection::Units => {
-            let rows = SaveRows::units(workspace, document, dictionary, state.unit_filter())?;
+            let rows = SaveRows::units(workspace, document, state.player_only())?;
             let inspected = rows
                 .reconciled_unit(state.inspected_unit())
                 .map(|unit| unit_projection(workspace, document, unit, dictionary))
@@ -664,7 +629,7 @@ pub fn save_section_model(
             Ok(SaveSectionModel::Units { rows, inspected })
         }
         SaveSection::Equipment => {
-            let rows = SaveRows::units(workspace, document, dictionary, state.unit_filter())?;
+            let rows = SaveRows::units(workspace, document, state.player_only())?;
             let (inspected_unit, selected) =
                 if let Some(unit) = rows.reconciled_unit(state.inspected_unit()) {
                     (
@@ -736,6 +701,7 @@ fn unit_row_projection(
         name_availability,
         role_value,
         role: display_editor_value(SaveEditor::UCD, role_value),
+        is_officer: matches!(role_value, 1 | 2),
         skill_level: value(SaveUnitField::SkillLevel)?,
         character_id: value(SaveUnitField::CharacterID)?,
     })
@@ -1424,6 +1390,7 @@ pub fn unit_row(
     selected: bool,
 ) -> Stateful<Div> {
     let hover = theme.raised;
+    let content_selector = format!("save-unit-row-content-{}", row.source_index);
     div()
         .id(id)
         .h(px(54.0))
@@ -1453,8 +1420,14 @@ pub fn unit_row(
         )
         .child(
             div()
+                .id(SharedString::from(format!(
+                    "save-unit-row-content:{:?}",
+                    row.id
+                )))
+                .debug_selector(move || content_selector.clone())
                 .flex_1()
                 .min_w_0()
+                .ml(if row.is_officer { px(14.0) } else { px(0.0) })
                 .flex()
                 .flex_col()
                 .gap(px(2.0))
@@ -1530,44 +1503,6 @@ pub fn player_leader_row(
         )
 }
 
-pub fn roster_row(
-    theme: &Theme,
-    id: impl Into<ElementId>,
-    row: &SaveRosterRowProjection,
-) -> Stateful<Div> {
-    let fields = row
-        .fields
-        .iter()
-        .map(|field| {
-            let selector = match field.target {
-                SaveNumberTarget::Roster { field, .. } => roster_field_selector(field),
-                _ => "save-roster-field-unexpected",
-            };
-            div()
-                .id(roster_field_element_id(field.id))
-                .debug_selector(move || selector.to_owned())
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(
-                    div()
-                        .text_size(px(10.0))
-                        .text_color(theme.text_dim)
-                        .child(field.label.clone()),
-                )
-                .child(
-                    div()
-                        .truncate()
-                        .text_color(theme.text)
-                        .child(field.display_value.clone()),
-                )
-                .into_any_element()
-        })
-        .collect();
-    roster_row_with_fields(theme, id, row, fields)
-}
-
 pub fn roster_row_with_fields(
     theme: &Theme,
     id: impl Into<ElementId>,
@@ -1600,38 +1535,6 @@ pub fn roster_row_with_fields(
                 .gap(px(10.0))
                 .children(fields),
         )
-}
-
-pub fn roster_field_element_id(id: SaveProjectionID) -> SharedString {
-    format!("save-roster-field:{id:?}").into()
-}
-
-const fn roster_field_selector(field: SaveRosterField) -> &'static str {
-    match field {
-        SaveRosterField::Byte60 => "save-roster-field-byte-60",
-        SaveRosterField::Byte61 => "save-roster-field-byte-61",
-        SaveRosterField::Byte62 => "save-roster-field-byte-62",
-        SaveRosterField::Byte63 => "save-roster-field-byte-63",
-        SaveRosterField::Value64 => "save-roster-field-value-64",
-    }
-}
-
-pub fn second_array_row(
-    theme: &Theme,
-    id: impl Into<ElementId>,
-    index: usize,
-    value: i64,
-) -> Stateful<Div> {
-    value_row(
-        theme,
-        id,
-        format!("Second Array {}", index + 1),
-        value.to_string(),
-    )
-    .h(px(42.0))
-    .rounded_none()
-    .border_b_1()
-    .border_color(theme.border)
 }
 
 pub fn equipment_slot_button(
@@ -1722,10 +1625,8 @@ mod tests {
     )]
 
     use std::{
-        cell::RefCell,
         collections::HashSet,
         fs,
-        ops::Range,
         path::{Path, PathBuf},
     };
 
@@ -1739,10 +1640,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        SaveNameAvailability, SaveProjectionField, SaveRowKind, SaveRowProjection, SaveRows,
-        SaveSectionModel, equipment_projection, mission_projection, render_editor,
-        roster_field_element_id, roster_row, save_section_model, summary_projection,
-        unit_projection, unit_row_metadata, visible_unit_indices,
+        SaveNameAvailability, SaveProjectionField, SaveProjectionResult, SaveRowKind,
+        SaveRowProjection, SaveRows, SaveSectionModel, equipment_projection, mission_projection,
+        player_unit_indices, render_editor, row_projection, save_section_model, summary_projection,
+        unit_projection, unit_row_metadata,
     };
     use crate::{
         state::{SavePresentationState, SavePresentationStates, SaveSection, SaveUnitVisibility},
@@ -2047,12 +1948,7 @@ mod tests {
         let (mut workspace, document) = workspace_with_roles_save(&[3, 3], 0, 0);
         let mut presentations = SavePresentationStates::default();
         presentations.select_section(document, SaveSection::Units, false);
-        presentations.set_unit_filter(
-            document,
-            "troop".to_owned(),
-            SaveUnitVisibility::Filtered(&[0, 1]),
-            false,
-        );
+        presentations.set_player_only(document, true, SaveUnitVisibility::Filtered(&[0, 1]), false);
         presentations.inspect_unit(document, 0, SaveUnitVisibility::Filtered(&[0, 1]), false);
         assert_eq!(
             workspace
@@ -2139,16 +2035,11 @@ mod tests {
 
     #[test]
     fn save_view_equipment_does_not_resurrect_a_unit_hidden_by_the_filter() {
-        let (workspace, document) = workspace_with_role_save(3, 0, 0);
-        let filtered = SaveRows::units(&workspace, document, None, "leader").unwrap();
+        let (workspace, document) = workspace_with_role_save(99, 0, 0);
+        let filtered = SaveRows::units(&workspace, document, true).unwrap();
         assert!(filtered.is_empty());
         let mut presentations = SavePresentationStates::default();
-        presentations.set_unit_filter(
-            document,
-            "leader".to_owned(),
-            filtered.unit_visibility().unwrap(),
-            false,
-        );
+        presentations.set_player_only(document, true, filtered.unit_visibility().unwrap(), false);
         presentations.select_section(document, SaveSection::Equipment, false);
 
         let SaveSectionModel::Equipment {
@@ -2172,8 +2063,8 @@ mod tests {
 
     #[test]
     fn save_view_equipment_uses_the_first_visible_unit_when_unit_zero_is_hidden() {
-        let (workspace, document) = workspace_with_roles_save(&[3, 0], 0, 0);
-        let filtered = SaveRows::units(&workspace, document, None, "leader").unwrap();
+        let (workspace, document) = workspace_with_roles_save(&[99, 0], 0, 0);
+        let filtered = SaveRows::units(&workspace, document, true).unwrap();
         assert_eq!(
             filtered
                 .locations(0..filtered.len())
@@ -2183,12 +2074,7 @@ mod tests {
             [1],
         );
         let mut presentations = SavePresentationStates::default();
-        presentations.set_unit_filter(
-            document,
-            "leader".to_owned(),
-            filtered.unit_visibility().unwrap(),
-            false,
-        );
+        presentations.set_player_only(document, true, filtered.unit_visibility().unwrap(), false);
         presentations.select_section(document, SaveSection::Equipment, false);
 
         let SaveSectionModel::Equipment {
@@ -2227,12 +2113,12 @@ mod tests {
         else {
             panic!("roster state must produce the roster view");
         };
-        assert_eq!(player_leaders.kind(), SaveRowKind::PlayerLeaders);
         assert_eq!(player_leaders.len(), 1);
-        let leader = player_leaders
-            .project_range(&workspace, None, 0..1)
-            .unwrap();
-        let Some(SaveRowProjection::Unit(leader)) = leader.first() else {
+        let location = *player_leaders.locations(0..1).first().unwrap();
+        assert_eq!(location.kind, SaveRowKind::PlayerLeaders);
+        let SaveRowProjection::Unit(leader) =
+            row_projection(&workspace, document, None, location).unwrap()
+        else {
             panic!("player-leader rows must project units lazily");
         };
         assert_eq!(leader.role, "Leader (0)");
@@ -2252,12 +2138,14 @@ mod tests {
         assert_ne!(player_leader_id, world_map_id);
     }
 
-    #[gpui::test]
-    fn save_view_world_map_row_renders_five_labeled_stable_fields(cx: &mut TestAppContext) {
+    #[test]
+    fn save_view_world_map_row_projects_five_labeled_stable_fields() {
         let (workspace, document) = workspace_with_save(0, 1, 0);
         let rows = SaveRows::roster(&workspace, document).unwrap();
-        let projected = rows.project_range(&workspace, None, 0..1).unwrap();
-        let Some(SaveRowProjection::Roster(row)) = projected.first() else {
+        let location = *rows.locations(0..1).first().unwrap();
+        let SaveRowProjection::Roster(row) =
+            row_projection(&workspace, document, None, location).unwrap()
+        else {
             panic!("world-map rows must project roster fields");
         };
         assert_eq!(
@@ -2275,31 +2163,6 @@ mod tests {
                 .len(),
             5,
         );
-        assert_eq!(
-            row.fields
-                .iter()
-                .map(|field| roster_field_element_id(field.id))
-                .collect::<HashSet<_>>()
-                .len(),
-            5,
-        );
-
-        let row = row.clone();
-        let cx = cx.add_empty_window();
-        cx.draw(
-            point(px(0.0), px(0.0)),
-            size(px(900.0), px(120.0)),
-            |_, _| roster_row(&Theme::default(), "roster-row-test", &row),
-        );
-        for selector in [
-            "save-roster-field-byte-60",
-            "save-roster-field-byte-61",
-            "save-roster-field-byte-62",
-            "save-roster-field-byte-63",
-            "save-roster-field-value-64",
-        ] {
-            assert!(cx.debug_bounds(selector).is_some(), "missing {selector}");
-        }
     }
 
     #[test]
@@ -2463,28 +2326,47 @@ mod tests {
 
         assert_eq!(raw.row.label, "Job 2");
         assert_eq!(resolved.row.label, "Footman");
+        assert_eq!(raw.row.role_value, resolved.row.role_value);
+    }
+
+    #[test]
+    fn save_projection_player_only_membership_uses_raw_ucd_group_boundaries() {
+        let (workspace, document) =
+            workspace_with_roles_save(&[0, 1, 2, 3, 1, 99, 2, 0, 2, 3], 0, 0);
+
         assert_eq!(
-            visible_unit_indices(&workspace, document, None, "job 2").unwrap(),
-            [0]
+            player_unit_indices(&workspace, document).unwrap(),
+            [0, 1, 2, 3, 7, 8, 9],
         );
-        assert!(
-            visible_unit_indices(&workspace, document, None, "missing")
-                .unwrap()
-                .is_empty()
+
+        let raw = SaveRows::units(&workspace, document, true).unwrap();
+        let dictionary = CatalogTree::names().load();
+        let resolved = raw
+            .locations(0..raw.len())
+            .into_iter()
+            .map(|location| row_projection(&workspace, document, Some(&dictionary), location))
+            .collect::<SaveProjectionResult<Vec<_>>>();
+        assert_eq!(resolved.unwrap().len(), raw.len());
+        assert_eq!(
+            raw.locations(0..raw.len())
+                .into_iter()
+                .map(|location| location.source_index)
+                .collect::<Vec<_>>(),
+            [0, 1, 2, 3, 7, 8, 9],
         );
     }
 
     #[test]
     fn save_projection_exposes_compact_unit_visibility() {
-        let (workspace, document) = workspace_with_save(1, 0, 0);
+        let (workspace, document) = workspace_with_role_save(0, 0, 0);
 
-        let all_units = SaveRows::units(&workspace, document, None, "").unwrap();
+        let all_units = SaveRows::units(&workspace, document, false).unwrap();
         assert_eq!(
             all_units.unit_visibility(),
             Some(SaveUnitVisibility::All { unit_count: 1 }),
         );
 
-        let filtered_units = SaveRows::units(&workspace, document, None, "job 2").unwrap();
+        let filtered_units = SaveRows::units(&workspace, document, true).unwrap();
         assert_eq!(
             filtered_units.unit_visibility(),
             Some(SaveUnitVisibility::Filtered(&[0])),
@@ -2589,9 +2471,8 @@ mod tests {
     #[test]
     fn save_projection_large_lists_build_only_the_requested_ranges() {
         let (workspace, document) = workspace_with_save(2_048, 4_096, 8_192);
-        let requests = RefCell::new(Vec::<(SaveRowKind, Range<usize>)>::new());
 
-        let units = SaveRows::units(&workspace, document, None, "").unwrap();
+        let units = SaveRows::units(&workspace, document, false).unwrap();
         let roster = SaveRows::roster(&workspace, document).unwrap();
         let second_array = SaveRows::second_array(&workspace, document).unwrap();
         assert_eq!(
@@ -2599,33 +2480,50 @@ mod tests {
             (2_048, 4_096, 8_192)
         );
 
-        let unit_rows = units
-            .project_range_with_observer(&workspace, None, 1_000..1_007, |kind, range| {
-                requests.borrow_mut().push((kind, range));
-            })
-            .unwrap();
-        let roster_rows = roster
-            .project_range_with_observer(&workspace, None, 2_000..2_005, |kind, range| {
-                requests.borrow_mut().push((kind, range));
-            })
-            .unwrap();
-        let second_rows = second_array
-            .project_range_with_observer(&workspace, None, 4_000..4_003, |kind, range| {
-                requests.borrow_mut().push((kind, range));
-            })
-            .unwrap();
+        let unit_locations = units.locations(1_000..1_007);
+        let roster_locations = roster.locations(2_000..2_005);
+        let second_locations = second_array.locations(4_000..4_003);
+        let project = |location| row_projection(&workspace, document, None, location).unwrap();
+        let unit_rows = unit_locations
+            .iter()
+            .copied()
+            .map(project)
+            .collect::<Vec<_>>();
+        let roster_rows = roster_locations
+            .iter()
+            .copied()
+            .map(project)
+            .collect::<Vec<_>>();
+        let second_rows = second_locations
+            .iter()
+            .copied()
+            .map(project)
+            .collect::<Vec<_>>();
 
         assert_eq!(
             (unit_rows.len(), roster_rows.len(), second_rows.len()),
             (7, 5, 3)
         );
         assert_eq!(
-            requests.into_inner(),
-            [
-                (SaveRowKind::Units, 1_000..1_007),
-                (SaveRowKind::Roster, 2_000..2_005),
-                (SaveRowKind::SecondArray, 4_000..4_003),
-            ],
+            unit_locations
+                .iter()
+                .map(|location| location.source_index)
+                .collect::<Vec<_>>(),
+            (1_000..1_007).collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            roster_locations
+                .iter()
+                .map(|location| location.source_index)
+                .collect::<Vec<_>>(),
+            (2_000..2_005).collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            second_locations
+                .iter()
+                .map(|location| location.source_index)
+                .collect::<Vec<_>>(),
+            (4_000..4_003).collect::<Vec<_>>(),
         );
     }
 }

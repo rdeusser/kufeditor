@@ -414,32 +414,36 @@ mod tests {
     }
 
     #[gpui::test]
-    fn ready_catalog_reconciles_a_filtered_unit_draft_before_stale_enter(cx: &mut TestAppContext) {
+    fn ready_catalog_keeps_player_only_membership_and_the_active_unit_draft(
+        cx: &mut TestAppContext,
+    ) {
         let tree = CatalogTree::with_troop_catalog();
         let root = tree.root.clone();
         let window = test_window(cx);
         let (document, target) = window
-            .update(cx, |frame, _, cx| {
+            .update(cx, |frame, app_window, cx| {
                 frame
                     .game_paths
                     .set_root(Game::Crusaders, Some(root.clone()));
                 let document = frame.workspace.open_loaded(
                     PathBuf::from("campaign.sav"),
-                    Document::Save(SaveDocument::parse(SaveFixture::new(2, 0, 0).build()).unwrap()),
+                    Document::Save(
+                        SaveDocument::parse(
+                            SaveFixture::new(2, 0, 0).with_unit_roles([0, 3]).build(),
+                        )
+                        .unwrap(),
+                    ),
                 );
                 frame.activate_document(document, cx);
                 let key = visible_key(frame);
-                let rows = SaveRows::units(&frame.workspace, document, None, "Job").unwrap();
+                let rows = SaveRows::units(&frame.workspace, document, true).unwrap();
                 let visibility = rows.unit_visibility().unwrap();
                 frame
                     .save_presentations
                     .select_section(document, SaveSection::Units, false);
-                frame.save_presentations.set_unit_filter(
-                    document,
-                    "Job".to_owned(),
-                    visibility,
-                    false,
-                );
+                frame
+                    .save_presentations
+                    .set_player_only(document, true, visibility, false);
                 frame
                     .save_presentations
                     .inspect_unit(document, 0, visibility, false);
@@ -466,6 +470,7 @@ mod tests {
                 );
 
                 frame.finish_save_catalog_load(key, Ok(tree.load()), cx);
+                app_window.focus(&frame.focus);
                 (document, target)
             })
             .unwrap();
@@ -482,18 +487,20 @@ mod tests {
                         .get(document)
                         .unwrap()
                         .inspected_unit(),
-                    1,
+                    0,
                 );
                 assert!(frame.number_edit.is_none());
-                assert_eq!(frame.workspace.save_number(document, target).unwrap(), 2);
-                assert!(!frame.workspace.is_dirty(document).unwrap());
-                assert!(!frame.workspace.can_undo(document).unwrap());
+                assert_eq!(frame.workspace.save_number(document, target).unwrap(), 9);
+                assert!(frame.workspace.is_dirty(document).unwrap());
+                assert!(frame.workspace.can_undo(document).unwrap());
             })
             .unwrap();
     }
 
     #[gpui::test]
-    fn retained_ready_catalog_reconciles_cached_filter_on_save_activation(cx: &mut TestAppContext) {
+    fn retained_ready_catalog_keeps_raw_player_membership_on_save_activation(
+        cx: &mut TestAppContext,
+    ) {
         let tree = CatalogTree::with_troop_catalog();
         let root = tree.root.clone();
         let window = test_window(cx);
@@ -505,16 +512,21 @@ mod tests {
                     .set_root(Game::Crusaders, Some(root.clone()));
                 let save = frame.workspace.open_loaded(
                     PathBuf::from("campaign.sav"),
-                    Document::Save(SaveDocument::parse(SaveFixture::new(2, 0, 0).build()).unwrap()),
+                    Document::Save(
+                        SaveDocument::parse(
+                            SaveFixture::new(2, 0, 0).with_unit_roles([0, 3]).build(),
+                        )
+                        .unwrap(),
+                    ),
                 );
                 let sox = open_sox(frame, "TroopInfo.sox");
                 frame.activate_document(save, cx);
                 let key = visible_key(frame);
-                let rows = SaveRows::units(&frame.workspace, save, None, "Job").unwrap();
+                let rows = SaveRows::units(&frame.workspace, save, true).unwrap();
                 let visibility = rows.unit_visibility().unwrap();
                 frame
                     .save_presentations
-                    .set_unit_filter(save, "Job".to_owned(), visibility, false);
+                    .set_player_only(save, true, visibility, false);
                 frame
                     .save_presentations
                     .inspect_unit(save, 0, visibility, false);
@@ -532,7 +544,7 @@ mod tests {
                 frame.activate_document(save, cx);
                 assert_eq!(
                     frame.save_presentations.get(save).unwrap().inspected_unit(),
-                    1,
+                    0,
                 );
             })
             .unwrap();

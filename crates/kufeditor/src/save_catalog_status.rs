@@ -8,10 +8,6 @@ use kufeditor_game::NameDictionary;
 use crate::{catalog_status::CatalogRequestError, state::SaveCatalogRequestID};
 
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "the save editor in Task 10 consumes issue counts and load failures"
-)]
 pub(crate) enum SaveCatalogStatus {
     NotConfigured,
     Dormant,
@@ -175,10 +171,6 @@ impl SaveCatalogSession {
         false
     }
 
-    #[allow(
-        dead_code,
-        reason = "the save editor in Task 10 consumes the complete visible status"
-    )]
     pub(crate) const fn status(&self) -> &SaveCatalogStatus {
         &self.status
     }

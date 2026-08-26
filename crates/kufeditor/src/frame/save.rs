@@ -6,7 +6,7 @@ use kufeditor_workspace::{
 
 use super::AppFrame;
 use crate::{
-    actions::SetSaveChoice,
+    actions::{ActivateSaveControl, SetSaveChoice},
     components,
     save_catalog_status::SaveCatalogStatus,
     state::{SavePresentationState, SavePresentationTransition, SaveSection, SaveUnitVisibility},
@@ -24,12 +24,7 @@ const SAVE_SECTIONS: [SaveSection; 5] = [
     SaveSection::Missions,
 ];
 
-const UNIT_FILTERS: [(&str, &str); 4] = [
-    ("All", ""),
-    ("Leaders", "leader"),
-    ("Officers", "officer"),
-    ("Troops", "troop"),
-];
+const PLAYER_ONLY_FILTER_LABEL: &str = "Player only";
 
 impl AppFrame {
     pub(super) fn activate_save_presentation(
@@ -37,11 +32,11 @@ impl AppFrame {
         document: DocumentID,
         cx: &mut Context<Self>,
     ) {
-        let filter = self
+        let player_only = self
             .save_presentations
             .get(document)
-            .map_or_else(String::new, |state| state.unit_filter().to_owned());
-        let rows = self.save_unit_rows(document, &filter);
+            .is_some_and(SavePresentationState::player_only);
+        let rows = self.save_unit_rows(document, player_only);
         let draft_active = self.save_draft_active();
         let document_changed = self.active_document != Some(document);
         let visibility = rows
@@ -91,6 +86,8 @@ impl AppFrame {
             self.save_catalog_status_element(),
             content,
         )
+        .tab_group()
+        .key_context("SaveEditor")
     }
 
     fn render_save_section(
@@ -235,13 +232,20 @@ impl AppFrame {
                     },
                 );
                 if let Ok(value) = &field.value {
-                    let value = value.clone();
+                    let click_value = value.clone();
+                    let keyboard_value = value.clone();
                     row.debug_selector(move || save_text_selector(field.field).to_owned())
-                        .tab_stop(true)
+                        .tab_index(0)
+                        .key_context("SaveControl")
                         .cursor_pointer()
                         .on_click(cx.listener(move |frame, _, window, cx| {
-                            frame.start_text_edit(target, value.clone(), window, cx);
+                            frame.start_text_edit(target, click_value.clone(), window, cx);
                         }))
+                        .on_action(cx.listener(
+                            move |frame, _: &ActivateSaveControl, window, cx| {
+                                frame.start_text_edit(target, keyboard_value.clone(), window, cx);
+                            },
+                        ))
                         .into_any_element()
                 } else {
                     row.debug_selector(|| "save-fixed-text-error".to_owned())
@@ -378,30 +382,35 @@ impl AppFrame {
         rows: SaveRows,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let filters = UNIT_FILTERS
-            .into_iter()
-            .enumerate()
-            .map(|(index, (label, filter))| {
-                let selected = state.unit_filter() == filter;
-                let selector = format!("save-unit-filter-{}", label.to_lowercase());
-                components::choice_button(&self.theme, ("save-unit-filter", index), label, selected)
-                    .child(if selected { " ✓" } else { "" })
-                    .debug_selector(move || selector.clone())
-                    .tab_stop(true)
-                    .on_click(cx.listener(move |frame, _, window, cx| {
-                        frame.set_save_unit_filter(document, filter, cx);
-                        window.focus(&frame.focus);
-                    }))
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
+        let player_only = state.player_only();
+        let filter = components::choice_button(
+            &self.theme,
+            "save-unit-filter-player-only-control",
+            PLAYER_ONLY_FILTER_LABEL,
+            player_only,
+        )
+        .child(if player_only { " ✓" } else { "" })
+        .debug_selector(|| "save-unit-filter-player-only".to_owned())
+        .tab_index(0)
+        .key_context("SaveControl")
+        .on_click(cx.listener(move |frame, _, window, cx| {
+            frame.set_save_player_only(document, !player_only, cx);
+            window.focus(&frame.focus);
+        }))
+        .on_action(
+            cx.listener(move |frame, _: &ActivateSaveControl, window, cx| {
+                frame.set_save_player_only(document, !player_only, cx);
+                window.focus(&frame.focus);
+            }),
+        )
+        .into_any_element();
         let list = if rows.is_empty() {
             save::empty_state(
                 &self.theme,
-                if state.unit_filter().is_empty() {
-                    "This save has no unit records."
+                if state.player_only() {
+                    "This save has no player units."
                 } else {
-                    "No units match the current filter."
+                    "This save has no unit records."
                 },
             )
             .id("save-unit-empty")
@@ -433,7 +442,7 @@ impl AppFrame {
                     .gap(px(5.0))
                     .border_b_1()
                     .border_color(self.theme.border)
-                    .children(filters),
+                    .child(filter),
             )
             .child(div().flex_1().min_h_0().overflow_hidden().child(list))
             .into_any_element()
@@ -461,11 +470,18 @@ impl AppFrame {
                     selected,
                 )
                 .debug_selector(move || selector.clone())
-                .tab_stop(true)
+                .tab_index(0)
+                .key_context("SaveControl")
                 .on_click(cx.listener(move |frame, _, window, cx| {
                     frame.inspect_save_unit(document, location.source_index, cx);
                     window.focus(&frame.focus);
                 }))
+                .on_action(
+                    cx.listener(move |frame, _: &ActivateSaveControl, window, cx| {
+                        frame.inspect_save_unit(document, location.source_index, cx);
+                        window.focus(&frame.focus);
+                    }),
+                )
                 .into_any_element()
             }
             Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
@@ -548,15 +564,15 @@ impl AppFrame {
         if let (Some(unit), Some(equipment)) = (inspected_unit, selected) {
             content.extend(self.save_equipment_details(document, unit, equipment, cx));
         } else {
-            let (selector, message) = if state.unit_filter().is_empty() {
+            let (selector, message) = if state.player_only() {
                 (
-                    "save-equipment-save-empty",
-                    "This save has no units, so there is no equipment to inspect.",
+                    "save-equipment-filter-empty",
+                    "This save has no player units, so there is no equipment to inspect.",
                 )
             } else {
                 (
-                    "save-equipment-filter-empty",
-                    "No units match the current filter, so there is no equipment to inspect.",
+                    "save-equipment-save-empty",
+                    "This save has no units, so there is no equipment to inspect.",
                 )
             };
             content.push(
@@ -599,11 +615,18 @@ impl AppFrame {
                 .debug_selector(move || selector.to_owned());
                 if enabled {
                     button
-                        .tab_stop(true)
+                        .tab_index(0)
+                        .key_context("SaveControl")
                         .on_click(cx.listener(move |frame, _, window, cx| {
                             frame.select_save_equipment_slot(document, slot, cx);
                             window.focus(&frame.focus);
                         }))
+                        .on_action(cx.listener(
+                            move |frame, _: &ActivateSaveControl, window, cx| {
+                                frame.select_save_equipment_slot(document, slot, cx);
+                                window.focus(&frame.focus);
+                            },
+                        ))
                         .into_any_element()
                 } else {
                     button.into_any_element()
@@ -983,6 +1006,26 @@ impl AppFrame {
         self.save_number_row_with_label(field, field.label.clone(), cx)
     }
 
+    fn start_save_number_edit(
+        &mut self,
+        document: DocumentID,
+        target: SaveNumberTarget,
+        raw_value: i64,
+        editor: SaveEditor,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_document != Some(document) {
+            return;
+        }
+        let Some(edit) = super::ActiveNumberEdit::save(document, target, raw_value, editor) else {
+            return;
+        };
+        self.begin_number_edit(edit);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
     fn save_number_row_with_label(
         &self,
         field: &SaveNumberProjection,
@@ -1014,20 +1057,18 @@ impl AppFrame {
                         .is_some_and(|edit| edit.editor.invalid() || !edit.editor.is_valid()),
                 )
                 .debug_selector(move || selector.clone())
-                .tab_stop(true)
+                .tab_index(0)
+                .key_context("SaveControl")
                 .on_click(cx.listener(move |frame, _, window, cx| {
-                    if frame.active_document != Some(document) {
-                        return;
-                    }
-                    let Some(edit) =
-                        super::ActiveNumberEdit::save(document, target, raw_value, editor)
-                    else {
-                        return;
-                    };
-                    frame.begin_number_edit(edit);
-                    window.focus(&frame.focus);
-                    cx.notify();
+                    frame.start_save_number_edit(document, target, raw_value, editor, window, cx);
                 }))
+                .on_action(
+                    cx.listener(move |frame, _: &ActivateSaveControl, window, cx| {
+                        frame.start_save_number_edit(
+                            document, target, raw_value, editor, window, cx,
+                        );
+                    }),
+                )
                 .into_any_element()
             }
             SaveEditor::Choice { choices } => {
@@ -1050,8 +1091,12 @@ impl AppFrame {
                             choice.value == raw_value,
                         )
                         .debug_selector(move || choice_selector.clone())
-                        .tab_stop(true)
+                        .tab_index(0)
+                        .key_context("SaveControl")
                         .on_click(move |_, window, cx| {
+                            window.dispatch_action(Box::new(action), cx);
+                        })
+                        .on_action(move |_: &ActivateSaveControl, window, cx| {
                             window.dispatch_action(Box::new(action), cx);
                         })
                         .into_any_element()
@@ -1089,11 +1134,18 @@ impl AppFrame {
                     selected == section,
                 )
                 .debug_selector(move || save_section_id(section).to_owned())
-                .tab_stop(true)
+                .tab_index(0)
+                .key_context("SaveControl")
                 .on_click(cx.listener(move |frame, _, window, cx| {
                     frame.select_save_section(document, section, cx);
                     window.focus(&frame.focus);
                 }))
+                .on_action(
+                    cx.listener(move |frame, _: &ActivateSaveControl, window, cx| {
+                        frame.select_save_section(document, section, cx);
+                        window.focus(&frame.focus);
+                    }),
+                )
                 .into_any_element()
             })
             .collect()
@@ -1181,12 +1233,11 @@ impl AppFrame {
         if self.active_document != Some(document) {
             return;
         }
-        let filter = self
+        let player_only = self
             .save_presentations
             .get(document)
-            .map_or("", SavePresentationState::unit_filter)
-            .to_owned();
-        let Ok(rows) = self.save_unit_rows(document, &filter) else {
+            .is_some_and(SavePresentationState::player_only);
+        let Ok(rows) = self.save_unit_rows(document, player_only) else {
             return;
         };
         let visibility = rows
@@ -1217,11 +1268,16 @@ impl AppFrame {
         );
     }
 
-    fn set_save_unit_filter(&mut self, document: DocumentID, filter: &str, cx: &mut Context<Self>) {
+    fn set_save_player_only(
+        &mut self,
+        document: DocumentID,
+        player_only: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.active_document != Some(document) {
             return;
         }
-        let Ok(rows) = self.save_unit_rows(document, filter) else {
+        let Ok(rows) = self.save_unit_rows(document, player_only) else {
             return;
         };
         let visibility = rows
@@ -1231,7 +1287,7 @@ impl AppFrame {
         self.apply_save_presentation_transition(
             draft_active,
             |states, draft_active| {
-                states.set_unit_filter(document, filter.to_owned(), visibility, draft_active)
+                states.set_player_only(document, player_only, visibility, draft_active)
             },
             cx,
         );
@@ -1240,9 +1296,9 @@ impl AppFrame {
     fn save_unit_rows(
         &self,
         document: DocumentID,
-        filter: &str,
+        player_only: bool,
     ) -> save::SaveProjectionResult<SaveRows> {
-        SaveRows::units(&self.workspace, document, self.save_dictionary(), filter)
+        SaveRows::units(&self.workspace, document, player_only)
     }
 
     pub(super) fn reconcile_save_presentation(
@@ -1250,12 +1306,11 @@ impl AppFrame {
         document: DocumentID,
         cx: &mut Context<Self>,
     ) {
-        let filter = self
+        let player_only = self
             .save_presentations
             .get(document)
-            .map_or("", SavePresentationState::unit_filter)
-            .to_owned();
-        let Ok(rows) = self.save_unit_rows(document, &filter) else {
+            .is_some_and(SavePresentationState::player_only);
+        let Ok(rows) = self.save_unit_rows(document, player_only) else {
             return;
         };
         let visibility = rows
@@ -1280,10 +1335,7 @@ impl AppFrame {
         self.number_edit.is_some() || self.text_edit.is_some()
     }
 
-    #[allow(
-        dead_code,
-        reason = "Task 12 covers document-close cancellation before tab close controls are exposed"
-    )]
+    #[cfg(test)]
     fn remove_save_presentation(&mut self, document: DocumentID, cx: &mut Context<Self>) {
         let draft_active = self
             .number_edit
@@ -1505,7 +1557,9 @@ mod tests {
         SaveUnitField,
     };
 
-    use super::{AppFrame, SAVE_SECTIONS, UNIT_FILTERS, save_section_id, save_section_label};
+    use super::{
+        AppFrame, PLAYER_ONLY_FILTER_LABEL, SAVE_SECTIONS, save_section_id, save_section_label,
+    };
     use crate::{
         actions::{Redo, Undo},
         catalog_status::CatalogRequestError,
@@ -1544,16 +1598,126 @@ mod tests {
     }
 
     #[test]
-    fn save_view_unit_filter_controls_keep_stable_values() {
+    fn save_view_player_only_filter_keeps_its_stable_label() {
+        assert_eq!(PLAYER_ONLY_FILTER_LABEL, "Player only");
+    }
+
+    #[gpui::test]
+    fn save_keyboard_tab_enters_the_section_rail_and_enter_activates(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(1, 0, 0).build());
+
+        cx.run_until_parked();
+        focus_frame(&frame, cx);
+        cx.simulate_keystrokes("tab tab enter");
+
         assert_eq!(
-            UNIT_FILTERS,
-            [
-                ("All", ""),
-                ("Leaders", "leader"),
-                ("Officers", "officer"),
-                ("Troops", "troop"),
-            ],
+            save_state(&frame, cx, document).section(),
+            SaveSection::Units,
         );
+    }
+
+    #[gpui::test]
+    fn save_keyboard_activates_player_filter_unit_and_equipment_slot(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(4, 0, 0)
+                .with_unit_roles([99, 0, 1, 3])
+                .build(),
+        );
+
+        select_and_draw(&frame, cx, document, SaveSection::Units);
+        focus_frame(&frame, cx);
+        press_tabs(cx, 6);
+        cx.simulate_keystrokes("space");
+        cx.run_until_parked();
+        assert!(save_state(&frame, cx, document).player_only());
+        assert_eq!(visible_save_unit_indices(&frame, cx, document), [1, 2, 3]);
+        assert_eq!(save_state(&frame, cx, document).inspected_unit(), 1);
+
+        press_tabs(cx, 8);
+        cx.simulate_keystrokes("enter");
+        assert_eq!(save_state(&frame, cx, document).inspected_unit(), 2);
+
+        select_and_draw(&frame, cx, document, SaveSection::Equipment);
+        focus_frame(&frame, cx);
+        press_tabs(cx, 11);
+        cx.simulate_keystrokes("space");
+        assert_eq!(
+            save_state(&frame, cx, document).equipment_slot(),
+            SaveEquipmentSlot::TroopArmor,
+        );
+    }
+
+    #[gpui::test]
+    fn save_keyboard_skips_disabled_equipment_slots(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 0, 0).build());
+
+        select_and_draw(&frame, cx, document, SaveSection::Equipment);
+        focus_frame(&frame, cx);
+        press_tabs(cx, 6);
+        cx.simulate_keystrokes("enter");
+
+        assert_eq!(
+            save_state(&frame, cx, document).section(),
+            SaveSection::Summary,
+        );
+    }
+
+    #[gpui::test]
+    fn save_keyboard_activates_choice_number_and_fixed_text_controls(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+
+        cx.run_until_parked();
+        focus_frame(&frame, cx);
+        press_tabs(cx, 7);
+        cx.simulate_keystrokes("space");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(document, SaveNumberTarget::CampaignIndex)
+                    .unwrap(),
+                1,
+            );
+        });
+
+        focus_frame(&frame, cx);
+        press_tabs(cx, 10);
+        cx.simulate_keystrokes("enter");
+        frame.update(cx, |frame, _| {
+            assert!(frame.number_edit.as_ref().is_some_and(|edit| {
+                edit.target
+                    .is_save(document, SaveNumberTarget::Main(SaveMainField::Field00))
+            }));
+        });
+        cx.simulate_keystrokes("escape");
+
+        focus_frame(&frame, cx);
+        cx.simulate_keystrokes("shift-tab enter");
+        frame.update_in(cx, |frame, window, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(
+                edit.target,
+                crate::frame::TextEditTarget::save(document, SaveTextField::SkyEffects),
+            );
+            assert!(edit.input.read(cx).focus_handle().is_focused(window));
+        });
     }
 
     #[gpui::test]
@@ -1611,13 +1775,14 @@ mod tests {
             SaveSection::Units
         );
 
-        click(cx, "save-unit-filter-troops");
+        click(cx, "save-unit-filter-player-only");
         let state = save_state(&frame, cx, document);
-        assert_eq!(state.unit_filter(), "troop");
+        assert!(state.player_only());
         assert_eq!(state.inspected_unit(), 0);
         assert!(cx.debug_bounds("save-unit-master-row-0").is_some());
 
-        click(cx, "save-unit-filter-all");
+        click(cx, "save-unit-filter-player-only");
+        assert!(!save_state(&frame, cx, document).player_only());
         click(cx, "save-unit-master-row-1");
         assert_eq!(save_state(&frame, cx, document).inspected_unit(), 1);
 
@@ -1632,6 +1797,143 @@ mod tests {
             SaveEquipmentSlot::TroopArmor
         );
         assert!(cx.debug_bounds("save-equipment").is_some());
+    }
+
+    #[gpui::test]
+    fn save_player_only_filter_uses_raw_ucd_grouping_and_indents_attached_officers(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(10, 0, 0)
+                .with_unit_roles([0, 1, 2, 3, 1, 99, 2, 0, 2, 3])
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        click(cx, "save-unit-filter-player-only");
+        cx.run_until_parked();
+        assert!(save_state(&frame, cx, document).player_only());
+        draw_frame(cx, &frame);
+
+        assert_eq!(
+            visible_save_unit_indices(&frame, cx, document),
+            [0, 1, 2, 3, 7, 8, 9],
+        );
+
+        let leader = cx.debug_bounds("save-unit-row-content-0").unwrap();
+        let officer = cx.debug_bounds("save-unit-row-content-1").unwrap();
+        let troop = cx.debug_bounds("save-unit-row-content-3").unwrap();
+        assert!(officer.origin.x > leader.origin.x);
+        assert_eq!(troop.origin.x, leader.origin.x);
+
+        click(cx, "save-unit-filter-player-only");
+        cx.run_until_parked();
+        assert!(!save_state(&frame, cx, document).player_only());
+        draw_frame(cx, &frame);
+        assert_eq!(
+            visible_save_unit_indices(&frame, cx, document),
+            (0..10).collect::<Vec<_>>(),
+        );
+        let detached_officer = cx.debug_bounds("save-unit-row-content-4").unwrap();
+        assert!(detached_officer.origin.x > leader.origin.x);
+    }
+
+    #[gpui::test]
+    fn save_player_only_filter_reconciles_first_visible_and_cancels_hidden_draft(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(4, 0, 0)
+                .with_unit_roles([99, 0, 1, 3])
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        click(cx, "save-number-unit-0-troop-info-index");
+        assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
+        click(cx, "save-unit-filter-player-only");
+        cx.run_until_parked();
+        draw_frame(cx, &frame);
+
+        frame.update(cx, |frame, _| {
+            assert!(frame.number_edit.is_none());
+            assert_eq!(
+                frame
+                    .save_presentations
+                    .get(document)
+                    .unwrap()
+                    .inspected_unit(),
+                1,
+            );
+        });
+        assert_eq!(visible_save_unit_indices(&frame, cx, document), [1, 2, 3]);
+        let inspected = frame.update(cx, |frame, _| {
+            let state = frame.save_presentations.get(document).unwrap();
+            let save::SaveSectionModel::Units { inspected, .. } = save::save_section_model(
+                &frame.workspace,
+                document,
+                state,
+                frame.save_dictionary(),
+            )
+            .unwrap() else {
+                panic!("units section must remain active");
+            };
+            inspected.unwrap().row.source_index
+        });
+        assert_eq!(inspected, 1);
+    }
+
+    #[gpui::test]
+    fn save_player_only_filter_reconciles_to_empty_and_cancels_the_draft(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(3, 0, 0)
+                .with_unit_roles([1, 2, 99])
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-section-units");
+        click(cx, "save-number-unit-0-troop-info-index");
+        click(cx, "save-unit-filter-player-only");
+        cx.run_until_parked();
+        draw_frame(cx, &frame);
+
+        frame.update(cx, |frame, _| {
+            assert!(frame.number_edit.is_none());
+            assert!(
+                frame
+                    .save_presentations
+                    .get(document)
+                    .unwrap()
+                    .player_only()
+            );
+        });
+        assert!(cx.debug_bounds("save-unit-empty").is_some());
+        assert!(visible_save_unit_indices(&frame, cx, document).is_empty());
+        frame.update(cx, |frame, _| {
+            let state = frame.save_presentations.get(document).unwrap();
+            let save::SaveSectionModel::Units { inspected, .. } = save::save_section_model(
+                &frame.workspace,
+                document,
+                state,
+                frame.save_dictionary(),
+            )
+            .unwrap() else {
+                panic!("units section must remain active");
+            };
+            assert!(inspected.is_none());
+        });
     }
 
     #[gpui::test]
@@ -1792,7 +2094,7 @@ mod tests {
 
         cx.run_until_parked();
         click(cx, "save-section-units");
-        click(cx, "save-unit-filter-troops");
+        click(cx, "save-unit-filter-player-only");
         click(cx, "save-unit-master-row-0");
         click(cx, "save-number-unit-0-troop-info-index");
         frame.update(cx, |frame, _| assert!(frame.number_edit.is_some()));
@@ -1864,7 +2166,7 @@ mod tests {
 
         cx.run_until_parked();
         click(cx, "save-section-units");
-        click(cx, "save-unit-filter-troops");
+        click(cx, "save-unit-filter-player-only");
         assert_eq!(save_state(&frame, cx, document).inspected_unit(), 1);
         let row_one_before_undo = cx.debug_bounds("save-unit-master-row-1").unwrap();
 
@@ -2015,6 +2317,90 @@ mod tests {
         });
         draw_frame(cx, &frame);
         assert!(cx.debug_bounds("save-text-editor-set-file").is_some());
+    }
+
+    #[gpui::test]
+    fn save_text_commit_restores_app_frame_focus(cx: &mut TestAppContext) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-text-set-file");
+        cx.simulate_keystrokes("B r a v o enter");
+
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.text_edit.is_none());
+            assert!(frame.focus.is_focused(window));
+        });
+    }
+
+    #[gpui::test]
+    fn save_text_cancel_restores_app_frame_focus(cx: &mut TestAppContext) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-text-set-file");
+        cx.simulate_keystrokes("escape");
+
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.text_edit.is_none());
+            assert!(frame.focus.is_focused(window));
+        });
+    }
+
+    #[gpui::test]
+    fn save_text_input_tab_reenters_save_controls_without_committing(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+
+        cx.run_until_parked();
+        click(cx, "save-text-set-file");
+        cx.simulate_keystrokes("B r a v o");
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter");
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Alpha",
+            );
+            assert!(frame.text_edit.is_none());
+            assert_eq!(
+                frame.save_presentations.get(document).unwrap().section(),
+                SaveSection::Units,
+            );
+        });
     }
 
     #[gpui::test]
@@ -2398,12 +2784,12 @@ mod tests {
 
         click(cx, "save-number-unit-0-troop-info-index");
         assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
-        click(cx, "save-unit-filter-troops");
+        click(cx, "save-unit-filter-player-only");
         assert!(frame.update(cx, |frame, _| frame.number_edit.is_none()));
 
         click(cx, "save-number-unit-0-troop-info-index");
         assert!(frame.update(cx, |frame, _| frame.number_edit.is_some()));
-        click(cx, "save-unit-filter-all");
+        click(cx, "save-unit-filter-player-only");
         click(cx, "save-unit-master-row-1");
         assert!(frame.update(cx, |frame, _| frame.number_edit.is_none()));
 
@@ -2525,10 +2911,10 @@ mod tests {
         assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
 
         let stale = start_hidden_save_text(&frame, cx, first);
-        click(cx, "save-unit-filter-troops");
+        click(cx, "save-unit-filter-player-only");
         assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
 
-        click(cx, "save-unit-filter-all");
+        click(cx, "save-unit-filter-player-only");
         let stale = start_hidden_save_text(&frame, cx, first);
         click(cx, "save-unit-master-row-1");
         assert_hidden_text_commit_is_ignored(&frame, cx, first, &stale);
@@ -2591,10 +2977,10 @@ mod tests {
         let document = activate_save(
             &frame,
             cx,
-            SaveFixture::new(1, 0, 0).with_unit_roles([3]).build(),
+            SaveFixture::new(1, 0, 0).with_unit_roles([99]).build(),
         );
         frame.update(cx, |frame, cx| {
-            frame.set_save_unit_filter(document, "leader", cx);
+            frame.set_save_player_only(document, true, cx);
             frame.select_save_section(document, SaveSection::Equipment, cx);
         });
 
@@ -2762,6 +3148,16 @@ mod tests {
         );
     }
 
+    fn focus_frame(frame: &Entity<AppFrame>, cx: &mut VisualTestContext) {
+        frame.update_in(cx, |frame, window, _| window.focus(&frame.focus));
+    }
+
+    fn press_tabs(cx: &mut VisualTestContext, count: usize) {
+        for _ in 0..count {
+            cx.simulate_keystrokes("tab");
+        }
+    }
+
     fn click(cx: &mut VisualTestContext, selector: &'static str) {
         let bounds = cx
             .debug_bounds(selector)
@@ -2776,6 +3172,25 @@ mod tests {
     ) -> crate::state::SavePresentationState {
         frame.update(cx, |frame, _| {
             frame.save_presentations.get(document).unwrap().clone()
+        })
+    }
+
+    fn visible_save_unit_indices(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        document: DocumentID,
+    ) -> Vec<usize> {
+        frame.update(cx, |frame, _| {
+            let player_only = frame
+                .save_presentations
+                .get(document)
+                .is_some_and(crate::state::SavePresentationState::player_only);
+            save::SaveRows::units(&frame.workspace, document, player_only)
+                .unwrap()
+                .locations(0..usize::MAX)
+                .into_iter()
+                .map(|location| location.source_index)
+                .collect()
         })
     }
 

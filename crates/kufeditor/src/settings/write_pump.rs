@@ -21,10 +21,7 @@ pub(crate) struct SettingsWriteRequest {
 }
 
 impl SettingsWriteRequest {
-    #[allow(
-        dead_code,
-        reason = "later settings integrations inspect request revisions directly"
-    )]
+    #[cfg(test)]
     pub(crate) const fn revision(&self) -> SettingsRevision {
         self.revision
     }

@@ -17,7 +17,10 @@ use kufeditor_workspace::{
 };
 
 use crate::{
-    actions::{OpenFile, Redo, Save, SaveAll, SaveAs, SetSaveChoice, Undo},
+    actions::{
+        FocusNextSaveControl, FocusPreviousSaveControl, OpenFile, Redo, Save, SaveAll, SaveAs,
+        SetSaveChoice, Undo,
+    },
     catalog_status::{CatalogRequestError, CatalogSession},
     components,
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
@@ -634,8 +637,8 @@ impl AppFrame {
         let colors = self.text_input_colors();
         let element_id = target.element_id();
         let input = cx.new(|cx| TextInput::new(value, target.label(), element_id, colors, cx));
-        cx.subscribe(&input, |frame, input, event, cx| {
-            frame.handle_text_input_event(&input, event, cx);
+        cx.subscribe_in(&input, window, |frame, input, event, window, cx| {
+            frame.handle_text_input_event(input, event, window, cx);
         })
         .detach();
         window.focus(&input.read(cx).focus_handle());
@@ -651,6 +654,7 @@ impl AppFrame {
         &mut self,
         input: &Entity<TextInput>,
         event: &TextInputEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(target) = self
@@ -682,7 +686,10 @@ impl AppFrame {
                     edit.validation_error = None;
                 }
             }
-            TextInputEvent::Cancel => self.cancel_property_edit(),
+            TextInputEvent::Cancel => {
+                self.cancel_property_edit();
+                window.focus(&self.focus);
+            }
             TextInputEvent::Commit(value) => {
                 let (document, edit) = target.document_edit(value.clone());
                 match self.workspace.apply(document, edit) {
@@ -692,6 +699,7 @@ impl AppFrame {
                         }
                         self.cancel_property_edit();
                         self.notices.clear(NoticeSource::Editor);
+                        window.focus(&self.focus);
                     }
                     Err(error) => {
                         if matches!(target, TextEditTarget::Save { .. }) {
@@ -1023,6 +1031,35 @@ impl AppFrame {
             NumberOutcome::Commit(value) => self.commit_number_edit(value, cx),
         }
         cx.notify();
+    }
+
+    fn focus_next_save_control(
+        &mut self,
+        _: &FocusNextSaveControl,
+        window: &mut Window,
+        _: &mut Context<Self>,
+    ) {
+        if self.save_editor_is_visible() {
+            window.focus_next();
+        }
+    }
+
+    fn focus_previous_save_control(
+        &mut self,
+        _: &FocusPreviousSaveControl,
+        window: &mut Window,
+        _: &mut Context<Self>,
+    ) {
+        if self.save_editor_is_visible() {
+            window.focus_prev();
+        }
+    }
+
+    fn save_editor_is_visible(&self) -> bool {
+        self.shell.area() == Area::Files
+            && self.active_document.is_some_and(|document| {
+                self.workspace.document_kind(document).ok() == Some(DocumentKind::CrusadersSave)
+            })
     }
 
     fn commit_number_edit(&mut self, value: i64, cx: &mut Context<Self>) {
@@ -2431,6 +2468,11 @@ impl Focusable for AppFrame {
 
 impl Render for AppFrame {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let key_context = if self.save_editor_is_visible() {
+            "KufEditor SaveEditor"
+        } else {
+            "KufEditor"
+        };
         div()
             .id("kufeditor-root")
             .size_full()
@@ -2441,8 +2483,10 @@ impl Render for AppFrame {
             .font_family("Inter")
             .text_size(px(14.0))
             .track_focus(&self.focus)
-            .key_context("KufEditor")
+            .key_context(key_context)
             .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::focus_next_save_control))
+            .on_action(cx.listener(Self::focus_previous_save_control))
             .on_action(cx.listener(Self::open_action))
             .on_action(cx.listener(Self::save_action))
             .on_action(cx.listener(Self::save_all_action))
@@ -3556,15 +3600,51 @@ mod tests {
 
         cx.simulate_keystrokes(window.into(), "B r a v o enter");
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, window, _| {
                 assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Bravo");
                 assert!(frame.text_edit.is_none());
+                assert!(frame.focus.is_focused(window));
                 assert!(frame.workspace.undo(document).unwrap());
                 assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Alpha");
                 assert!(!frame.workspace.undo(document).unwrap());
                 assert!(frame.workspace.redo(document).unwrap());
                 assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Bravo");
                 assert!(!frame.workspace.redo(document).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn save_tab_bindings_preserve_text_sox_input_tab_insertion(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            crate::actions::bind(cx);
+            bind_text_input(cx);
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+        let input = window
+            .update(cx, |frame, window, cx| {
+                let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
+                frame.activate_document(document, cx);
+                frame.shell.select_area(Area::Files);
+                frame.start_text_edit(
+                    TextEditTarget::text_sox(document, 0),
+                    "Alpha".to_owned(),
+                    window,
+                    cx,
+                );
+                frame.text_edit.as_ref().unwrap().input.clone()
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "tab shift-tab");
+        window
+            .update(cx, |frame, window, cx| {
+                assert_eq!(frame.text_edit.as_ref().unwrap().input, input);
+                assert_eq!(input.read(cx).content(), "\t\t");
+                assert!(input.read(cx).focus_handle().is_focused(window));
             })
             .unwrap();
     }
@@ -4301,9 +4381,10 @@ mod tests {
         canceled_input.update(cx, |_, cx| cx.emit(TextInputEvent::Cancel));
         cx.run_until_parked();
         window
-            .update(cx, |frame, _, _| {
+            .update(cx, |frame, window, _| {
                 assert!(frame.text_edit.is_none());
                 assert!(frame.notices.current().is_none());
+                assert!(frame.focus.is_focused(window));
                 assert_eq!(
                     frame
                         .workspace

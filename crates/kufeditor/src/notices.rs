@@ -51,10 +51,6 @@ impl Notice {
         }
     }
 
-    #[allow(
-        dead_code,
-        reason = "batch file-open integration consumes this staged notice API"
-    )]
     pub(crate) fn error_lines<I, S, E>(summary: impl Into<String>, lines: I) -> Self
     where
         I: IntoIterator<Item = (S, E)>,
@@ -98,10 +94,7 @@ impl Notice {
         &self.detail
     }
 
-    #[allow(
-        dead_code,
-        reason = "existing editor-feedback tests retain the moved notice contract"
-    )]
+    #[cfg(test)]
     pub(crate) const fn is_editor_feedback(&self) -> bool {
         matches!(self.scope, NoticeScope::Editor)
     }
@@ -119,10 +112,6 @@ fn format_error(error: &dyn Error) -> String {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[allow(
-    dead_code,
-    reason = "later settings stages consume the complete source set"
-)]
 pub(crate) enum NoticeSource {
     Workspace,
     Editor,

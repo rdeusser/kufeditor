@@ -29,10 +29,6 @@ pub enum SaveSection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[allow(
-    dead_code,
-    reason = "Task 11 passes save row visibility into presentation reconciliation"
-)]
 pub enum SaveUnitVisibility<'a> {
     All { unit_count: usize },
     Filtered(&'a [usize]),
@@ -67,21 +63,13 @@ impl SaveUnitVisibility<'_> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(
-    dead_code,
-    reason = "Task 11 stores save presentation state in the GPUI frame"
-)]
 pub struct SavePresentationState {
     section: SaveSection,
     inspected_unit: usize,
     equipment_slot: SaveEquipmentSlot,
-    unit_filter: String,
+    player_only: bool,
 }
 
-#[allow(
-    dead_code,
-    reason = "Task 11 reads save presentation state while rendering"
-)]
 impl SavePresentationState {
     pub const fn section(&self) -> SaveSection {
         self.section
@@ -95,8 +83,8 @@ impl SavePresentationState {
         self.equipment_slot
     }
 
-    pub fn unit_filter(&self) -> &str {
-        &self.unit_filter
+    pub const fn player_only(&self) -> bool {
+        self.player_only
     }
 }
 
@@ -106,16 +94,12 @@ impl Default for SavePresentationState {
             section: SaveSection::Summary,
             inspected_unit: 0,
             equipment_slot: SaveEquipmentSlot::LeaderWeapon,
-            unit_filter: String::new(),
+            player_only: false,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[allow(
-    dead_code,
-    reason = "Task 11 consumes transition outcomes to cancel active editors"
-)]
 pub enum SavePresentationTransition {
     Unchanged,
     Changed,
@@ -133,30 +117,14 @@ impl SavePresentationTransition {
 }
 
 #[derive(Clone, Debug, Default)]
-#[allow(
-    dead_code,
-    reason = "Task 11 stores document-scoped save presentation state in the frame"
-)]
 pub struct SavePresentationStates {
     documents: HashMap<DocumentID, SavePresentationState>,
     active_document: Option<DocumentID>,
 }
 
-#[allow(
-    dead_code,
-    reason = "Task 11 connects document and control transitions to the frame"
-)]
 impl SavePresentationStates {
-    pub fn for_document(&mut self, document: DocumentID) -> &SavePresentationState {
-        self.documents.entry(document).or_default()
-    }
-
     pub fn get(&self, document: DocumentID) -> Option<&SavePresentationState> {
         self.documents.get(&document)
-    }
-
-    pub const fn active_document(&self) -> Option<DocumentID> {
-        self.active_document
     }
 
     pub fn activate_document(
@@ -238,10 +206,10 @@ impl SavePresentationStates {
         changed_transition(draft_active)
     }
 
-    pub fn set_unit_filter(
+    pub fn set_player_only(
         &mut self,
         document: DocumentID,
-        filter: String,
+        player_only: bool,
         visibility: SaveUnitVisibility<'_>,
         draft_active: bool,
     ) -> SavePresentationTransition {
@@ -250,14 +218,15 @@ impl SavePresentationStates {
         let transition = unit_reconciliation_transition(
             state.inspected_unit,
             reconciliation,
-            state.unit_filter != filter,
+            state.player_only != player_only,
             draft_active,
         );
-        state.unit_filter = filter;
+        state.player_only = player_only;
         state.inspected_unit = reconciliation.inspected_unit;
         transition
     }
 
+    #[cfg(test)]
     pub fn remove_document(
         &mut self,
         document: DocumentID,
@@ -275,10 +244,6 @@ impl SavePresentationStates {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "Task 11 reaches this helper through save presentation reconciliation"
-)]
 const fn clamp_unit(unit: usize, unit_count: usize) -> usize {
     if unit_count == 0 {
         0
@@ -289,10 +254,6 @@ const fn clamp_unit(unit: usize, unit_count: usize) -> usize {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "Task 11 reaches this helper through save presentation controls"
-)]
 const fn changed_transition(draft_active: bool) -> SavePresentationTransition {
     if draft_active {
         SavePresentationTransition::ChangedAndCancelDraft
@@ -329,10 +290,7 @@ impl RequestID {
 pub struct SaveCatalogRequestID(u64);
 
 impl SaveCatalogRequestID {
-    #[allow(
-        dead_code,
-        reason = "save-catalog request identities are exposed to later inline status views"
-    )]
+    #[cfg(test)]
     pub const fn get(self) -> u64 {
         self.0
     }
@@ -685,7 +643,8 @@ mod save_presentation_tests {
     use kufeditor_workspace::{Document, DocumentID, SaveEquipmentSlot, TroopDocument, Workspace};
 
     use super::{
-        SavePresentationStates, SavePresentationTransition, SaveSection, SaveUnitVisibility,
+        SavePresentationState, SavePresentationStates, SavePresentationTransition, SaveSection,
+        SaveUnitVisibility,
     };
 
     const fn all_units(unit_count: usize) -> SaveUnitVisibility<'static> {
@@ -723,7 +682,10 @@ mod save_presentation_tests {
         let (first, second) = document_ids();
         let mut states = SavePresentationStates::default();
 
-        assert_eq!(states.for_document(first).section(), SaveSection::Summary);
+        assert_eq!(
+            SavePresentationState::default().section(),
+            SaveSection::Summary
+        );
         assert_eq!(
             states.select_section(first, SaveSection::Units, false),
             SavePresentationTransition::Changed,
@@ -783,17 +745,17 @@ mod save_presentation_tests {
     }
 
     #[test]
-    fn save_presentation_filter_moves_inspection_to_the_first_visible_unit() {
+    fn save_presentation_player_only_moves_inspection_to_the_first_visible_unit() {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
         states.inspect_unit(document, 7, all_units(10), false);
 
         assert_eq!(
-            states.set_unit_filter(document, "gerald".to_owned(), filtered_units(&[2, 4]), true),
+            states.set_player_only(document, true, filtered_units(&[2, 4]), true),
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         let state = states.get(document).unwrap();
-        assert_eq!(state.unit_filter(), "gerald");
+        assert!(state.player_only());
         assert_eq!(state.inspected_unit(), 2);
     }
 
@@ -812,7 +774,7 @@ mod save_presentation_tests {
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(
-            states.set_unit_filter(first, "leader".to_owned(), filtered_units(&[1, 3]), true),
+            states.set_player_only(first, true, filtered_units(&[1, 3]), true),
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(
@@ -829,12 +791,7 @@ mod save_presentation_tests {
     fn save_presentation_same_count_replacement_reconciles_changed_filter_membership() {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
-        states.set_unit_filter(
-            document,
-            "leader".to_owned(),
-            filtered_units(&[1, 3]),
-            false,
-        );
+        states.set_player_only(document, true, filtered_units(&[1, 3]), false);
         states.inspect_unit(document, 3, filtered_units(&[1, 3]), false);
 
         assert_eq!(
@@ -842,7 +799,7 @@ mod save_presentation_tests {
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         let state = states.get(document).unwrap();
-        assert_eq!(state.unit_filter(), "leader");
+        assert!(state.player_only());
         assert_eq!(state.inspected_unit(), 1);
     }
 
@@ -853,7 +810,7 @@ mod save_presentation_tests {
         states.inspect_unit(document, 3, all_units(5), false);
 
         assert_eq!(
-            states.set_unit_filter(document, "missing".to_owned(), filtered_units(&[]), true),
+            states.set_player_only(document, true, filtered_units(&[]), true),
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
@@ -863,10 +820,10 @@ mod save_presentation_tests {
     fn save_presentation_unchanged_filter_cancels_unit_zero_draft_when_visibility_empties() {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
-        states.set_unit_filter(document, "leader".to_owned(), filtered_units(&[0]), false);
+        states.set_player_only(document, true, filtered_units(&[0]), false);
 
         assert_eq!(
-            states.set_unit_filter(document, "leader".to_owned(), filtered_units(&[]), true),
+            states.set_player_only(document, true, filtered_units(&[]), true),
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
@@ -936,6 +893,6 @@ mod save_presentation_tests {
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert!(states.get(document).is_none());
-        assert_eq!(states.active_document(), None);
+        assert_eq!(states.active_document, None);
     }
 }

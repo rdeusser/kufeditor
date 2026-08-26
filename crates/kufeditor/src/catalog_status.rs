@@ -15,21 +15,38 @@ pub(crate) struct CatalogKey {
     root: PathBuf,
 }
 
-#[allow(
-    dead_code,
-    reason = "the Settings view in Task 5 consumes catalog status values and errors"
-)]
 pub(crate) enum CatalogStatus<T, E> {
     NotConfigured,
     Loading {
         key: CatalogKey,
     },
     Ready {
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "the terminal request identity remains part of the cached catalog state"
+            )
+        )]
         key: CatalogKey,
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "the global name dictionary remains resident across UI transitions"
+            )
+        )]
         value: T,
         issue_count: usize,
     },
     Failed {
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "the terminal request identity remains part of the cached catalog state"
+            )
+        )]
         key: CatalogKey,
         error: E,
     },
@@ -126,18 +143,11 @@ impl<T, E> CatalogSession<T, E> {
         true
     }
 
-    #[allow(
-        dead_code,
-        reason = "the Settings view in Task 5 consumes the complete catalog status"
-    )]
     pub(crate) const fn status(&self) -> &CatalogStatus<T, E> {
         &self.status
     }
 
-    #[allow(
-        dead_code,
-        reason = "editors consume the exact ready dictionary in a later stage"
-    )]
+    #[cfg(test)]
     pub(crate) fn ready_value(&self) -> Option<&T> {
         match &self.status {
             CatalogStatus::Ready { value, .. } => Some(value),
