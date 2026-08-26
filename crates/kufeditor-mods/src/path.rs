@@ -213,12 +213,14 @@ impl GameRoot {
                 GameRootErrorKind::NonUnicode,
             ));
         }
-        let canonical_store = canonicalize_missing_path(stores.application_data())?;
-        if canonical_store.starts_with(&canonical_path) {
+        let canonical_store = canonicalize_missing_path(stores.root())?;
+        if canonical_store.starts_with(&canonical_path)
+            || canonical_path.starts_with(&canonical_store)
+        {
             return Err(invalid_game_root(
                 game,
                 configured_path,
-                GameRootErrorKind::StoreInsideGameRoot,
+                GameRootErrorKind::StoreOverlapsGameRoot,
             ));
         }
 
@@ -272,28 +274,16 @@ fn canonicalize_missing_path(path: &Path) -> Result<PathBuf, ModError> {
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let Some(name) = existing.file_name() else {
-                    return Err(ModError::io(
-                        "canonicalize application-data root",
-                        path,
-                        error,
-                    ));
+                    return Err(ModError::io("canonicalize owned mod store", path, error));
                 };
                 missing.push(name.to_os_string());
                 let Some(parent) = existing.parent() else {
-                    return Err(ModError::io(
-                        "canonicalize application-data root",
-                        path,
-                        error,
-                    ));
+                    return Err(ModError::io("canonicalize owned mod store", path, error));
                 };
                 existing = parent;
             }
             Err(error) => {
-                return Err(ModError::io(
-                    "canonicalize application-data root",
-                    path,
-                    error,
-                ));
+                return Err(ModError::io("canonicalize owned mod store", path, error));
             }
         }
     }

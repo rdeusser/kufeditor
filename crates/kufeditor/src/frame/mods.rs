@@ -16,8 +16,8 @@ use kufeditor_game::Game;
 use kufeditor_mods::{
     ApplyModRequest, BackupID, BackupScan, CreateBackupRequest, CreateModRequest, GameRoot,
     ImportedModDisposition, InstallationID, InstallationScan, ModError, ModLibraryScan, ModLimits,
-    ModMetadata, ModPackageID, ModProgress, ModProgressReporter, ModService, ModStorePaths,
-    RelativeGamePath, RestoreBackupRequest, UninstallModRequest,
+    ModMetadata, ModPackageID, ModProgress, ModProgressPhase, ModProgressReporter, ModService,
+    ModStorePaths, RelativeGamePath, RestoreBackupRequest, UninstallModRequest,
 };
 
 use super::AppFrame;
@@ -322,14 +322,23 @@ fn backup_subject(backup: &BackupSnapshot) -> String {
 
 struct ModProgressBridge;
 
+struct ModProgressUpdate {
+    sequence: u64,
+    phase_epoch: u64,
+    progress: ModProgress,
+}
+
 struct ModProgressBridgeReporter {
-    latest: Arc<Mutex<Option<ModProgress>>>,
+    latest: Arc<Mutex<Option<ModProgressUpdate>>>,
     cancellation: Arc<AtomicBool>,
     wake: Sender<()>,
+    sequence: u64,
+    phase_epoch: u64,
+    last_phase: Option<ModProgressPhase>,
 }
 
 struct ModProgressBridgeReader {
-    latest: Arc<Mutex<Option<ModProgress>>>,
+    latest: Arc<Mutex<Option<ModProgressUpdate>>>,
     cancellation: Arc<AtomicBool>,
     wake: Receiver<()>,
 }
@@ -344,6 +353,9 @@ impl ModProgressBridge {
                 latest: Arc::clone(&latest),
                 cancellation: Arc::clone(&cancellation),
                 wake: wake_sender,
+                sequence: 0,
+                phase_epoch: 0,
+                last_phase: None,
             },
             ModProgressBridgeReader {
                 latest,
@@ -355,7 +367,7 @@ impl ModProgressBridge {
 }
 
 impl ModProgressBridgeReporter {
-    fn lock_latest(&self) -> MutexGuard<'_, Option<ModProgress>> {
+    fn lock_latest(&self) -> MutexGuard<'_, Option<ModProgressUpdate>> {
         self.latest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -364,7 +376,16 @@ impl ModProgressBridgeReporter {
 
 impl ModProgressReporter for ModProgressBridgeReporter {
     fn report(&mut self, progress: &ModProgress) -> ControlFlow<()> {
-        *self.lock_latest() = Some(progress.clone());
+        self.sequence = self.sequence.saturating_add(1);
+        if self.last_phase != Some(progress.phase) {
+            self.phase_epoch = self.phase_epoch.saturating_add(1);
+            self.last_phase = Some(progress.phase);
+        }
+        *self.lock_latest() = Some(ModProgressUpdate {
+            sequence: self.sequence,
+            phase_epoch: self.phase_epoch,
+            progress: progress.clone(),
+        });
         match self.wake.try_send(()) {
             Ok(()) | Err(TrySendError::Full(()) | TrySendError::Closed(())) => {}
         }
@@ -378,13 +399,13 @@ impl ModProgressReporter for ModProgressBridgeReporter {
 }
 
 impl ModProgressBridgeReader {
-    fn lock_latest(&self) -> MutexGuard<'_, Option<ModProgress>> {
+    fn lock_latest(&self) -> MutexGuard<'_, Option<ModProgressUpdate>> {
         self.latest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    async fn next(&self) -> Option<ModProgress> {
+    async fn next(&self) -> Option<ModProgressUpdate> {
         self.wake.recv().await.ok()?;
         self.lock_latest().take()
     }
@@ -404,7 +425,7 @@ impl ModProgressBridgeReader {
     }
 
     #[cfg(test)]
-    fn take_pending(&self) -> Option<ModProgress> {
+    fn take_pending(&self) -> Option<ModProgressUpdate> {
         let _ = self.wake.try_recv();
         self.lock_latest().take()
     }
@@ -802,9 +823,14 @@ impl AppFrame {
 
         let progress_key = launch.key;
         cx.spawn(async move |entity, cx| {
-            while let Some(progress) = reader.next().await {
+            while let Some(update) = reader.next().await {
                 let _ = entity.update(cx, |frame, cx| {
-                    if frame.mods.update_progress(progress_key, &progress) {
+                    if frame.mods.update_progress(
+                        progress_key,
+                        update.sequence,
+                        update.phase_epoch,
+                        &update.progress,
+                    ) {
                         cx.notify();
                     }
                 });
@@ -1575,6 +1601,7 @@ mod tests {
             reader
                 .take_pending()
                 .expect("the newest progress value should remain")
+                .progress
                 .completed,
             99
         );
@@ -1599,6 +1626,49 @@ mod tests {
             }),
             ControlFlow::Break(())
         );
+    }
+
+    #[test]
+    fn mods_actions_progress_bridge_marks_a_repeated_phase_after_coalescing() {
+        let (mut reporter, reader) = ModProgressBridge::channel();
+        assert_eq!(
+            reporter.report(&ModProgress {
+                phase: ModProgressPhase::InspectingPackage,
+                completed: 4,
+                total: 4,
+                path: None,
+            }),
+            ControlFlow::Continue(())
+        );
+        let first = reader
+            .take_pending()
+            .expect("the first inspection update should be queued");
+        assert_eq!(first.sequence, 1);
+        assert_eq!(first.phase_epoch, 1);
+
+        for progress in [
+            ModProgress {
+                phase: ModProgressPhase::PublishingPackage,
+                completed: 0,
+                total: 1,
+                path: None,
+            },
+            ModProgress {
+                phase: ModProgressPhase::InspectingPackage,
+                completed: 0,
+                total: 4,
+                path: None,
+            },
+        ] {
+            assert_eq!(reporter.report(&progress), ControlFlow::Continue(()));
+        }
+        let latest = reader
+            .take_pending()
+            .expect("the repeated inspection update should remain queued");
+        assert_eq!(latest.sequence, 3);
+        assert_eq!(latest.phase_epoch, 3);
+        assert_eq!(latest.progress.phase, ModProgressPhase::InspectingPackage);
+        assert_eq!(latest.progress.completed, 0);
     }
 
     #[gpui::test]
@@ -1832,6 +1902,8 @@ mod tests {
                     .unwrap();
                 assert!(frame.mods.update_progress(
                     operation,
+                    1,
+                    1,
                     &ModProgress {
                         phase: ModProgressPhase::CopyingPackage,
                         completed: 1,
@@ -2131,6 +2203,8 @@ mod tests {
                 .unwrap();
             assert!(frame.mods.update_progress(
                 operation,
+                1,
+                1,
                 &ModProgress {
                     phase: ModProgressPhase::CopyingPackage,
                     completed: 3,

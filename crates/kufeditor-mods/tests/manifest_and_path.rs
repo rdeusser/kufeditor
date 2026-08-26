@@ -159,10 +159,29 @@ fn game_root_rejects_missing_files_and_nested_application_data()
     assert!(matches!(
         GameRoot::inspect(Game::Crusaders, game, &nested_stores),
         Err(ModError::InvalidGameRoot {
-            kind: GameRootErrorKind::StoreInsideGameRoot,
+            kind: GameRootErrorKind::StoreOverlapsGameRoot,
             ..
         })
     ));
+    Ok(())
+}
+
+#[test]
+fn game_root_rejects_overlap_with_the_owned_mod_store() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = TestDirectory::new("overlapping-mod-store")?;
+    let stores = ModStorePaths::new(directory.path().join("application-data"));
+    fs::create_dir_all(stores.root())?;
+
+    for game_root in [stores.root().to_path_buf(), stores.root().join("game")] {
+        fs::create_dir_all(&game_root)?;
+        assert!(matches!(
+            GameRoot::inspect(Game::Crusaders, game_root, &stores),
+            Err(ModError::InvalidGameRoot {
+                kind: GameRootErrorKind::StoreOverlapsGameRoot,
+                ..
+            })
+        ));
+    }
     Ok(())
 }
 

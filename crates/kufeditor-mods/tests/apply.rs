@@ -142,7 +142,10 @@ fn apply_rejects_wrong_game_missing_root_and_unsafe_target_without_writes()
             ApplyModRequest::new(&fixture.root, missing),
             &mut RecordingProgress::default()
         ),
-        Err(ModError::InvalidGameRoot { .. })
+        Err(ModError::InvalidGameRoot {
+            kind: kufeditor_mods::GameRootErrorKind::Missing,
+            ..
+        })
     ));
 
     #[cfg(unix)]
@@ -299,7 +302,10 @@ fn apply_rejects_unsupported_target_objects_and_nested_application_data()
     let nested_stores = ModStorePaths::new(fixture.root_path.join("application-data"));
     assert!(matches!(
         GameRoot::inspect(Game::Crusaders, fixture.root_path.clone(), &nested_stores),
-        Err(ModError::InvalidGameRoot { .. })
+        Err(ModError::InvalidGameRoot {
+            kind: kufeditor_mods::GameRootErrorKind::StoreOverlapsGameRoot,
+            ..
+        })
     ));
     Ok(())
 }

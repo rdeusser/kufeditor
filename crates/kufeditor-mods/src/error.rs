@@ -47,7 +47,7 @@ pub enum GameRootErrorKind {
     NotDirectory,
     SymbolicLink,
     NonUnicode,
-    StoreInsideGameRoot,
+    StoreOverlapsGameRoot,
 }
 
 impl std::fmt::Display for GameRootErrorKind {
@@ -57,7 +57,7 @@ impl std::fmt::Display for GameRootErrorKind {
             Self::NotDirectory => "the game root is not a directory",
             Self::SymbolicLink => "the game root is a symbolic link",
             Self::NonUnicode => "the game root is not Unicode",
-            Self::StoreInsideGameRoot => "the application-data root is inside the game root",
+            Self::StoreOverlapsGameRoot => "the owned mod store overlaps the game root",
         };
         formatter.write_str(message)
     }

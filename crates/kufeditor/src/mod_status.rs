@@ -357,6 +357,8 @@ pub(crate) struct ModOperationLaunch {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ModProgressSnapshot {
+    sequence: u64,
+    phase_epoch: u64,
     pub(crate) operation: ModOperationKind,
     pub(crate) phase: ModProgressPhase,
     pub(crate) completed: u64,
@@ -716,7 +718,13 @@ impl ModPresentationState {
         Some(key)
     }
 
-    pub(crate) fn update_progress(&mut self, key: ModRequestKey, progress: &ModProgress) -> bool {
+    pub(crate) fn update_progress(
+        &mut self,
+        key: ModRequestKey,
+        sequence: u64,
+        phase_epoch: u64,
+        progress: &ModProgress,
+    ) -> bool {
         let Some(operation) = self.active_operation else {
             return false;
         };
@@ -724,10 +732,10 @@ impl ModPresentationState {
             return false;
         }
         if self.progress.as_ref().is_some_and(|current| {
-            let current_phase = progress_phase_order(current.phase);
-            let next_phase = progress_phase_order(progress.phase);
-            next_phase < current_phase
-                || (next_phase == current_phase && progress.completed < current.completed)
+            sequence <= current.sequence
+                || phase_epoch < current.phase_epoch
+                || (phase_epoch == current.phase_epoch
+                    && (current.phase != progress.phase || progress.completed < current.completed))
         }) {
             return false;
         }
@@ -736,6 +744,8 @@ impl ModPresentationState {
             .as_ref()
             .is_some_and(|current| current.cancel_requested);
         self.progress = Some(ModProgressSnapshot {
+            sequence,
+            phase_epoch,
             operation: operation.kind,
             phase: progress.phase,
             completed: progress.completed,
@@ -865,31 +875,6 @@ fn recovery_paths(error: &ModError) -> Vec<String> {
                 .map(move |path| format!("{label}: {}", path.as_str()))
         })
         .collect()
-}
-
-const fn progress_phase_order(phase: ModProgressPhase) -> u8 {
-    match phase {
-        ModProgressPhase::InspectingPackage => 0,
-        ModProgressPhase::CopyingPackage => 1,
-        ModProgressPhase::CreatingPackage => 2,
-        ModProgressPhase::PublishingPackage => 3,
-        ModProgressPhase::PlanningApply => 4,
-        ModProgressPhase::StagingFiles => 5,
-        ModProgressPhase::CreatingRecovery => 6,
-        ModProgressPhase::CommittingFiles => 7,
-        ModProgressPhase::PublishingInstallation => 8,
-        ModProgressPhase::PlanningUninstall => 9,
-        ModProgressPhase::StagingUninstall => 10,
-        ModProgressPhase::RestoringFiles => 11,
-        ModProgressPhase::PublishingUninstall => 12,
-        ModProgressPhase::ScanningBackup => 13,
-        ModProgressPhase::CopyingBackup => 14,
-        ModProgressPhase::PublishingBackup => 15,
-        ModProgressPhase::StagingBackupRestore => 16,
-        ModProgressPhase::CreatingRestoreRecovery => 17,
-        ModProgressPhase::RestoringBackup => 18,
-        ModProgressPhase::RollingBack => 19,
-    }
 }
 
 pub(crate) const fn progress_phase_allows_cancel(phase: ModProgressPhase) -> bool {
@@ -1120,6 +1105,8 @@ mod tests {
 
         assert!(state.update_progress(
             launch.key,
+            1,
+            1,
             &ModProgress {
                 phase: ModProgressPhase::StagingUninstall,
                 completed: 5,
@@ -1129,6 +1116,8 @@ mod tests {
         ));
         assert!(!state.update_progress(
             launch.key,
+            2,
+            1,
             &ModProgress {
                 phase: ModProgressPhase::StagingUninstall,
                 completed: 4,
@@ -1146,6 +1135,8 @@ mod tests {
 
         assert!(state.update_progress(
             launch.key,
+            3,
+            2,
             &ModProgress {
                 phase: ModProgressPhase::PublishingUninstall,
                 completed: 0,
@@ -1160,6 +1151,66 @@ mod tests {
         );
         assert!(!state.request_cancellation());
         assert!(state.finish_operation(launch.key));
+    }
+
+    #[test]
+    fn mods_progress_accepts_valid_phase_changes_that_reuse_package_phases() {
+        let mut state = ModPresentationState::default();
+        let operation = state
+            .begin_operation(ModOperationKind::Create)
+            .expect("the create operation should start");
+
+        for (sequence, phase_epoch, progress) in [
+            (
+                1,
+                1,
+                ModProgress {
+                    phase: ModProgressPhase::CreatingPackage,
+                    completed: 1,
+                    total: 1,
+                    path: None,
+                },
+            ),
+            (
+                2,
+                2,
+                ModProgress {
+                    phase: ModProgressPhase::InspectingPackage,
+                    completed: 0,
+                    total: 2,
+                    path: None,
+                },
+            ),
+            (
+                3,
+                3,
+                ModProgress {
+                    phase: ModProgressPhase::PublishingPackage,
+                    completed: 0,
+                    total: 1,
+                    path: None,
+                },
+            ),
+            (
+                4,
+                4,
+                ModProgress {
+                    phase: ModProgressPhase::InspectingPackage,
+                    completed: 0,
+                    total: 2,
+                    path: None,
+                },
+            ),
+        ] {
+            assert!(
+                state.update_progress(operation, sequence, phase_epoch, &progress),
+                "valid phase change to {:?} was discarded",
+                progress.phase
+            );
+        }
+        assert!(state.progress().is_some_and(|progress| {
+            progress.phase == ModProgressPhase::InspectingPackage && progress.can_cancel
+        }));
     }
 
     fn ready_completion(
