@@ -1,16 +1,22 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use sha2::{Digest, Sha256};
-use zip::{CompressionMethod, ZipArchive};
+use tempfile::NamedTempFile;
+use zip::{
+    CompressionMethod, DateTime, System, ZIP64_BYTES_THR, ZipArchive, ZipWriter,
+    write::SimpleFileOptions,
+};
 
 use crate::{
-    ModError, ModLimits, ModManifest, ModPackageID, ModProgress, ModProgressPhase,
-    ModProgressReporter, PackageErrorKind, RelativeGamePath,
+    GameRoot, ManifestErrorKind, ModError, ModLimits, ModManifest, ModMetadata, ModPackageID,
+    ModProgress, ModProgressPhase, ModProgressReporter, ModService, PackageErrorKind,
+    RelativeGamePath, SourceFileErrorKind,
 };
 
 const BUFFER_BYTES: usize = 64 * 1024;
@@ -64,6 +70,545 @@ impl ModPackageInfo {
             && self.compressed_bytes == other.compressed_bytes
             && self.uncompressed_bytes == other.uncompressed_bytes
             && self.file_count == other.file_count
+    }
+}
+
+#[derive(Debug)]
+pub struct CreateModRequest<'a> {
+    manifest: ModManifest,
+    root: &'a GameRoot,
+    sources: Vec<CreationSource>,
+    output: &'a Path,
+}
+
+impl<'a> CreateModRequest<'a> {
+    pub fn new(
+        metadata: ModMetadata,
+        root: &'a GameRoot,
+        files: Vec<RelativeGamePath>,
+        output: &'a Path,
+    ) -> Result<Self, ModError> {
+        let manifest = ModManifest::new(metadata, root.game(), files)?;
+        let sources = manifest
+            .files()
+            .iter()
+            .map(|path| inspect_creation_source(root, path))
+            .collect::<Result<Vec<_>, _>>()?;
+        validate_creation_output(output, &sources)?;
+        Ok(Self {
+            manifest,
+            root,
+            sources,
+            output,
+        })
+    }
+
+    pub const fn manifest(&self) -> &ModManifest {
+        &self.manifest
+    }
+
+    pub const fn root(&self) -> &GameRoot {
+        self.root
+    }
+
+    pub fn files(&self) -> &[RelativeGamePath] {
+        self.manifest.files()
+    }
+
+    pub const fn output(&self) -> &Path {
+        self.output
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatedMod {
+    package: ModPackageInfo,
+}
+
+impl CreatedMod {
+    pub fn output_path(&self) -> &Path {
+        self.package.library_path()
+    }
+
+    pub const fn package_id(&self) -> ModPackageID {
+        self.package.package_id()
+    }
+
+    pub const fn manifest(&self) -> &ModManifest {
+        self.package.manifest()
+    }
+
+    pub const fn compressed_bytes(&self) -> u64 {
+        self.package.compressed_bytes()
+    }
+
+    pub const fn uncompressed_bytes(&self) -> u64 {
+        self.package.uncompressed_bytes()
+    }
+
+    pub const fn file_count(&self) -> u64 {
+        self.package.file_count()
+    }
+}
+
+#[derive(Debug)]
+struct CreationSource {
+    relative_path: RelativeGamePath,
+    absolute_path: PathBuf,
+    components: Vec<SourceComponentSnapshot>,
+    file_stamp: SourceMetadataStamp,
+}
+
+impl CreationSource {
+    const fn bytes(&self) -> u64 {
+        self.file_stamp.len
+    }
+}
+
+#[derive(Debug)]
+struct SourceComponentSnapshot {
+    path: PathBuf,
+    stamp: SourceMetadataStamp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SourceMetadataStamp {
+    kind: SourceMetadataKind,
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(windows)]
+    volume_serial_number: Option<u32>,
+    #[cfg(windows)]
+    file_index: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceMetadataKind {
+    Directory,
+    File,
+    SymbolicLink,
+    Other,
+}
+
+impl ModService {
+    pub fn create_package(
+        &self,
+        request: CreateModRequest<'_>,
+        progress: &mut impl ModProgressReporter,
+    ) -> Result<CreatedMod, ModError> {
+        let CreateModRequest {
+            manifest,
+            root: _,
+            sources,
+            output,
+        } = request;
+        let (manifest_bytes, total_source_bytes) =
+            prepare_creation(&manifest, &sources, &self.limits)?;
+        let output_parent = output
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let mut temporary = NamedTempFile::new_in(output_parent)
+            .map_err(|error| ModError::io("create temporary mod package", output_parent, error))?;
+        let temporary_path = temporary.path().to_path_buf();
+        write_creation_image(
+            temporary.as_file_mut(),
+            &temporary_path,
+            &sources,
+            &manifest_bytes,
+            total_source_bytes,
+            &self.limits,
+            progress,
+        )?;
+        let inspected = inspect_package(&temporary_path, &self.limits, progress)?;
+        if inspected.manifest() != &manifest
+            || inspected.uncompressed_bytes() != total_source_bytes
+            || inspected.file_count() != u64::try_from(sources.len()).unwrap_or(u64::MAX)
+        {
+            return Err(ModError::package(
+                &temporary_path,
+                None,
+                PackageErrorKind::PayloadMismatch,
+            ));
+        }
+        if progress
+            .report(&ModProgress {
+                phase: ModProgressPhase::PublishingPackage,
+                completed: 0,
+                total: 1,
+                path: None,
+            })
+            .is_break()
+        {
+            return Err(ModError::Canceled {
+                operation: "package creation",
+            });
+        }
+
+        let output = output.to_path_buf();
+        let file = temporary
+            .persist(&output)
+            .map_err(|error| ModError::io("publish created mod package", &output, error.error))?;
+        drop(file);
+        Ok(CreatedMod {
+            package: inspected.at_path(output),
+        })
+    }
+}
+
+fn prepare_creation(
+    manifest: &ModManifest,
+    sources: &[CreationSource],
+    limits: &ModLimits,
+) -> Result<(Vec<u8>, u64), ModError> {
+    let file_count = u64::try_from(sources.len()).unwrap_or(u64::MAX);
+    if file_count > limits.max_package_files {
+        return Err(ModError::manifest(ManifestErrorKind::TooManyFiles));
+    }
+    let manifest_bytes = manifest.to_json()?;
+    if u64::try_from(manifest_bytes.len()).unwrap_or(u64::MAX) > limits.max_manifest_bytes {
+        return Err(ModError::manifest(ManifestErrorKind::TooLarge));
+    }
+
+    let mut total_source_bytes = 0u64;
+    for source in sources {
+        verify_creation_source(source)?;
+        if source.bytes() > limits.max_file_bytes {
+            return Err(ModError::source(
+                &source.absolute_path,
+                SourceFileErrorKind::TooLarge,
+            ));
+        }
+        total_source_bytes = total_source_bytes
+            .checked_add(source.bytes())
+            .ok_or_else(|| {
+                ModError::source(&source.absolute_path, SourceFileErrorKind::TooLarge)
+            })?;
+        if total_source_bytes > limits.max_uncompressed_bytes {
+            return Err(ModError::source(
+                &source.absolute_path,
+                SourceFileErrorKind::TooLarge,
+            ));
+        }
+    }
+    Ok((manifest_bytes, total_source_bytes))
+}
+
+fn write_creation_image(
+    output: &mut File,
+    image_path: &Path,
+    sources: &[CreationSource],
+    manifest_bytes: &[u8],
+    total_source_bytes: u64,
+    limits: &ModLimits,
+    progress: &mut impl ModProgressReporter,
+) -> Result<(), ModError> {
+    let mut writer = ZipWriter::new(output);
+    writer
+        .start_file(
+            "mod.json",
+            creation_options(
+                u64::try_from(manifest_bytes.len()).unwrap_or(u64::MAX) >= ZIP64_BYTES_THR,
+            ),
+        )
+        .map_err(|error| ModError::zip(image_path, error))?;
+    writer
+        .write_all(manifest_bytes)
+        .map_err(|error| ModError::io("write mod manifest", image_path, error))?;
+
+    let mut completed = 0u64;
+    for source in sources {
+        write_creation_source(
+            &mut writer,
+            image_path,
+            source,
+            total_source_bytes,
+            &mut completed,
+            limits,
+            progress,
+        )?;
+    }
+    let file = writer
+        .finish()
+        .map_err(|error| ModError::zip(image_path, error))?;
+    file.flush()
+        .map_err(|error| ModError::io("flush created mod package", image_path, error))?;
+    file.sync_all()
+        .map_err(|error| ModError::io("synchronize created mod package", image_path, error))
+}
+
+fn write_creation_source(
+    writer: &mut ZipWriter<&mut File>,
+    image_path: &Path,
+    source: &CreationSource,
+    total_source_bytes: u64,
+    completed: &mut u64,
+    limits: &ModLimits,
+    progress: &mut impl ModProgressReporter,
+) -> Result<(), ModError> {
+    verify_creation_source(source)?;
+    let mut input = File::open(&source.absolute_path)
+        .map_err(|error| ModError::io("open package source", &source.absolute_path, error))?;
+    let opened_stamp = source_metadata_stamp(&input.metadata().map_err(|error| {
+        ModError::io("inspect open package source", &source.absolute_path, error)
+    })?);
+    if opened_stamp != source.file_stamp {
+        return Err(ModError::source(
+            &source.absolute_path,
+            SourceFileErrorKind::Changed,
+        ));
+    }
+    writer
+        .start_file(
+            source.relative_path.as_str(),
+            creation_options(source.bytes() >= ZIP64_BYTES_THR),
+        )
+        .map_err(|error| ModError::zip(image_path, error))?;
+
+    let mut buffer = vec![0u8; BUFFER_BYTES].into_boxed_slice();
+    let mut source_bytes = 0u64;
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .map_err(|error| ModError::io("read package source", &source.absolute_path, error))?;
+        if read == 0 {
+            break;
+        }
+        source_bytes = source_bytes
+            .checked_add(u64::try_from(read).unwrap_or(u64::MAX))
+            .ok_or_else(|| {
+                ModError::source(&source.absolute_path, SourceFileErrorKind::TooLarge)
+            })?;
+        if source_bytes > source.bytes() || source_bytes > limits.max_file_bytes {
+            return Err(ModError::source(
+                &source.absolute_path,
+                SourceFileErrorKind::Changed,
+            ));
+        }
+        *completed = completed
+            .checked_add(u64::try_from(read).unwrap_or(u64::MAX))
+            .ok_or_else(|| {
+                ModError::source(&source.absolute_path, SourceFileErrorKind::TooLarge)
+            })?;
+        if *completed > limits.max_uncompressed_bytes {
+            return Err(ModError::source(
+                &source.absolute_path,
+                SourceFileErrorKind::TooLarge,
+            ));
+        }
+        writer
+            .write_all(checked_read_bytes(&buffer, read, &source.absolute_path)?)
+            .map_err(|error| ModError::io("write package payload", image_path, error))?;
+        report_creation_progress(progress, *completed, total_source_bytes, source)?;
+    }
+    if source_bytes == 0 {
+        report_creation_progress(progress, *completed, total_source_bytes, source)?;
+    }
+    let closed_stamp = source_metadata_stamp(&input.metadata().map_err(|error| {
+        ModError::io(
+            "reinspect open package source",
+            &source.absolute_path,
+            error,
+        )
+    })?);
+    if source_bytes != source.bytes() || closed_stamp != source.file_stamp {
+        return Err(ModError::source(
+            &source.absolute_path,
+            SourceFileErrorKind::Changed,
+        ));
+    }
+    verify_creation_source(source)
+}
+
+fn report_creation_progress(
+    reporter: &mut impl ModProgressReporter,
+    completed: u64,
+    total: u64,
+    source: &CreationSource,
+) -> Result<(), ModError> {
+    if reporter
+        .report(&ModProgress {
+            phase: ModProgressPhase::CreatingPackage,
+            completed,
+            total,
+            path: Some(source.relative_path.clone()),
+        })
+        .is_break()
+    {
+        Err(ModError::Canceled {
+            operation: "package creation",
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn creation_options(large_file: bool) -> SimpleFileOptions {
+    SimpleFileOptions::DEFAULT
+        .compression_method(CompressionMethod::Deflated)
+        .compression_level(Some(6))
+        .last_modified_time(DateTime::DEFAULT)
+        .unix_permissions(0o644)
+        .large_file(large_file)
+        .system(System::Unix)
+}
+
+fn inspect_creation_source(
+    root: &GameRoot,
+    relative_path: &RelativeGamePath,
+) -> Result<CreationSource, ModError> {
+    let mut current = root.canonical_path().to_path_buf();
+    let mut components = Vec::with_capacity(relative_path.component_count().saturating_add(1));
+    let root_metadata = initial_source_metadata(&current)?;
+    if root_metadata.file_type().is_symlink() {
+        return Err(ModError::source(
+            &current,
+            SourceFileErrorKind::SymbolicLink,
+        ));
+    }
+    if !root_metadata.is_dir() {
+        return Err(ModError::source(
+            &current,
+            SourceFileErrorKind::ParentNotDirectory,
+        ));
+    }
+    components.push(SourceComponentSnapshot {
+        path: current.clone(),
+        stamp: source_metadata_stamp(&root_metadata),
+    });
+
+    for (index, component) in relative_path.as_str().split('/').enumerate() {
+        current.push(component);
+        let metadata = initial_source_metadata(&current)?;
+        if metadata.file_type().is_symlink() {
+            return Err(ModError::source(
+                &current,
+                SourceFileErrorKind::SymbolicLink,
+            ));
+        }
+        let is_file = index.saturating_add(1) == relative_path.component_count();
+        if is_file && !metadata.is_file() {
+            return Err(ModError::source(
+                &current,
+                SourceFileErrorKind::NotRegularFile,
+            ));
+        }
+        if !is_file && !metadata.is_dir() {
+            return Err(ModError::source(
+                &current,
+                SourceFileErrorKind::ParentNotDirectory,
+            ));
+        }
+        components.push(SourceComponentSnapshot {
+            path: current.clone(),
+            stamp: source_metadata_stamp(&metadata),
+        });
+    }
+    let file_stamp = components
+        .last()
+        .map(|component| component.stamp)
+        .ok_or_else(|| ModError::source(&current, SourceFileErrorKind::Missing))?;
+    Ok(CreationSource {
+        relative_path: relative_path.clone(),
+        absolute_path: current,
+        components,
+        file_stamp,
+    })
+}
+
+fn initial_source_metadata(path: &Path) -> Result<fs::Metadata, ModError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(ModError::source(path, SourceFileErrorKind::Missing))
+        }
+        Err(error) => Err(ModError::io("inspect package source", path, error)),
+    }
+}
+
+fn validate_creation_output(output: &Path, sources: &[CreationSource]) -> Result<(), ModError> {
+    let canonical_output = match fs::canonicalize(output) {
+        Ok(path) => Some(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(ModError::io("inspect mod package output", output, error)),
+    };
+    if let Some(source) = canonical_output
+        .and_then(|output| sources.iter().find(|source| source.absolute_path == output))
+    {
+        Err(ModError::source(
+            &source.absolute_path,
+            SourceFileErrorKind::OutputCollision,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn verify_creation_source(source: &CreationSource) -> Result<(), ModError> {
+    for component in &source.components {
+        let metadata = match fs::symlink_metadata(&component.path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(ModError::source(
+                    &component.path,
+                    SourceFileErrorKind::Changed,
+                ));
+            }
+            Err(error) => {
+                return Err(ModError::io(
+                    "reinspect package source",
+                    &component.path,
+                    error,
+                ));
+            }
+        };
+        if source_metadata_stamp(&metadata) != component.stamp {
+            return Err(ModError::source(
+                &component.path,
+                SourceFileErrorKind::Changed,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn source_metadata_stamp(metadata: &fs::Metadata) -> SourceMetadataStamp {
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    #[cfg(windows)]
+    use std::os::windows::fs::MetadataExt;
+
+    let file_type = metadata.file_type();
+    let kind = if file_type.is_dir() {
+        SourceMetadataKind::Directory
+    } else if file_type.is_file() {
+        SourceMetadataKind::File
+    } else if file_type.is_symlink() {
+        SourceMetadataKind::SymbolicLink
+    } else {
+        SourceMetadataKind::Other
+    };
+    let (len, modified) = if kind == SourceMetadataKind::File {
+        (metadata.len(), metadata.modified().ok())
+    } else {
+        (0, None)
+    };
+    SourceMetadataStamp {
+        kind,
+        len,
+        modified,
+        #[cfg(unix)]
+        device: metadata.dev(),
+        #[cfg(unix)]
+        inode: metadata.ino(),
+        #[cfg(windows)]
+        volume_serial_number: metadata.volume_serial_number(),
+        #[cfg(windows)]
+        file_index: metadata.file_index(),
     }
 }
 

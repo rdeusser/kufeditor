@@ -105,6 +105,32 @@ pub enum PackageErrorKind {
     DestinationCollision,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceFileErrorKind {
+    Missing,
+    ParentNotDirectory,
+    NotRegularFile,
+    SymbolicLink,
+    OutputCollision,
+    TooLarge,
+    Changed,
+}
+
+impl std::fmt::Display for SourceFileErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::Missing => "the selected source does not exist",
+            Self::ParentNotDirectory => "a selected source parent is not a directory",
+            Self::NotRegularFile => "the selected source is not a regular file",
+            Self::SymbolicLink => "the selected source contains a symbolic link",
+            Self::OutputCollision => "the package output is one of its selected sources",
+            Self::TooLarge => "the selected source exceeds a package limit",
+            Self::Changed => "the selected source changed during package creation",
+        };
+        formatter.write_str(message)
+    }
+}
+
 impl std::fmt::Display for PackageErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
@@ -178,6 +204,11 @@ pub enum ModError {
         entry: Option<String>,
         kind: PackageErrorKind,
     },
+    #[error("invalid package source {path:?}: {kind}")]
+    InvalidSourceFile {
+        path: PathBuf,
+        kind: SourceFileErrorKind,
+    },
     #[error("could not read ZIP package {path:?}: {source}")]
     ZIP {
         path: PathBuf,
@@ -226,6 +257,13 @@ impl ModError {
         Self::ZIP {
             path: path.into(),
             source,
+        }
+    }
+
+    pub(crate) fn source(path: impl Into<PathBuf>, kind: SourceFileErrorKind) -> Self {
+        Self::InvalidSourceFile {
+            path: path.into(),
+            kind,
         }
     }
 }

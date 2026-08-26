@@ -6,6 +6,7 @@ use crate::RelativeGamePath;
 pub enum ModProgressPhase {
     InspectingPackage,
     CopyingPackage,
+    CreatingPackage,
     PublishingPackage,
 }
 

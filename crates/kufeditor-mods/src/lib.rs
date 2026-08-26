@@ -9,10 +9,11 @@ mod progress;
 
 pub use error::{
     GameRootErrorKind, ManifestErrorKind, ModError, PackageErrorKind, RelativeGamePathErrorKind,
+    SourceFileErrorKind,
 };
 pub use library::{ImportedMod, ImportedModDisposition, ModLibraryIssue, ModLibraryScan};
 pub use manifest::{ModManifest, ModMetadata, ModTimestamp};
-pub use package::ModPackageInfo;
+pub use package::{CreateModRequest, CreatedMod, ModPackageInfo};
 pub use path::{
     BackupID, GameRoot, GameRootKey, ModPackageID, ModStorePaths, OperationID, RelativeGamePath,
 };
