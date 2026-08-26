@@ -232,7 +232,11 @@ add_executable(kufeditor_tests
     src/formats/stg_script_catalog.cpp
     ${CLEAVE_PARSER_SOURCES}
 )
-target_link_libraries(kufeditor_tests PRIVATE Catch2::Catch2WithMain Iconv::Iconv)
+target_link_libraries(kufeditor_tests PRIVATE
+    Catch2::Catch2WithMain
+    Iconv::Iconv
+    imgui
+)
 target_include_directories(kufeditor_tests PRIVATE src)
 include(CTest)
 include(Catch)

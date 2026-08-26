@@ -4,7 +4,13 @@
 #include "formats/stg_format.h"
 #include "formats/stg_script_catalog.h"
 
+#include <algorithm>
+#include <array>
 #include <cstring>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -262,6 +268,105 @@ buildEventBlob(const char *desc, uint32_t eventId,
 	}
 
 	return buf;
+}
+
+enum class FixedTextFamily { Header, Unit, Area, Variable, Event };
+
+struct FixedTextCase {
+	FixedTextFamily family;
+	const char *name;
+	size_t width;
+};
+
+constexpr std::array<FixedTextCase, 5> kFixedTextCases{{
+    {FixedTextFamily::Header, "header.mapFile", 64},
+    {FixedTextFamily::Unit, "units[0].unitName", 32},
+    {FixedTextFamily::Area, "areas[0].description", 32},
+    {FixedTextFamily::Variable, "variables[0].name", 64},
+    {FixedTextFamily::Event, "eventBlocks[0].events[0].description", 64},
+}};
+
+struct FixedTextFixture {
+	std::vector<std::byte> bytes;
+	std::array<size_t, 5> offsets{};
+};
+
+FixedTextFixture createFixedTextFixture() {
+	FixedTextFixture fixture;
+	fixture.bytes = createMinimalStg();
+	fixture.offsets[static_cast<size_t>(FixedTextFamily::Header)] = 0x48;
+	fixture.offsets[static_cast<size_t>(FixedTextFamily::Unit)] =
+	    kuf::kStgHeaderSize;
+
+	std::vector<std::byte> tail;
+	appendU32(tail, 1);
+	fixture.offsets[static_cast<size_t>(FixedTextFamily::Area)] =
+	    fixture.bytes.size() + tail.size();
+	appendAreaEntry(tail, "area", 7, 1.0f, 2.0f, 3.0f, 4.0f);
+
+	appendU32(tail, 1);
+	fixture.offsets[static_cast<size_t>(FixedTextFamily::Variable)] =
+	    fixture.bytes.size() + tail.size();
+	appendFixedString(tail, "variable", 64);
+	appendU32(tail, 8);
+	appendParamInt(tail, 9);
+
+	appendU32(tail, 1);
+	appendU32(tail, 0);
+	appendU32(tail, 1);
+	fixture.offsets[static_cast<size_t>(FixedTextFamily::Event)] =
+	    fixture.bytes.size() + tail.size();
+	auto event = buildEventBlob("event", 10, {}, {});
+	tail.insert(tail.end(), event.begin(), event.end());
+	appendU32(tail, 0);
+
+	fixture.bytes.insert(fixture.bytes.end(), tail.begin(), tail.end());
+	return fixture;
+}
+
+size_t fixedTextOffset(const FixedTextFixture &fixture,
+		       FixedTextFamily family) {
+	return fixture.offsets[static_cast<size_t>(family)];
+}
+
+std::string &fixedText(kuf::StgFormat &format, FixedTextFamily family) {
+	switch (family) {
+		case FixedTextFamily::Header:
+			return format.header().mapFile;
+		case FixedTextFamily::Unit:
+			return format.units()[0].unitName;
+		case FixedTextFamily::Area:
+			return format.areas()[0].description;
+		case FixedTextFamily::Variable:
+			return format.variables()[0].name;
+		case FixedTextFamily::Event:
+			return format.eventBlocks()[0].events[0].description;
+	}
+	throw std::logic_error("unknown fixed text family");
+}
+
+void setFixedText(std::vector<std::byte> &bytes, size_t offset, size_t width,
+		  std::span<const std::byte> value,
+		  std::byte fill = std::byte{0}) {
+	std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), width,
+		    fill);
+	std::copy(value.begin(), value.end(),
+		  bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+void requireFixedTextEquals(const std::vector<std::byte> &actual,
+			    const std::vector<std::byte> &expected,
+			    size_t offset, size_t width) {
+	REQUIRE(std::equal(
+	    actual.begin() + static_cast<std::ptrdiff_t>(offset),
+	    actual.begin() + static_cast<std::ptrdiff_t>(offset + width),
+	    expected.begin() + static_cast<std::ptrdiff_t>(offset)));
+}
+
+std::vector<std::byte> textBytes(std::string_view value) {
+	return {
+	    reinterpret_cast<const std::byte *>(value.data()),
+	    reinterpret_cast<const std::byte *>(value.data() + value.size())};
 }
 
 } // namespace
@@ -913,4 +1018,239 @@ TEST_CASE("Script catalog lookups", "[stg][catalog]") {
 
 	REQUIRE(kuf::findConditionInfo(9999) == nullptr);
 	REQUIRE(kuf::findActionInfo(9999) == nullptr);
+}
+
+TEST_CASE("StgFormat fixed text source images survive unrelated edits",
+	  "[stg][text][source-image]") {
+	for (const auto &textCase : kFixedTextCases) {
+		DYNAMIC_SECTION(textCase.name << " trailing bytes") {
+			auto fixture = createFixedTextFixture();
+			const auto offset =
+			    fixedTextOffset(fixture, textCase.family);
+			auto visible =
+			    textBytes(std::string_view("visible\0", 8));
+			setFixedText(fixture.bytes, offset, textCase.width,
+				     visible, std::byte{0xA5});
+
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+			auto unchanged = format.trySave();
+			REQUIRE(unchanged.succeeded());
+			REQUIRE(unchanged.bytes == fixture.bytes);
+
+			format.units()[0].positionX += 1.0f;
+			auto edited = format.trySave();
+			REQUIRE(edited.succeeded());
+			REQUIRE(edited.bytes != fixture.bytes);
+			requireFixedTextEquals(edited.bytes, fixture.bytes,
+					       offset, textCase.width);
+		}
+
+		DYNAMIC_SECTION(textCase.name << " full width") {
+			auto fixture = createFixedTextFixture();
+			const auto offset =
+			    fixedTextOffset(fixture, textCase.family);
+			std::vector<std::byte> full(textCase.width,
+						    std::byte{'Q'});
+			setFixedText(fixture.bytes, offset, textCase.width,
+				     full);
+
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+			format.units()[0].positionX += 1.0f;
+			auto edited = format.trySave();
+			REQUIRE(edited.succeeded());
+			requireFixedTextEquals(edited.bytes, fixture.bytes,
+					       offset, textCase.width);
+		}
+
+		DYNAMIC_SECTION(textCase.name << " undecodable source") {
+			auto fixture = createFixedTextFixture();
+			const auto offset =
+			    fixedTextOffset(fixture, textCase.family);
+			const std::array invalid{textCase.family ==
+							 FixedTextFamily::Header
+						     ? std::byte{0xFF}
+						     : std::byte{0x81},
+						 std::byte{0}};
+			setFixedText(fixture.bytes, offset, textCase.width,
+				     invalid, std::byte{0x5A});
+
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+			format.units()[0].positionX += 1.0f;
+			auto edited = format.trySave();
+			REQUIRE(edited.succeeded());
+			requireFixedTextEquals(edited.bytes, fixture.bytes,
+					       offset, textCase.width);
+		}
+	}
+}
+
+TEST_CASE("StgFormat retains all eight header text images",
+	  "[stg][text][source-image]") {
+	auto fixture = createFixedTextFixture();
+	constexpr std::array<size_t, 8> offsets{0x48,  0x88,  0xC8,  0x108,
+						0x148, 0x188, 0x1C8, 0x20C};
+	for (size_t index = 0; index < offsets.size(); ++index) {
+		const std::array value{static_cast<std::byte>('A' + index),
+				       std::byte{0}};
+		setFixedText(fixture.bytes, offsets[index], 64, value,
+			     static_cast<std::byte>(0x80 + index));
+	}
+
+	kuf::StgFormat format;
+	REQUIRE(format.load(fixture.bytes));
+	format.units()[0].positionX += 1.0f;
+	auto result = format.trySave();
+	REQUIRE(result.succeeded());
+	for (const auto offset : offsets) {
+		requireFixedTextEquals(result.bytes, fixture.bytes, offset, 64);
+	}
+}
+
+TEST_CASE("StgFormat writes changed fixed text at the encoded maximum",
+	  "[stg][text][encoding]") {
+	for (const auto &textCase : kFixedTextCases) {
+		DYNAMIC_SECTION(textCase.name) {
+			auto fixture = createFixedTextFixture();
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+
+			std::string changed;
+			std::vector<std::byte> encoded;
+			if (textCase.family == FixedTextFamily::Header) {
+				changed.assign(61, 'A');
+				changed += "\xC3\xA9";
+				encoded = textBytes(changed);
+			} else {
+				changed.assign(textCase.width - 3, 'A');
+				changed += "\xED\x95\x9C";
+				encoded.assign(textCase.width - 3,
+					       std::byte{'A'});
+				encoded.push_back(std::byte{0xC7});
+				encoded.push_back(std::byte{0xD1});
+			}
+			fixedText(format, textCase.family) = changed;
+
+			auto result = format.trySave();
+			REQUIRE(result.succeeded());
+			REQUIRE(encoded.size() == textCase.width - 1);
+			const auto offset =
+			    fixedTextOffset(fixture, textCase.family);
+			REQUIRE(std::equal(
+			    encoded.begin(), encoded.end(),
+			    result.bytes.begin() +
+				static_cast<std::ptrdiff_t>(offset)));
+			REQUIRE(result.bytes[offset + textCase.width - 1] ==
+				std::byte{0});
+
+			kuf::StgFormat reparsed;
+			REQUIRE(reparsed.load(result.bytes));
+			REQUIRE(fixedText(reparsed, textCase.family) ==
+				changed);
+		}
+	}
+}
+
+TEST_CASE("StgFormat zero fills changed fixed text", "[stg][text][encoding]") {
+	for (const auto &textCase : kFixedTextCases) {
+		DYNAMIC_SECTION(textCase.name) {
+			auto fixture = createFixedTextFixture();
+			const auto offset =
+			    fixedTextOffset(fixture, textCase.family);
+			const std::array source{std::byte{'o'}, std::byte{'l'},
+						std::byte{'d'}, std::byte{0}};
+			setFixedText(fixture.bytes, offset, textCase.width,
+				     source, std::byte{0xA5});
+
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+			std::vector<std::byte> encoded;
+			if (textCase.family == FixedTextFamily::Header) {
+				fixedText(format, textCase.family) = "\xC3\xA9";
+				encoded = {std::byte{0xC3}, std::byte{0xA9}};
+			} else {
+				fixedText(format, textCase.family) =
+				    "\xED\x95\x9C";
+				encoded = {std::byte{0xC7}, std::byte{0xD1}};
+			}
+
+			auto result = format.trySave();
+			REQUIRE(result.succeeded());
+			REQUIRE(std::equal(
+			    encoded.begin(), encoded.end(),
+			    result.bytes.begin() +
+				static_cast<std::ptrdiff_t>(offset)));
+			REQUIRE(std::all_of(
+			    result.bytes.begin() + static_cast<std::ptrdiff_t>(
+						       offset + encoded.size()),
+			    result.bytes.begin() + static_cast<std::ptrdiff_t>(
+						       offset + textCase.width),
+			    [](std::byte value) {
+				    return value == std::byte{0};
+			    }));
+		}
+	}
+}
+
+TEST_CASE("StgFormat rejects invalid changed fixed text",
+	  "[stg][text][encoding]") {
+	for (const auto &textCase : kFixedTextCases) {
+		DYNAMIC_SECTION(textCase.name << " over encoded limit") {
+			auto fixture = createFixedTextFixture();
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+			std::string changed(textCase.width - 2, 'A');
+			changed += textCase.family == FixedTextFamily::Header
+				       ? "\xC3\xA9"
+				       : "\xED\x95\x9C";
+			fixedText(format, textCase.family) = changed;
+
+			auto result = format.trySave();
+			REQUIRE_FALSE(result.succeeded());
+			REQUIRE(result.error.has_value());
+			REQUIRE(result.error->code ==
+				kuf::STGSaveErrorCode::TextTooLong);
+			REQUIRE(result.error->field == textCase.name);
+			REQUIRE(format.save().empty());
+		}
+
+		DYNAMIC_SECTION(textCase.name << " embedded zero") {
+			auto fixture = createFixedTextFixture();
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+			fixedText(format, textCase.family) =
+			    std::string("before\0after", 12);
+
+			auto result = format.trySave();
+			REQUIRE_FALSE(result.succeeded());
+			REQUIRE(result.error.has_value());
+			REQUIRE(result.error->code ==
+				kuf::STGSaveErrorCode::EmbeddedZero);
+			REQUIRE(result.error->field == textCase.name);
+		}
+
+		DYNAMIC_SECTION(textCase.name << " conversion failure") {
+			auto fixture = createFixedTextFixture();
+			kuf::StgFormat format;
+			REQUIRE(format.load(fixture.bytes));
+			if (textCase.family == FixedTextFamily::Header) {
+				fixedText(format, textCase.family) =
+				    std::string("\xC3\x28", 2);
+			} else {
+				fixedText(format, textCase.family) =
+				    "\xF0\x9F\x98\x80";
+			}
+
+			auto result = format.trySave();
+			REQUIRE_FALSE(result.succeeded());
+			REQUIRE(result.error.has_value());
+			REQUIRE(result.error->code ==
+				(textCase.family == FixedTextFamily::Header
+				     ? kuf::STGSaveErrorCode::InvalidUTF8
+				     : kuf::STGSaveErrorCode::Unrepresentable));
+			REQUIRE(result.error->field == textCase.name);
+		}
+	}
 }

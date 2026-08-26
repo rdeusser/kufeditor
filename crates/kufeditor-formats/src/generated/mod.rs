@@ -13,6 +13,7 @@
 )]
 
 pub(crate) mod kuf_save;
+pub(crate) mod kuf_stg;
 pub(crate) mod sox_ability_by_job;
 pub(crate) mod sox_ability_info;
 pub(crate) mod sox_char_info;
@@ -41,5 +42,19 @@ mod save_contract_tests {
         let _ucd: fn(&UnitSaveData) -> u32 = |unit| unit.ucd;
         let _skill: fn(&EquipmentSlot) -> i32 = |slot| slot.skill_type_1;
         let _resist: fn(&EquipmentSlot) -> i32 = |slot| slot.resist_type_1;
+    }
+}
+
+#[cfg(test)]
+mod stg_contract_tests {
+    use super::kuf_stg::{AreaEntry, StgEvent, StgHeader, StgVariable, UnitBlock};
+
+    #[test]
+    fn stg_fixed_text_uses_raw_wire_bytes() {
+        let _header: fn(&StgHeader) -> &[u8; 64] = |value| &value.map_filename;
+        let _unit: fn(&UnitBlock) -> &[u8; 32] = |value| &value.name;
+        let _area: fn(&AreaEntry) -> &[u8; 32] = |value| &value.description;
+        let _variable: fn(&StgVariable) -> &[u8; 64] = |value| &value.name;
+        let _event: fn(&StgEvent) -> &[u8; 64] = |value| &value.description;
     }
 }

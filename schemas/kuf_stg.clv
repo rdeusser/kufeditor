@@ -35,22 +35,22 @@ struct StgHeader {
 // Reserved zeros
     reserved_2       bytes[24];
 // Map file (null-terminated within 64 bytes, e.g. 'E1001.map')
-    map_filename     string[64, terminator = 0x00];
+    map_filename     bytes[64];
 // Minimap bitmap (null-terminated within 64 bytes, e.g. 'E1001.bmp')
-    bitmap_filename  string[64, terminator = 0x00];
+    bitmap_filename  bytes[64];
 // Default camera file (null-terminated within 64 bytes, e.g. 'Default.cam')
-    default_camera   string[64, terminator = 0x00];
+    default_camera   bytes[64];
 // User camera file (null-terminated within 64 bytes, e.g. 'User.cam')
-    user_camera      string[64, terminator = 0x00];
+    user_camera      bytes[64];
 // Settings file (null-terminated within 64 bytes, e.g. '(08)000114.set')
-    settings_file    string[64, terminator = 0x00];
+    settings_file    bytes[64];
 // Sky/cloud effects (null-terminated within 64 bytes, e.g. 'cloud08.smfx')
-    sky_effects      string[64, terminator = 0x00];
+    sky_effects      bytes[64];
 // AI script file (null-terminated within 64 bytes, e.g. 'AI1001.txt')
-    ai_script        string[64, terminator = 0x00];
+    ai_script        bytes[64];
     padding_208      bytes[4];
 // Cubemap texture (null-terminated within 64 bytes, e.g. 'cubemap.dds')
-    cubemap_texture  string[64, terminator = 0x00];
+    cubemap_texture  bytes[64];
 // Configuration data including text_table_id and trigger_id
     config_data      bytes[36];
 }
@@ -58,7 +58,7 @@ struct StgHeader {
 // 544-byte (0x220) unit definition block.
 struct UnitBlock {
 // Unit name (null-terminated, padded). CP949/EUC-KR encoded.
-    name                  string[32, terminator = 0x00, encoding = "CP949"];
+    name                  bytes[32];
 // Must be unique per mission
     unique_id             u32;
 // Unit Control Disposition: 0=Player, 1=Enemy, 2=Ally, 3=Neutral
@@ -131,7 +131,7 @@ struct UnitBlock {
 // 84-byte (0x54) named map region for scripting.
 struct AreaEntry {
 // Area description (null-terminated). CP949/EUC-KR encoded.
-    description  string[32, terminator = 0x00, encoding = "CP949"];
+    description  bytes[32];
 // Observed: 15
     unknown_20   u32;
     unknown_24   u32;
@@ -164,7 +164,7 @@ struct StgParamValue {
 // Mission state variable. 64-byte name + 4-byte ID + typed initial value.
 struct StgVariable {
 // Variable name (null-terminated). CP949 encoded.
-    name           string[64, terminator = 0x00, encoding = "CP949"];
+    name           bytes[64];
 // Referenced by CON_VAR_INT_COMPARE and ACT_VAR_INT_SET
     variable_id    u32;
 // Typed initial value
@@ -191,7 +191,7 @@ struct StgAction {
 // and execute all actions.
 struct StgEvent {
 // Editable event label (null-terminated). CP949/EUC-KR encoded.
-    description      string[64, terminator = 0x00, encoding = "CP949"];
+    description      bytes[64];
 // Unique event ID within this mission
     event_id         u32;
     condition_count  u32;

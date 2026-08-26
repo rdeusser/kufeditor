@@ -56,6 +56,8 @@ Application::Application() {
 
 	// Create tab manager.
 	tabManager_ = std::make_unique<TabManager>();
+	bindApplicationSaveErrorPopup(*tabManager_, pendingPopupMessage_,
+				      showErrorPopup_);
 
 	// Create dialogs.
 	settingsDialog_ = std::make_unique<SettingsDialog>();

@@ -66,56 +66,32 @@ StgHeader StgHeader::parse(const uint8_t* buf, size_t len, size_t& offset) {
     std::memcpy(result.reserved_2, buf + offset, 24);
     offset += 24;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.map_filename.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.map_filename, buf + offset, 64);
+    offset += 64;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.bitmap_filename.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.bitmap_filename, buf + offset, 64);
+    offset += 64;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.default_camera.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.default_camera, buf + offset, 64);
+    offset += 64;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.user_camera.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.user_camera, buf + offset, 64);
+    offset += 64;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.settings_file.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.settings_file, buf + offset, 64);
+    offset += 64;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.sky_effects.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.sky_effects, buf + offset, 64);
+    offset += 64;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.ai_script.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.ai_script, buf + offset, 64);
+    offset += 64;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(result.padding_208, buf + offset, 4);
     offset += 4;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.cubemap_texture.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
+    std::memcpy(result.cubemap_texture, buf + offset, 64);
+    offset += 64;
     if (offset + 36 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(result.config_data, buf + offset, 36);
     offset += 36;
@@ -156,25 +132,60 @@ std::string StgHeader::to_json() const {
     s += "]";
     s += ",";
     s += "\"map_filename\":";
-    s += "\"" + map_filename + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(map_filename[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"bitmap_filename\":";
-    s += "\"" + bitmap_filename + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(bitmap_filename[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"default_camera\":";
-    s += "\"" + default_camera + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(default_camera[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"user_camera\":";
-    s += "\"" + user_camera + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(user_camera[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"settings_file\":";
-    s += "\"" + settings_file + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(settings_file[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"sky_effects\":";
-    s += "\"" + sky_effects + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(sky_effects[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"ai_script\":";
-    s += "\"" + ai_script + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(ai_script[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"padding_208\":";
     s += "[";
@@ -185,7 +196,12 @@ std::string StgHeader::to_json() const {
     s += "]";
     s += ",";
     s += "\"cubemap_texture\":";
-    s += "\"" + cubemap_texture + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(cubemap_texture[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"config_data\":";
     s += "[";
@@ -232,47 +248,15 @@ std::vector<uint8_t> StgHeader::to_bytes() const {
         _buf.insert(_buf.end(), _raw, _raw + 4);
     }
     _buf.insert(_buf.end(), reserved_2, reserved_2 + 24);
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), map_filename.data(), std::min(map_filename.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), bitmap_filename.data(), std::min(bitmap_filename.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), default_camera.data(), std::min(default_camera.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), user_camera.data(), std::min(user_camera.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), settings_file.data(), std::min(settings_file.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), sky_effects.data(), std::min(sky_effects.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), ai_script.data(), std::min(ai_script.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
+    _buf.insert(_buf.end(), map_filename, map_filename + 64);
+    _buf.insert(_buf.end(), bitmap_filename, bitmap_filename + 64);
+    _buf.insert(_buf.end(), default_camera, default_camera + 64);
+    _buf.insert(_buf.end(), user_camera, user_camera + 64);
+    _buf.insert(_buf.end(), settings_file, settings_file + 64);
+    _buf.insert(_buf.end(), sky_effects, sky_effects + 64);
+    _buf.insert(_buf.end(), ai_script, ai_script + 64);
     _buf.insert(_buf.end(), padding_208, padding_208 + 4);
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), cubemap_texture.data(), std::min(cubemap_texture.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
+    _buf.insert(_buf.end(), cubemap_texture, cubemap_texture + 64);
     _buf.insert(_buf.end(), config_data, config_data + 36);
     return _buf;
 }
@@ -280,12 +264,8 @@ std::vector<uint8_t> StgHeader::to_bytes() const {
 UnitBlock UnitBlock::parse(const uint8_t* buf, size_t len, size_t& offset) {
     UnitBlock result;
     if (offset + 32 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 32);
-        result.name.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 32;
-    }
-    // encoding: CP949
+    std::memcpy(result.name, buf + offset, 32);
+    offset += 32;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.unique_id, buf + offset, 4);
     offset += 4;
@@ -423,7 +403,12 @@ UnitBlock UnitBlock::parse(const uint8_t* buf, size_t len, size_t& offset) {
 std::string UnitBlock::to_json() const {
     std::string s = "{";
     s += "\"name\":";
-    s += "\"" + name + "\"";
+    s += "[";
+    for (size_t i = 0; i < 32; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(name[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"unique_id\":";
     s += std::to_string(unique_id);
@@ -593,11 +578,7 @@ std::string UnitBlock::to_json() const {
 
 std::vector<uint8_t> UnitBlock::to_bytes() const {
     std::vector<uint8_t> _buf;
-    {
-        std::vector<uint8_t> _tmp(32, 0);
-        std::memcpy(_tmp.data(), name.data(), std::min(name.size(), static_cast<size_t>(32)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
+    _buf.insert(_buf.end(), name, name + 32);
     {
         uint32_t _tmp = unique_id;
         uint8_t _raw[4];
@@ -724,12 +705,8 @@ std::vector<uint8_t> UnitBlock::to_bytes() const {
 AreaEntry AreaEntry::parse(const uint8_t* buf, size_t len, size_t& offset) {
     AreaEntry result;
     if (offset + 32 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 32);
-        result.description.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 32;
-    }
-    // encoding: CP949
+    std::memcpy(result.description, buf + offset, 32);
+    offset += 32;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.unknown_20, buf + offset, 4);
     offset += 4;
@@ -760,7 +737,12 @@ AreaEntry AreaEntry::parse(const uint8_t* buf, size_t len, size_t& offset) {
 std::string AreaEntry::to_json() const {
     std::string s = "{";
     s += "\"description\":";
-    s += "\"" + description + "\"";
+    s += "[";
+    for (size_t i = 0; i < 32; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(description[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"unknown_20\":";
     s += std::to_string(unknown_20);
@@ -796,11 +778,7 @@ std::string AreaEntry::to_json() const {
 
 std::vector<uint8_t> AreaEntry::to_bytes() const {
     std::vector<uint8_t> _buf;
-    {
-        std::vector<uint8_t> _tmp(32, 0);
-        std::memcpy(_tmp.data(), description.data(), std::min(description.size(), static_cast<size_t>(32)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
+    _buf.insert(_buf.end(), description, description + 32);
     {
         uint32_t _tmp = unknown_20;
         uint8_t _raw[4];
@@ -930,12 +908,8 @@ std::vector<uint8_t> StgParamValue::to_bytes() const {
 StgVariable StgVariable::parse(const uint8_t* buf, size_t len, size_t& offset) {
     StgVariable result;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.name.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
-    // encoding: CP949
+    std::memcpy(result.name, buf + offset, 64);
+    offset += 64;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.variable_id, buf + offset, 4);
     offset += 4;
@@ -946,7 +920,12 @@ StgVariable StgVariable::parse(const uint8_t* buf, size_t len, size_t& offset) {
 std::string StgVariable::to_json() const {
     std::string s = "{";
     s += "\"name\":";
-    s += "\"" + name + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(name[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"variable_id\":";
     s += std::to_string(variable_id);
@@ -959,11 +938,7 @@ std::string StgVariable::to_json() const {
 
 std::vector<uint8_t> StgVariable::to_bytes() const {
     std::vector<uint8_t> _buf;
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), name.data(), std::min(name.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
+    _buf.insert(_buf.end(), name, name + 64);
     {
         uint32_t _tmp = variable_id;
         uint8_t _raw[4];
@@ -1088,12 +1063,8 @@ std::vector<uint8_t> StgAction::to_bytes() const {
 StgEvent StgEvent::parse(const uint8_t* buf, size_t len, size_t& offset) {
     StgEvent result;
     if (offset + 64 > len) throw std::runtime_error("buffer overflow");
-    {
-        size_t _n = strnlen(reinterpret_cast<const char*>(buf + offset), 64);
-        result.description.assign(reinterpret_cast<const char*>(buf + offset), _n);
-        offset += 64;
-    }
-    // encoding: CP949
+    std::memcpy(result.description, buf + offset, 64);
+    offset += 64;
     if (offset + 4 > len) throw std::runtime_error("buffer overflow");
     std::memcpy(&result.event_id, buf + offset, 4);
     offset += 4;
@@ -1115,7 +1086,12 @@ StgEvent StgEvent::parse(const uint8_t* buf, size_t len, size_t& offset) {
 std::string StgEvent::to_json() const {
     std::string s = "{";
     s += "\"description\":";
-    s += "\"" + description + "\"";
+    s += "[";
+    for (size_t i = 0; i < 64; ++i) {
+        if (i > 0) s += ",";
+        s += std::to_string(description[i]);
+    }
+    s += "]";
     s += ",";
     s += "\"event_id\":";
     s += std::to_string(event_id);
@@ -1147,11 +1123,7 @@ std::string StgEvent::to_json() const {
 
 std::vector<uint8_t> StgEvent::to_bytes() const {
     std::vector<uint8_t> _buf;
-    {
-        std::vector<uint8_t> _tmp(64, 0);
-        std::memcpy(_tmp.data(), description.data(), std::min(description.size(), static_cast<size_t>(64)));
-        _buf.insert(_buf.end(), _tmp.begin(), _tmp.end());
-    }
+    _buf.insert(_buf.end(), description, description + 64);
     {
         uint32_t _tmp = event_id;
         uint8_t _raw[4];

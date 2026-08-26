@@ -3,11 +3,98 @@
 #include "core/text_encoding.h"
 #include "parsers/kuf_stg.h"
 
+#include <algorithm>
 #include <cstring>
+#include <string_view>
 
 namespace kuf {
 
 namespace {
+
+template <size_t N>
+std::array<uint8_t, N> copyFixedBytes(const uint8_t (&bytes)[N]) {
+	std::array<uint8_t, N> copy{};
+	std::copy_n(bytes, N, copy.begin());
+	return copy;
+}
+
+template <size_t N> std::string visibleFixedBytes(const uint8_t (&bytes)[N]) {
+	const auto *end = std::find(bytes, bytes + N, uint8_t{0});
+	return {reinterpret_cast<const char *>(bytes),
+		reinterpret_cast<const char *>(end)};
+}
+
+template <size_t N>
+STGFixedTextImage<N> UTF8TextImage(const uint8_t (&bytes)[N]) {
+	return {copyFixedBytes(bytes), visibleFixedBytes(bytes)};
+}
+
+template <size_t N>
+STGFixedTextImage<N> CP949TextImage(const uint8_t (&bytes)[N]) {
+	auto source = visibleFixedBytes(bytes);
+	return {copyFixedBytes(bytes), cp949ToUtf8(source)};
+}
+
+STGSaveError textError(STGSaveErrorCode code, std::string field,
+		       std::string_view detail) {
+	auto message = "Cannot save " + field + ": " + std::string(detail);
+	return {code, std::move(field), std::move(message)};
+}
+
+template <size_t N>
+bool writeFixedText(const std::string &current,
+		    const STGFixedTextImage<N> &image, uint8_t (&output)[N],
+		    bool CP949, std::string field,
+		    std::optional<STGSaveError> &error) {
+	if (current == image.decoded) {
+		std::copy(image.bytes.begin(), image.bytes.end(), output);
+		return true;
+	}
+
+	if (current.find('\0') != std::string::npos) {
+		error =
+		    textError(STGSaveErrorCode::EmbeddedZero, std::move(field),
+			      "text contains an embedded zero byte");
+		return false;
+	}
+
+	std::string encoded;
+	if (CP949) {
+		if (!isValidUTF8(current)) {
+			error = textError(STGSaveErrorCode::InvalidUTF8,
+					  std::move(field),
+					  "text is not valid UTF8");
+			return false;
+		}
+		auto converted = UTF8ToCP949Checked(current);
+		if (!converted) {
+			error = textError(
+			    STGSaveErrorCode::Unrepresentable, std::move(field),
+			    "text cannot be represented in CP949");
+			return false;
+		}
+		encoded = std::move(*converted);
+	} else {
+		if (!isValidUTF8(current)) {
+			error = textError(STGSaveErrorCode::InvalidUTF8,
+					  std::move(field),
+					  "text is not valid UTF8");
+			return false;
+		}
+		encoded = current;
+	}
+
+	if (encoded.size() >= N) {
+		error =
+		    textError(STGSaveErrorCode::TextTooLong, std::move(field),
+			      "encoded text exceeds the fixed field");
+		return false;
+	}
+
+	std::fill_n(output, N, uint8_t{0});
+	std::copy(encoded.begin(), encoded.end(), output);
+	return true;
+}
 
 StgParamValue wireToParam(const kuf_stg::StgParamValue &wp) {
 	StgParamValue p;
@@ -43,22 +130,41 @@ StgScriptEntry wireToScript(const kuf_stg::StgAction &wa) {
 	return entry;
 }
 
-kuf_stg::StgHeader headerToWire(const StgHeader &h) {
-	kuf_stg::StgHeader w = h.wire_;
-	w.map_filename = h.mapFile;
-	w.bitmap_filename = h.bitmapFile;
-	w.default_camera = h.defaultCameraFile;
-	w.user_camera = h.userCameraFile;
-	w.settings_file = h.settingsFile;
-	w.sky_effects = h.skyCloudEffects;
-	w.ai_script = h.aiScriptFile;
-	w.cubemap_texture = h.cubemapTexture;
-	return w;
+bool headerToWire(const StgHeader &h, kuf_stg::StgHeader &w,
+		  std::optional<STGSaveError> &error) {
+	w = h.wire_;
+	return writeFixedText(h.mapFile, h.mapFileImage_, w.map_filename, false,
+			      "header.mapFile", error) &&
+	       writeFixedText(h.bitmapFile, h.bitmapFileImage_,
+			      w.bitmap_filename, false, "header.bitmapFile",
+			      error) &&
+	       writeFixedText(h.defaultCameraFile, h.defaultCameraFileImage_,
+			      w.default_camera, false,
+			      "header.defaultCameraFile", error) &&
+	       writeFixedText(h.userCameraFile, h.userCameraFileImage_,
+			      w.user_camera, false, "header.userCameraFile",
+			      error) &&
+	       writeFixedText(h.settingsFile, h.settingsFileImage_,
+			      w.settings_file, false, "header.settingsFile",
+			      error) &&
+	       writeFixedText(h.skyCloudEffects, h.skyCloudEffectsImage_,
+			      w.sky_effects, false, "header.skyCloudEffects",
+			      error) &&
+	       writeFixedText(h.aiScriptFile, h.aiScriptFileImage_, w.ai_script,
+			      false, "header.aiScriptFile", error) &&
+	       writeFixedText(h.cubemapTexture, h.cubemapTextureImage_,
+			      w.cubemap_texture, false, "header.cubemapTexture",
+			      error);
 }
 
-kuf_stg::UnitBlock unitToWire(const StgUnit &u) {
-	kuf_stg::UnitBlock w = u.wire_;
-	w.name = utf8ToCp949(u.unitName);
+bool unitToWire(const StgUnit &u, size_t index, kuf_stg::UnitBlock &w,
+		std::optional<STGSaveError> &error) {
+	w = u.wire_;
+	if (!writeFixedText(u.unitName, u.unitNameImage_, w.name, true,
+			    "units[" + std::to_string(index) + "].unitName",
+			    error)) {
+		return false;
+	}
 	w.unique_id = u.uniqueId;
 	w.ucd = static_cast<uint8_t>(u.ucd);
 	w.is_hero = u.isHero;
@@ -115,18 +221,23 @@ kuf_stg::UnitBlock unitToWire(const StgUnit &u) {
 	w.formation_type = u.formationType;
 	w.stat_overrides.assign(u.statOverrides.begin(), u.statOverrides.end());
 
-	return w;
+	return true;
 }
 
-kuf_stg::AreaEntry areaToWire(const StgArea &a) {
-	kuf_stg::AreaEntry w = a.wire_;
-	w.description = utf8ToCp949(a.description);
+bool areaToWire(const StgArea &a, size_t index, kuf_stg::AreaEntry &w,
+		std::optional<STGSaveError> &error) {
+	w = a.wire_;
+	if (!writeFixedText(
+		a.description, a.descriptionImage_, w.description, true,
+		"areas[" + std::to_string(index) + "].description", error)) {
+		return false;
+	}
 	w.area_id = a.areaId;
 	w.bound_x1 = a.boundX1;
 	w.bound_y1 = a.boundY1;
 	w.bound_x2 = a.boundX2;
 	w.bound_y2 = a.boundY2;
-	return w;
+	return true;
 }
 
 kuf_stg::StgParamValue domainParamToWire(const StgParamValue &p) {
@@ -145,11 +256,33 @@ kuf_stg::StgParamValue domainParamToWire(const StgParamValue &p) {
 	return w;
 }
 
-kuf_stg::StgEvent eventToWire(const StgEvent &e) {
-	kuf_stg::StgEvent w;
-	w.description = utf8ToCp949(e.description);
+bool variableToWire(const StgVariable &variable, size_t index,
+		    kuf_stg::StgVariable &wire,
+		    std::optional<STGSaveError> &error) {
+	wire = variable.wire_;
+	if (!writeFixedText(variable.name, variable.nameImage_, wire.name, true,
+			    "variables[" + std::to_string(index) + "].name",
+			    error)) {
+		return false;
+	}
+	wire.variable_id = variable.variableId;
+	wire.initial_value = domainParamToWire(variable.initialValue);
+	return true;
+}
+
+bool eventToWire(const StgEvent &e, size_t blockIndex, size_t eventIndex,
+		 kuf_stg::StgEvent &w, std::optional<STGSaveError> &error) {
+	w = e.wire_;
+	if (!writeFixedText(
+		e.description, e.descriptionImage_, w.description, true,
+		"eventBlocks[" + std::to_string(blockIndex) + "].events[" +
+		    std::to_string(eventIndex) + "].description",
+		error)) {
+		return false;
+	}
 	w.event_id = e.eventId;
 	w.condition_count = static_cast<uint32_t>(e.conditions.size());
+	w.conditions.clear();
 	for (const auto &cond : e.conditions) {
 		kuf_stg::StgCondition wc;
 		wc.type_id = cond.typeId;
@@ -160,6 +293,7 @@ kuf_stg::StgEvent eventToWire(const StgEvent &e) {
 		w.conditions.push_back(std::move(wc));
 	}
 	w.action_count = static_cast<uint32_t>(e.actions.size());
+	w.actions.clear();
 	for (const auto &act : e.actions) {
 		kuf_stg::StgAction wa;
 		wa.type_id = act.typeId;
@@ -169,7 +303,7 @@ kuf_stg::StgEvent eventToWire(const StgEvent &e) {
 		}
 		w.actions.push_back(std::move(wa));
 	}
-	return w;
+	return true;
 }
 
 } // namespace
@@ -210,14 +344,30 @@ bool StgFormat::load(std::span<const std::byte> data) {
 		// Convert header.
 		header_.wire_ = wireHeader;
 		header_.formatMagic = magic;
-		header_.mapFile = wireHeader.map_filename;
-		header_.bitmapFile = wireHeader.bitmap_filename;
-		header_.defaultCameraFile = wireHeader.default_camera;
-		header_.userCameraFile = wireHeader.user_camera;
-		header_.settingsFile = wireHeader.settings_file;
-		header_.skyCloudEffects = wireHeader.sky_effects;
-		header_.aiScriptFile = wireHeader.ai_script;
-		header_.cubemapTexture = wireHeader.cubemap_texture;
+		header_.mapFileImage_ = UTF8TextImage(wireHeader.map_filename);
+		header_.mapFile = header_.mapFileImage_.decoded;
+		header_.bitmapFileImage_ =
+		    UTF8TextImage(wireHeader.bitmap_filename);
+		header_.bitmapFile = header_.bitmapFileImage_.decoded;
+		header_.defaultCameraFileImage_ =
+		    UTF8TextImage(wireHeader.default_camera);
+		header_.defaultCameraFile =
+		    header_.defaultCameraFileImage_.decoded;
+		header_.userCameraFileImage_ =
+		    UTF8TextImage(wireHeader.user_camera);
+		header_.userCameraFile = header_.userCameraFileImage_.decoded;
+		header_.settingsFileImage_ =
+		    UTF8TextImage(wireHeader.settings_file);
+		header_.settingsFile = header_.settingsFileImage_.decoded;
+		header_.skyCloudEffectsImage_ =
+		    UTF8TextImage(wireHeader.sky_effects);
+		header_.skyCloudEffects = header_.skyCloudEffectsImage_.decoded;
+		header_.aiScriptFileImage_ =
+		    UTF8TextImage(wireHeader.ai_script);
+		header_.aiScriptFile = header_.aiScriptFileImage_.decoded;
+		header_.cubemapTextureImage_ =
+		    UTF8TextImage(wireHeader.cubemap_texture);
+		header_.cubemapTexture = header_.cubemapTextureImage_.decoded;
 		header_.unitCount = unitCount;
 
 		// Convert units.
@@ -229,7 +379,8 @@ bool StgFormat::load(std::span<const std::byte> data) {
 
 			unit.wire_ = wu;
 
-			unit.unitName = cp949ToUtf8(wu.name);
+			unit.unitNameImage_ = CP949TextImage(wu.name);
+			unit.unitName = unit.unitNameImage_.decoded;
 			unit.uniqueId = wu.unique_id;
 			unit.ucd = static_cast<UCD>(wu.ucd);
 			unit.isHero = wu.is_hero;
@@ -332,8 +483,10 @@ bool StgFormat::load(std::span<const std::byte> data) {
 					    buf, len, offset);
 					StgArea area;
 					area.wire_ = wa;
+					area.descriptionImage_ =
+					    CP949TextImage(wa.description);
 					area.description =
-					    cp949ToUtf8(wa.description);
+					    area.descriptionImage_.decoded;
 					area.areaId = wa.area_id;
 					area.boundX1 = wa.bound_x1;
 					area.boundY1 = wa.bound_y1;
@@ -354,7 +507,10 @@ bool StgFormat::load(std::span<const std::byte> data) {
 					auto wv = kuf_stg::StgVariable::parse(
 					    buf, len, offset);
 					StgVariable var;
-					var.name = cp949ToUtf8(wv.name);
+					var.wire_ = wv;
+					var.nameImage_ =
+					    CP949TextImage(wv.name);
+					var.name = var.nameImage_.decoded;
 					var.variableId = wv.variable_id;
 					var.initialValue =
 					    wireToParam(wv.initial_value);
@@ -378,8 +534,12 @@ bool StgFormat::load(std::span<const std::byte> data) {
 
 					for (const auto &we : wb.events) {
 						StgEvent event;
+						event.descriptionImage_ =
+						    CP949TextImage(
+							we.description);
 						event.description =
-						    cp949ToUtf8(we.description);
+						    event.descriptionImage_
+							.decoded;
 						event.eventId = we.event_id;
 
 						event.conditions.reserve(
@@ -449,36 +609,61 @@ bool StgFormat::load(std::span<const std::byte> data) {
 }
 
 std::vector<std::byte> StgFormat::save() const {
+	auto result = trySave();
+	return std::move(result.bytes);
+}
+
+STGSaveResult StgFormat::trySave() const {
+	std::optional<STGSaveError> error;
+	kuf_stg::StgHeader wireHeader;
+	if (!headerToWire(header_, wireHeader, error)) {
+		return {{}, std::move(error)};
+	}
+
 	if (tailParsed_) {
 		kuf_stg::File file;
 		file.magic = header_.formatMagic;
-		file.header = headerToWire(header_);
+		file.header = std::move(wireHeader);
 
-		for (const auto &unit : units_) {
-			file.units.push_back(unitToWire(unit));
+		for (size_t index = 0; index < units_.size(); ++index) {
+			kuf_stg::UnitBlock wire;
+			if (!unitToWire(units_[index], index, wire, error)) {
+				return {{}, std::move(error)};
+			}
+			file.units.push_back(std::move(wire));
 		}
 
-		for (const auto &area : areas_) {
-			file.areas.push_back(areaToWire(area));
+		for (size_t index = 0; index < areas_.size(); ++index) {
+			kuf_stg::AreaEntry wire;
+			if (!areaToWire(areas_[index], index, wire, error)) {
+				return {{}, std::move(error)};
+			}
+			file.areas.push_back(std::move(wire));
 		}
 
-		for (const auto &var : variables_) {
-			kuf_stg::StgVariable wv;
-			wv.name = utf8ToCp949(var.name);
-			wv.variable_id = var.variableId;
-			wv.initial_value = domainParamToWire(var.initialValue);
-			file.variables.push_back(std::move(wv));
+		for (size_t index = 0; index < variables_.size(); ++index) {
+			kuf_stg::StgVariable wire;
+			if (!variableToWire(variables_[index], index, wire,
+					    error)) {
+				return {{}, std::move(error)};
+			}
+			file.variables.push_back(std::move(wire));
 		}
 
-		for (const auto &block : eventBlocks_) {
+		for (size_t blockIndex = 0; blockIndex < eventBlocks_.size();
+		     ++blockIndex) {
+			const auto &block = eventBlocks_[blockIndex];
 			kuf_stg::EventBlock wb;
 			wb.block_header = block.blockHeader;
-			for (const auto &event : block.events) {
-				if (!event.modified) {
-					wb.events.push_back(event.wire_);
-				} else {
-					wb.events.push_back(eventToWire(event));
+			for (size_t eventIndex = 0;
+			     eventIndex < block.events.size(); ++eventIndex) {
+				kuf_stg::StgEvent wire;
+				if (!eventToWire(block.events[eventIndex],
+						 blockIndex, eventIndex, wire,
+						 error)) {
+					return {{}, std::move(error)};
 				}
+				wb.events.push_back(std::move(wire));
 			}
 			file.event_blocks.push_back(std::move(wb));
 		}
@@ -489,9 +674,10 @@ std::vector<std::byte> StgFormat::save() const {
 		}
 
 		auto bytes = file.to_bytes();
-		return {reinterpret_cast<const std::byte *>(bytes.data()),
-			reinterpret_cast<const std::byte *>(bytes.data() +
-							    bytes.size())};
+		return {{reinterpret_cast<const std::byte *>(bytes.data()),
+			 reinterpret_cast<const std::byte *>(bytes.data() +
+							     bytes.size())},
+			std::nullopt};
 	}
 
 	// Tail not parsed: emit header + units manually, append raw tail.
@@ -502,7 +688,7 @@ std::vector<std::byte> StgFormat::save() const {
 	std::memcpy(data.data(), &header_.formatMagic, 4);
 
 	// Header.
-	auto hdrBytes = headerToWire(header_).to_bytes();
+	auto hdrBytes = wireHeader.to_bytes();
 	data.insert(data.end(),
 		    reinterpret_cast<const std::byte *>(hdrBytes.data()),
 		    reinterpret_cast<const std::byte *>(hdrBytes.data() +
@@ -515,8 +701,12 @@ std::vector<std::byte> StgFormat::save() const {
 	std::memcpy(data.data() + pos, &unitCount, 4);
 
 	// Units.
-	for (const auto &unit : units_) {
-		auto uBytes = unitToWire(unit).to_bytes();
+	for (size_t index = 0; index < units_.size(); ++index) {
+		kuf_stg::UnitBlock wire;
+		if (!unitToWire(units_[index], index, wire, error)) {
+			return {{}, std::move(error)};
+		}
+		auto uBytes = wire.to_bytes();
 		data.insert(data.end(),
 			    reinterpret_cast<const std::byte *>(uBytes.data()),
 			    reinterpret_cast<const std::byte *>(uBytes.data() +
@@ -524,7 +714,7 @@ std::vector<std::byte> StgFormat::save() const {
 	}
 
 	data.insert(data.end(), rawTail_.begin(), rawTail_.end());
-	return data;
+	return {std::move(data), std::nullopt};
 }
 
 size_t StgFormat::totalEventCount() const {

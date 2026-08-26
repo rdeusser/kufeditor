@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/config.h"
+#include "core/tab_manager.h"
 
 #include <memory>
 #include <string>
@@ -13,12 +14,21 @@ class ImGuiContext;
 class HomeView;
 class ValidationLogView;
 class SettingsDialog;
-class TabManager;
 class RecentFiles;
 class OpenDocument;
 class EditorTab;
 class ModManagerView;
 class PatchEditorView;
+
+inline void bindApplicationSaveErrorPopup(TabManager &manager,
+					  std::string &pendingMessage,
+					  bool &showPopup) {
+	manager.setOnSaveError(
+	    [&pendingMessage, &showPopup](const SaveResult &result) {
+		    pendingMessage = result.message;
+		    showPopup = true;
+	    });
+}
 
 class Application {
       public:

@@ -16,9 +16,11 @@ fi
 
 rust_schemas=(
     "${project_root}/schemas/kuf_save.clv"
+    "${project_root}/schemas/kuf_stg.clv"
     "${project_root}"/schemas/sox_*.clv
 )
-if [[ ! -f "${rust_schemas[0]}" ]] || ((${#rust_schemas[@]} == 1)); then
+if [[ ! -f "${rust_schemas[0]}" ]] || [[ ! -f "${rust_schemas[1]}" ]] ||
+    ((${#rust_schemas[@]} == 2)); then
     printf 'error: no Rust schema inputs found\n' >&2
     exit 1
 fi

@@ -27,15 +27,15 @@ struct StgHeader {
     uint8_t reserved_1[24];
     uint32_t unknown_4;
     uint8_t reserved_2[24];
-    std::string map_filename;
-    std::string bitmap_filename;
-    std::string default_camera;
-    std::string user_camera;
-    std::string settings_file;
-    std::string sky_effects;
-    std::string ai_script;
+    uint8_t map_filename[64];
+    uint8_t bitmap_filename[64];
+    uint8_t default_camera[64];
+    uint8_t user_camera[64];
+    uint8_t settings_file[64];
+    uint8_t sky_effects[64];
+    uint8_t ai_script[64];
     uint8_t padding_208[4];
-    std::string cubemap_texture;
+    uint8_t cubemap_texture[64];
     uint8_t config_data[36];
 
     static StgHeader parse(const uint8_t* buf, size_t len, size_t& offset);
@@ -44,7 +44,7 @@ struct StgHeader {
 };
 
 struct UnitBlock {
-    std::string name;
+    uint8_t name[32];
     uint32_t unique_id;
     uint8_t ucd;
     uint8_t is_hero;
@@ -93,7 +93,7 @@ struct UnitBlock {
 };
 
 struct AreaEntry {
-    std::string description;
+    uint8_t description[32];
     uint32_t unknown_20;
     uint32_t unknown_24;
     uint8_t unknown_28[24];
@@ -118,7 +118,7 @@ struct StgParamValue {
 };
 
 struct StgVariable {
-    std::string name;
+    uint8_t name[64];
     uint32_t variable_id;
     StgParamValue initial_value;
 
@@ -148,7 +148,7 @@ struct StgAction {
 };
 
 struct StgEvent {
-    std::string description;
+    uint8_t description[64];
     uint32_t event_id;
     uint32_t condition_count;
     std::vector<StgCondition> conditions;

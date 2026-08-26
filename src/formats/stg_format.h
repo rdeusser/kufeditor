@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,31 @@ enum class Direction : uint8_t {
 // K2JobDef.h job type IDs (0-42). Values above 42 are extended model IDs
 // for hero characters and special unit animations.
 constexpr uint8_t kMaxStandardJobType = 42;
+
+template <size_t N> struct STGFixedTextImage {
+	std::array<uint8_t, N> bytes{};
+	std::string decoded;
+};
+
+enum class STGSaveErrorCode {
+	InvalidUTF8,
+	Unrepresentable,
+	EmbeddedZero,
+	TextTooLong
+};
+
+struct STGSaveError {
+	STGSaveErrorCode code;
+	std::string field;
+	std::string message;
+};
+
+struct STGSaveResult {
+	std::vector<std::byte> bytes;
+	std::optional<STGSaveError> error;
+
+	bool succeeded() const { return !error.has_value(); }
+};
 
 // Skill slot: 1 byte skill ID + 1 byte level, packed into 2 bytes (4 slots = 8
 // bytes).
@@ -62,6 +88,14 @@ struct StgHeader {
 	uint32_t unitCount = 0;
 
 	kuf_stg::StgHeader wire_{};
+	STGFixedTextImage<64> mapFileImage_;
+	STGFixedTextImage<64> bitmapFileImage_;
+	STGFixedTextImage<64> defaultCameraFileImage_;
+	STGFixedTextImage<64> userCameraFileImage_;
+	STGFixedTextImage<64> settingsFileImage_;
+	STGFixedTextImage<64> skyCloudEffectsImage_;
+	STGFixedTextImage<64> aiScriptFileImage_;
+	STGFixedTextImage<64> cubemapTextureImage_;
 };
 
 // STG unit block (544 bytes for Crusaders).
@@ -100,6 +134,7 @@ struct StgUnit {
 	std::array<float, 22> statOverrides{};
 
 	kuf_stg::UnitBlock wire_{};
+	STGFixedTextImage<32> unitNameImage_;
 
 	StgUnit() {
 		leaderAbilities.fill(-1);
@@ -141,6 +176,7 @@ struct StgEvent {
 	std::vector<StgScriptEntry> conditions;
 	std::vector<StgScriptEntry> actions;
 	kuf_stg::StgEvent wire_{};
+	STGFixedTextImage<64> descriptionImage_;
 	bool modified = false;
 };
 
@@ -153,6 +189,8 @@ struct StgVariable {
 	std::string name;
 	uint32_t variableId = 0;
 	StgParamValue initialValue;
+	kuf_stg::StgVariable wire_{};
+	STGFixedTextImage<64> nameImage_;
 };
 
 struct StgArea {
@@ -163,6 +201,7 @@ struct StgArea {
 	float boundX2 = 0.0f;
 	float boundY2 = 0.0f;
 	kuf_stg::AreaEntry wire_{};
+	STGFixedTextImage<32> descriptionImage_;
 };
 
 struct StgFooterEntry {
@@ -174,6 +213,7 @@ class StgFormat : public IFileFormat {
       public:
 	bool load(std::span<const std::byte> data) override;
 	std::vector<std::byte> save() const override;
+	STGSaveResult trySave() const;
 	std::string_view formatName() const override { return "STG Mission"; }
 	GameVersion detectedVersion() const override { return version_; }
 	std::vector<ValidationIssue> validate() const override;

@@ -81,36 +81,6 @@ void TabManager::closeTab(EditorTab *tab) {
 	}
 }
 
-void TabManager::saveDocument(OpenDocument *doc) {
-	if (!doc || doc->path.empty()) return;
-
-	std::vector<std::byte> data;
-	if (doc->binaryData) {
-		data = doc->binaryData->save();
-	} else if (doc->skillData) {
-		data = doc->skillData->save();
-	} else if (doc->textData) {
-		data = doc->textData->save();
-	} else if (doc->stgData) {
-		data = doc->stgData->save();
-	} else if (doc->saveData) {
-		data = doc->saveData->save();
-	}
-
-	if (!data.empty()) {
-		// Re-encode to ASCII hex if the original file was hex-encoded
-		// (non-standard).
-		if (doc->isSoxEncoded) {
-			data = soxEncode(data);
-		}
-
-		std::ofstream file(doc->path, std::ios::binary);
-		file.write(reinterpret_cast<const char *>(data.data()),
-			   static_cast<std::streamsize>(data.size()));
-		doc->dirty = false;
-	}
-}
-
 void TabManager::saveAll() {
 	for (const auto &tab : tabs_) {
 		if (tab->document() && tab->document()->dirty) {
