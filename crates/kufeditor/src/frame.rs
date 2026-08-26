@@ -13,9 +13,10 @@ use gpui::{
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
     ApplyOutcome, DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
-    STGEditor, STGFloatTarget, STGFloatValue, STGNumberTarget, STGTextTarget,
-    SUPPORTED_OPEN_EXTENSIONS, SaveEditor, SaveNumberTarget, SaveTextField, SaveToken,
-    SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError, load_path,
+    STGEditor, STGFloatTarget, STGFloatValue, STGNumberTarget, STGParameterTarget,
+    STGReferenceKind, STGTextTarget, SUPPORTED_OPEN_EXTENSIONS, SaveEditor, SaveNumberTarget,
+    SaveTextField, SaveToken, SkillTextField, TroopField, TroopGroup, Workspace, WorkspaceError,
+    load_path,
 };
 
 use crate::{
@@ -32,8 +33,8 @@ use crate::{
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
     state::{
         Area, ClosePolicy, RecordSelections, RequestID, STGDraftTarget, STGPresentationStates,
-        STGSection, SaveListCursor, SaveListKind, SavePresentationStates, ShellState,
-        navigation_projection,
+        STGReferenceCursor, STGSection, SaveListCursor, SaveListKind, SavePresentationStates,
+        ShellState, navigation_projection,
     },
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
@@ -494,6 +495,37 @@ struct STGListControl {
     binding: Cell<Option<STGListBinding>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct STGReferenceListBinding {
+    document: DocumentID,
+    target: STGParameterTarget,
+    kind: STGReferenceKind,
+    cursor: Option<STGReferenceCursor>,
+    position: usize,
+    row_count: usize,
+    generation: u64,
+}
+
+struct STGReferenceListControl {
+    focus: FocusHandle,
+    scroll: UniformListScrollHandle,
+    binding: Cell<Option<STGReferenceListBinding>>,
+}
+
+impl STGReferenceListControl {
+    fn new(cx: &mut Context<AppFrame>) -> Self {
+        Self {
+            focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            scroll: UniformListScrollHandle::new(),
+            binding: Cell::new(None),
+        }
+    }
+
+    fn invalidate(&self) {
+        self.binding.set(None);
+    }
+}
+
 impl STGListControl {
     fn new(cx: &mut Context<AppFrame>) -> Self {
         Self {
@@ -743,7 +775,9 @@ pub struct AppFrame {
     stg_presentations: STGPresentationStates,
     save_lists: SaveListControls,
     stg_lists: STGListControls,
+    stg_reference_list: STGReferenceListControl,
     stg_search: Option<stg::ActiveSTGSearch>,
+    stg_reference_search: Option<stg::ActiveSTGReferenceSearch>,
     number_edit: Option<ActiveNumberEdit>,
     float_edit: Option<ActiveFloatEdit>,
     text_edit: Option<ActiveTextEdit>,
@@ -803,7 +837,9 @@ impl AppFrame {
             stg_presentations: STGPresentationStates::default(),
             save_lists: SaveListControls::new(cx),
             stg_lists: STGListControls::new(cx),
+            stg_reference_list: STGReferenceListControl::new(cx),
             stg_search: None,
+            stg_reference_search: None,
             number_edit: None,
             float_edit: None,
             text_edit: None,
@@ -848,7 +884,9 @@ impl AppFrame {
     fn activate_document(&mut self, document: DocumentID, cx: &mut Context<Self>) {
         self.save_lists.invalidate_all();
         self.stg_lists.invalidate_all();
+        self.stg_reference_list.invalidate();
         self.stg_search = None;
+        self.stg_reference_search = None;
         match self.workspace.document_kind(document).ok() {
             Some(DocumentKind::CrusadersSave) => {
                 self.deactivate_stg_presentation(cx);
@@ -2911,6 +2949,8 @@ impl Render for AppFrame {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let key_context = if self.save_editor_is_visible() {
             "KufEditor SaveEditor"
+        } else if self.stg_editor_is_visible() {
+            "KufEditor STGEditor"
         } else {
             "KufEditor"
         };
@@ -2928,6 +2968,8 @@ impl Render for AppFrame {
             .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::focus_next_save_control))
             .on_action(cx.listener(Self::focus_previous_save_control))
+            .on_action(cx.listener(Self::focus_next_stg_control))
+            .on_action(cx.listener(Self::focus_previous_stg_control))
             .on_action(cx.listener(Self::open_action))
             .on_action(cx.listener(Self::save_action))
             .on_action(cx.listener(Self::save_all_action))
@@ -2936,6 +2978,8 @@ impl Render for AppFrame {
             .on_action(cx.listener(Self::redo_action))
             .on_action(cx.listener(Self::set_save_choice))
             .on_action(cx.listener(Self::set_stg_choice))
+            .on_action(cx.listener(Self::apply_stg_structural_edit))
+            .on_action(cx.listener(Self::select_stg_reference))
             .child(self.top_bar(cx))
             .children(self.notice_bar())
             .child(

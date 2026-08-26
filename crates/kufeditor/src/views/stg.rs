@@ -878,6 +878,24 @@ where
     })
 }
 
+pub fn uniform_stg_reference_rows<R>(
+    id: impl Into<ElementId>,
+    rows: STGReferenceRows,
+    render: impl 'static + Fn((usize, STGReferenceCursor), &mut Window, &mut App) -> R,
+) -> UniformList
+where
+    R: IntoElement,
+{
+    uniform_list(id, rows.len(), move |requested, window, cx| {
+        requested
+            .filter_map(|position| {
+                rows.cursor(position)
+                    .map(|cursor| render((position, cursor), window, cx))
+            })
+            .collect()
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum STGIndexRowsData {
     Range { count: usize },
@@ -1207,6 +1225,19 @@ impl STGReferenceRows {
             STGReferenceRowsData::Events(rows) => {
                 rows.target(position).map(STGReferenceCursor::Event)
             }
+        }
+    }
+
+    pub fn position_of(&self, cursor: STGReferenceCursor) -> Option<usize> {
+        match (&self.data, cursor) {
+            (STGReferenceRowsData::Indices(rows), STGReferenceCursor::Index(index)) => {
+                rows.position_of(index)
+            }
+            (STGReferenceRowsData::Events(rows), STGReferenceCursor::Event(target)) => {
+                rows.position_of(target)
+            }
+            (STGReferenceRowsData::Indices(_), STGReferenceCursor::Event(_))
+            | (STGReferenceRowsData::Events(_), STGReferenceCursor::Index(_)) => None,
         }
     }
 

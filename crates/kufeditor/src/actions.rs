@@ -1,7 +1,10 @@
 use gpui::{Action, App, KeyBinding, actions};
-use kufeditor_workspace::{DocumentID, STGNumberTarget, SaveNumberTarget};
+use kufeditor_workspace::{
+    DocumentID, STGNumberTarget, STGParameterTarget, STGReferenceKind, STGStructuralEdit,
+    SaveNumberTarget,
+};
 
-use crate::state::STGSection;
+use crate::state::{STGReferenceCursor, STGSection};
 
 actions!(
     kufeditor,
@@ -14,6 +17,8 @@ actions!(
         Redo,
         FocusNextSaveControl,
         FocusPreviousSaveControl,
+        FocusNextSTGControl,
+        FocusPreviousSTGControl,
         MoveSaveListUp,
         MoveSaveListDown,
         MoveSaveListHome,
@@ -49,6 +54,28 @@ pub(crate) struct SetSTGChoice {
     pub(crate) value: i64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Action)]
+#[action(namespace = kufeditor, no_json)]
+pub(crate) struct ApplySTGStructuralEdit {
+    pub(crate) document: DocumentID,
+    pub(crate) section: STGSection,
+    pub(crate) generation: u64,
+    pub(crate) edit: STGStructuralEdit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Action)]
+#[action(namespace = kufeditor, no_json)]
+pub(crate) struct SelectSTGReference {
+    pub(crate) document: DocumentID,
+    pub(crate) section: STGSection,
+    pub(crate) generation: u64,
+    pub(crate) target: STGParameterTarget,
+    pub(crate) kind: STGReferenceKind,
+    pub(crate) cursor: STGReferenceCursor,
+    pub(crate) position: usize,
+    pub(crate) value: i32,
+}
+
 pub fn bind(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-o", OpenFile, None),
@@ -63,6 +90,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-shift-z", Redo, None),
         KeyBinding::new("tab", FocusNextSaveControl, Some("SaveEditor")),
         KeyBinding::new("shift-tab", FocusPreviousSaveControl, Some("SaveEditor")),
+        KeyBinding::new("tab", FocusNextSTGControl, Some("STGEditor")),
+        KeyBinding::new("shift-tab", FocusPreviousSTGControl, Some("STGEditor")),
         KeyBinding::new("up", MoveSaveListUp, Some("SaveVirtualList")),
         KeyBinding::new("down", MoveSaveListDown, Some("SaveVirtualList")),
         KeyBinding::new("home", MoveSaveListHome, Some("SaveVirtualList")),
@@ -77,5 +106,11 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("end", MoveSTGListEnd, Some("STGVirtualList")),
         KeyBinding::new("pageup", MoveSTGListPageUp, Some("STGVirtualList")),
         KeyBinding::new("pagedown", MoveSTGListPageDown, Some("STGVirtualList")),
+        KeyBinding::new("up", MoveSTGListUp, Some("STGReferenceList")),
+        KeyBinding::new("down", MoveSTGListDown, Some("STGReferenceList")),
+        KeyBinding::new("home", MoveSTGListHome, Some("STGReferenceList")),
+        KeyBinding::new("end", MoveSTGListEnd, Some("STGReferenceList")),
+        KeyBinding::new("pageup", MoveSTGListPageUp, Some("STGReferenceList")),
+        KeyBinding::new("pagedown", MoveSTGListPageDown, Some("STGReferenceList")),
     ]);
 }

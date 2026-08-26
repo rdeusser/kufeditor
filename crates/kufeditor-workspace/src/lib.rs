@@ -16,6 +16,7 @@ use kufeditor_formats::{FormatError, STGRebaseError};
 
 pub use document::{Document, DocumentEdit, DocumentID, DocumentKind, StateID};
 pub use history::DEFAULT_STG_HISTORY_LIMIT;
+pub use kufeditor_formats::stg::catalog as stg_catalog;
 pub use kufeditor_formats::{
     Diagnostic, DiagnosticLocation, STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice,
     STGDocument, STGEditor, STGEvent, STGEventBlock, STGEventTarget, STGFieldAccess,

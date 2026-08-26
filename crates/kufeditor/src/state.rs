@@ -1149,6 +1149,32 @@ impl STGDocumentTransition {
         }
     }
 
+    pub(crate) const fn inserted_event_target(self) -> Option<STGEventTarget> {
+        match self {
+            Self::StructuralEdit(Some(STGStructuralChange::InsertEvent { target })) => Some(target),
+            Self::StructuralEdit(_)
+            | Self::Undo(_)
+            | Self::Redo(_)
+            | Self::Unchanged
+            | Self::ScalarEdit
+            | Self::Catalog => None,
+        }
+    }
+
+    pub(crate) const fn inserted_script_target(self) -> Option<STGScriptTarget> {
+        match self {
+            Self::StructuralEdit(Some(STGStructuralChange::InsertScript { target })) => {
+                Some(target)
+            }
+            Self::StructuralEdit(_)
+            | Self::Undo(_)
+            | Self::Redo(_)
+            | Self::Unchanged
+            | Self::ScalarEdit
+            | Self::Catalog => None,
+        }
+    }
+
     const fn may_change_structure(self) -> bool {
         matches!(
             self,
@@ -1257,6 +1283,8 @@ impl STGPresentationStates {
     ) -> STGPresentationTransition {
         let after_structure = transition.may_change_structure();
         let structural_change = transition.structural_change();
+        let inserted_event = transition.inserted_event_target();
+        let inserted_script = transition.inserted_script_target();
         let invalidate_script_identity = transition.invalidates_script_identity();
         self.update_document(document, draft, transition.changed(), |state| {
             let mut changed =
@@ -1293,6 +1321,20 @@ impl STGPresentationStates {
                     changed |= replace_if_changed(&mut picker.cursor, cursor);
                 }
                 None => {}
+            }
+            if let Some(target) = inserted_event {
+                changed |= state.select(STGSelection::Event(Some(target)));
+            }
+            if let Some(target) = inserted_script {
+                changed |= replace_if_changed(&mut state.expanded_script, Some(target));
+                if state
+                    .reference_picker
+                    .as_ref()
+                    .is_some_and(|picker| picker.target.script != target)
+                {
+                    state.reference_picker = None;
+                    changed = true;
+                }
             }
             changed
         })
@@ -1381,6 +1423,26 @@ impl STGPresentationStates {
         self.update_document(document, draft, false, |state| {
             replace_if_changed(&mut state.reference_picker, picker)
         })
+    }
+
+    pub fn set_reference_cursor(
+        &mut self,
+        document: DocumentID,
+        target: STGParameterTarget,
+        kind: STGReferenceKind,
+        cursor: Option<STGReferenceCursor>,
+    ) -> bool {
+        let Some(state) = self.documents.get_mut(&document) else {
+            return false;
+        };
+        let Some(picker) = state
+            .reference_picker
+            .as_mut()
+            .filter(|picker| picker.target == target && picker.kind == kind)
+        else {
+            return false;
+        };
+        replace_if_changed(&mut picker.cursor, cursor)
     }
 
     pub fn binding_cursor(

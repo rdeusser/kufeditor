@@ -106,10 +106,11 @@ pub fn primary_button(theme: &Theme, id: &'static str, label: &'static str) -> S
 pub fn choice_button(
     theme: &Theme,
     id: impl Into<ElementId>,
-    label: &'static str,
+    label: impl Into<String>,
     selected: bool,
 ) -> Stateful<Div> {
     let hover = theme.raised;
+    let label = label.into();
     div()
         .id(id)
         .flex()

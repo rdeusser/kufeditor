@@ -1,12 +1,14 @@
 use gpui::{
-    AnyElement, Context, Div, ElementId, Entity, ScrollStrategy, SharedString, div, prelude::*, px,
+    AnyElement, ClickEvent, Context, Div, ElementId, Entity, MouseButton, PromptLevel,
+    ScrollStrategy, SharedString, div, prelude::*, px,
 };
 use kufeditor_workspace::{
-    DocumentID, STGAbilityOwner, STGAreaField, STGAreaFloatField, STGEditor, STGEventTarget,
-    STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField,
-    STGNumberTarget, STGReferenceKind, STGScriptKind, STGScriptTarget, STGSkillField,
-    STGSkillOwner, STGTailStatus, STGText, STGTextTarget, STGUnitField, STGUnitFloatField,
-    STGUnitGroup, STGValue, STGValueTarget, WorkspaceError,
+    DocumentID, DocumentKind, STGAbilityOwner, STGAreaField, STGAreaFloatField, STGEditor,
+    STGEventTarget, STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField,
+    STGHeaderTextField, STGNumberTarget, STGReferenceKind, STGScriptKind, STGScriptTarget,
+    STGSkillField, STGSkillOwner, STGStructuralEdit, STGTailStatus, STGText, STGTextTarget,
+    STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue, STGValueKind, STGValueTarget,
+    WorkspaceError, stg_catalog,
 };
 
 use super::{
@@ -14,16 +16,17 @@ use super::{
 };
 use crate::{
     actions::{
-        MoveSTGListDown, MoveSTGListEnd, MoveSTGListHome, MoveSTGListPageDown, MoveSTGListPageUp,
-        MoveSTGListUp, SetSTGChoice,
+        ApplySTGStructuralEdit, FocusNextSTGControl, FocusPreviousSTGControl, MoveSTGListDown,
+        MoveSTGListEnd, MoveSTGListHome, MoveSTGListPageDown, MoveSTGListPageUp, MoveSTGListUp,
+        SelectSTGReference, SetSTGChoice,
     },
     components,
     crusaders_catalog_status::CrusadersCatalogStatus,
     notices::{Notice, NoticeSource},
     state::{
         STGDocumentTransition, STGDraftBinding, STGDraftStatus, STGDraftTarget, STGIndexVisibility,
-        STGPresentationTransition, STGReferenceVisibility, STGSection, STGSelection,
-        STGVisibleSelections,
+        STGPresentationTransition, STGReferenceCursor, STGReferencePickerState,
+        STGReferenceVisibility, STGSection, STGSelection, STGVisibleSelections,
     },
     text_input::{TextInput, TextInputEvent},
     views::{
@@ -89,8 +92,18 @@ impl STGSearchKind {
 pub(super) struct ActiveSTGSearch {
     document: DocumentID,
     kind: STGSearchKind,
+    generation: u64,
     original_query: String,
     input: Entity<TextInput>,
+}
+
+pub(super) struct ActiveSTGReferenceSearch {
+    document: DocumentID,
+    target: kufeditor_workspace::STGParameterTarget,
+    kind: STGReferenceKind,
+    generation: u64,
+    original_query: String,
+    pub(super) input: Entity<TextInput>,
 }
 
 struct STGPresentationProjection {
@@ -168,7 +181,36 @@ impl AppFrame {
 
         if transition.changed() {
             self.stg_lists.invalidate_all();
+            self.stg_reference_list.invalidate();
             cx.notify();
+        }
+        if self
+            .stg_search
+            .as_ref()
+            .filter(|search| search.document == document)
+            .is_some_and(|search| {
+                !self.stg_presentations.get(document).is_some_and(|state| {
+                    state.section() == search.kind.section()
+                        && state.binding_generation() == search.generation
+                })
+            })
+        {
+            self.stg_search = None;
+        }
+        if self
+            .stg_reference_search
+            .as_ref()
+            .filter(|search| search.document == document)
+            .is_some_and(|search| {
+                !self.stg_presentations.get(document).is_some_and(|state| {
+                    state.binding_generation() == search.generation
+                        && state.reference_picker().is_some_and(|picker| {
+                            picker.target() == search.target && picker.kind() == search.kind
+                        })
+                })
+            })
+        {
+            self.stg_reference_search = None;
         }
     }
 
@@ -361,6 +403,7 @@ impl AppFrame {
 
     pub(super) fn deactivate_stg_presentation(&mut self, cx: &mut Context<Self>) {
         self.stg_search = None;
+        self.stg_reference_search = None;
         let draft = self.active_stg_draft_status(false);
         let document = self.active_stg_draft().map(|(binding, _)| binding.document);
         let transition = self.stg_presentations.deactivate_active_document(draft);
@@ -368,6 +411,7 @@ impl AppFrame {
             self.finish_stg_presentation_transition(document, transition, cx);
         } else if transition.changed() {
             self.stg_lists.invalidate_all();
+            self.stg_reference_list.invalidate();
             cx.notify();
         }
     }
@@ -392,7 +436,9 @@ impl AppFrame {
                         }),
                     )
                 });
-        let projected_expanded = expanded.and_then(|target| cause.remap_script_target(target));
+        let projected_expanded = cause
+            .inserted_script_target()
+            .or_else(|| expanded.and_then(|target| cause.remap_script_target(target)));
         let projected_picker_target = picker.as_ref().and_then(|(target, _, _)| {
             cause.remap_script_target(target.script).map(|script| {
                 kufeditor_workspace::STGParameterTarget {
@@ -693,6 +739,719 @@ impl AppFrame {
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "opening a picker validates its complete document, generation, value, and reference binding"
+    )]
+    fn open_stg_reference_picker(
+        &mut self,
+        document: DocumentID,
+        section: STGSection,
+        generation: u64,
+        value_target: STGValueTarget,
+        kind: STGReferenceKind,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let STGValueTarget::ScriptParameter(target) = value_target else {
+            return;
+        };
+        let Some(state) = self.stg_presentations.get(document) else {
+            return;
+        };
+        let valid = self.active_document == Some(document)
+            && section == STGSection::Events
+            && state.section() == section
+            && state.binding_generation() == generation
+            && state.inspected_event()
+                == Some(STGEventTarget {
+                    block: target.script.block,
+                    event: target.script.event,
+                })
+            && self
+                .workspace
+                .stg_parameter(document, target)
+                .is_ok_and(|parameter| {
+                    parameter.reference == Some(kind)
+                        && matches!(parameter.value, STGValue::Integer(_) | STGValue::Enum(_))
+                });
+        if !valid {
+            return;
+        }
+        let current = self
+            .workspace
+            .stg_value(document, value_target)
+            .ok()
+            .and_then(|value| match value {
+                STGValue::Integer(value) | STGValue::Enum(value) => Some(value),
+                STGValue::Float(_) | STGValue::String(_) => None,
+            });
+        let Ok(projection) = self.stg_presentation_projection(document) else {
+            return;
+        };
+        let Ok(rows) = self.stg_reference_rows(document, kind, "", &projection) else {
+            return;
+        };
+        let cursor = current.and_then(|current| {
+            (0..rows.len()).find_map(|position| {
+                let cursor = rows.cursor(position)?;
+                (self.stg_reference_payload(document, kind, cursor) == Some(current))
+                    .then_some(cursor)
+            })
+        });
+        let expand = state.expanded_script() != Some(target.script);
+
+        self.cancel_property_edit();
+        self.stg_reference_search = None;
+        if expand {
+            let transition =
+                self.stg_presentations
+                    .set_expanded_script(document, Some(target.script), None);
+            self.finish_stg_presentation_transition(document, transition, cx);
+        }
+        let transition = self.stg_presentations.set_reference_picker(
+            document,
+            Some(STGReferencePickerState::new(
+                target,
+                kind,
+                String::new(),
+                cursor,
+            )),
+            None,
+        );
+        self.finish_stg_presentation_transition(document, transition, cx);
+        window.focus(&self.stg_reference_list.focus);
+        cx.notify();
+    }
+
+    fn stg_reference_payload(
+        &self,
+        document: DocumentID,
+        kind: STGReferenceKind,
+        cursor: STGReferenceCursor,
+    ) -> Option<i32> {
+        let id = match (kind, cursor) {
+            (STGReferenceKind::Troop, STGReferenceCursor::Index(unit)) => self
+                .workspace
+                .stg_number(
+                    document,
+                    STGNumberTarget::Unit {
+                        unit,
+                        field: STGUnitField::UniqueID,
+                    },
+                )
+                .ok()
+                .and_then(|value| u32::try_from(value).ok())?,
+            (STGReferenceKind::Area, STGReferenceCursor::Index(area)) => self
+                .workspace
+                .stg_number(
+                    document,
+                    STGNumberTarget::Area {
+                        area,
+                        field: STGAreaField::AreaID,
+                    },
+                )
+                .ok()
+                .and_then(|value| u32::try_from(value).ok())?,
+            (STGReferenceKind::Variable, STGReferenceCursor::Index(variable)) => self
+                .workspace
+                .stg_number(document, STGNumberTarget::VariableID { variable })
+                .ok()
+                .and_then(|value| u32::try_from(value).ok())?,
+            (
+                STGReferenceKind::Event | STGReferenceKind::Trigger,
+                STGReferenceCursor::Event(target),
+            ) => self.workspace.stg_event(document, target).ok()?.id,
+            (
+                STGReferenceKind::Troop | STGReferenceKind::Area | STGReferenceKind::Variable,
+                STGReferenceCursor::Event(_),
+            )
+            | (STGReferenceKind::Event | STGReferenceKind::Trigger, STGReferenceCursor::Index(_)) =>
+            {
+                return None;
+            }
+        };
+        Some(i32::from_le_bytes(id.to_le_bytes()))
+    }
+
+    pub(super) fn select_stg_reference(
+        &mut self,
+        action: &SelectSTGReference,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.stg_presentations.get(action.document) else {
+            return;
+        };
+        let Some(picker) = state.reference_picker() else {
+            return;
+        };
+        if self.active_document != Some(action.document)
+            || state.section() != action.section
+            || state.binding_generation() != action.generation
+            || picker.target() != action.target
+            || picker.kind() != action.kind
+        {
+            return;
+        }
+        let query = picker.query().to_owned();
+        let Ok(projection) = self.stg_presentation_projection(action.document) else {
+            return;
+        };
+        let Ok(rows) =
+            self.stg_reference_rows(action.document, action.kind, picker.query(), &projection)
+        else {
+            return;
+        };
+        if rows.cursor(action.position) != Some(action.cursor)
+            || self.stg_reference_payload(action.document, action.kind, action.cursor)
+                != Some(action.value)
+            || !self
+                .workspace
+                .stg_parameter(action.document, action.target)
+                .is_ok_and(|parameter| {
+                    parameter.reference == Some(action.kind)
+                        && matches!(parameter.value, STGValue::Integer(_) | STGValue::Enum(_))
+                })
+        {
+            return;
+        }
+
+        self.cancel_property_edit();
+        match self.workspace.apply(
+            action.document,
+            kufeditor_workspace::DocumentEdit::SetSTGNumber {
+                target: STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::ScriptParameter(action.target),
+                },
+                value: i64::from(action.value),
+            },
+        ) {
+            Ok(outcome) => {
+                if outcome == kufeditor_workspace::ApplyOutcome::Changed {
+                    self.document_did_mutate(action.document, cx);
+                }
+                let transition = self.stg_presentations.set_reference_picker(
+                    action.document,
+                    Some(STGReferencePickerState::new(
+                        action.target,
+                        action.kind,
+                        query,
+                        Some(action.cursor),
+                    )),
+                    None,
+                );
+                self.finish_stg_presentation_transition(action.document, transition, cx);
+                self.notices.clear(NoticeSource::Editor);
+                window.focus(&self.stg_reference_list.focus);
+            }
+            Err(error) => self.notices.replace(
+                NoticeSource::Editor,
+                Notice::editor_error("Could not set STG reference", &error),
+            ),
+        }
+        cx.notify();
+    }
+
+    fn close_stg_reference_picker(
+        &mut self,
+        document: DocumentID,
+        generation: u64,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let valid = self.stg_presentations.get(document).is_some_and(|state| {
+            self.active_document == Some(document)
+                && state.section() == STGSection::Events
+                && state.binding_generation() == generation
+                && state
+                    .reference_picker()
+                    .is_some_and(|picker| picker.target() == target && picker.kind() == kind)
+        });
+        if !valid {
+            return;
+        }
+        self.stg_reference_search = None;
+        let transition = self
+            .stg_presentations
+            .set_reference_picker(document, None, None);
+        self.finish_stg_presentation_transition(document, transition, cx);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn edit_raw_stg_reference(
+        &mut self,
+        document: DocumentID,
+        generation: u64,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let valid = self.stg_presentations.get(document).is_some_and(|state| {
+            self.active_document == Some(document)
+                && state.section() == STGSection::Events
+                && state.binding_generation() == generation
+                && state
+                    .reference_picker()
+                    .is_some_and(|picker| picker.target() == target && picker.kind() == kind)
+        });
+        if !valid {
+            return;
+        }
+        let value_target = STGValueTarget::ScriptParameter(target);
+        let value = match self.workspace.stg_value(document, value_target) {
+            Ok(STGValue::Integer(value) | STGValue::Enum(value)) => i64::from(value),
+            Ok(STGValue::Float(_) | STGValue::String(_)) | Err(_) => return,
+        };
+        let number_target = STGNumberTarget::ParameterInteger {
+            value: value_target,
+        };
+        let Some(editor) = number_target.editor() else {
+            return;
+        };
+
+        self.cancel_property_edit();
+        self.stg_reference_search = None;
+        let transition = self
+            .stg_presentations
+            .set_reference_picker(document, None, None);
+        self.finish_stg_presentation_transition(document, transition, cx);
+        let Some(binding) = self.current_stg_edit_binding(document, STGSection::Events) else {
+            return;
+        };
+        self.number_edit = ActiveNumberEdit::stg(binding, number_target, value, editor);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn start_stg_reference_search(
+        &mut self,
+        document: DocumentID,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.stg_presentations.get(document).filter(|state| {
+            self.active_document == Some(document) && state.section() == STGSection::Events
+        }) else {
+            return;
+        };
+        let Some(picker) = state
+            .reference_picker()
+            .filter(|picker| picker.target() == target && picker.kind() == kind)
+        else {
+            return;
+        };
+        let generation = state.binding_generation();
+        if let Some(search) = self.stg_reference_search.as_ref().filter(|search| {
+            search.document == document
+                && search.target == target
+                && search.kind == kind
+                && search.generation == generation
+        }) {
+            window.focus(&search.input.read(cx).focus_handle());
+            return;
+        }
+        let query = picker.query().to_owned();
+        self.cancel_property_edit();
+        let colors = self.text_input_colors();
+        let input = cx.new(|cx| {
+            TextInput::new(
+                query.clone(),
+                "Search references by name, ID, or source index",
+                "stg-reference-search-input",
+                colors,
+                cx,
+            )
+        });
+        cx.subscribe_in(&input, window, |frame, input, event, window, cx| {
+            frame.handle_stg_reference_search_event(input, event, window, cx);
+        })
+        .detach();
+        window.focus(&input.read(cx).focus_handle());
+        self.stg_reference_search = Some(ActiveSTGReferenceSearch {
+            document,
+            target,
+            kind,
+            generation,
+            original_query: query,
+            input,
+        });
+        cx.notify();
+    }
+
+    fn handle_stg_reference_search_event(
+        &mut self,
+        input: &Entity<TextInput>,
+        event: &TextInputEvent,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((document, target, kind, generation, original_query)) = self
+            .stg_reference_search
+            .as_ref()
+            .filter(|search| search.input == *input)
+            .map(|search| {
+                (
+                    search.document,
+                    search.target,
+                    search.kind,
+                    search.generation,
+                    search.original_query.clone(),
+                )
+            })
+        else {
+            return;
+        };
+        let valid = self.stg_presentations.get(document).is_some_and(|state| {
+            state.section() == STGSection::Events
+                && state.binding_generation() == generation
+                && state
+                    .reference_picker()
+                    .is_some_and(|picker| picker.target() == target && picker.kind() == kind)
+        });
+        if self.active_document != Some(document) || !valid {
+            self.stg_reference_search = None;
+            cx.notify();
+            return;
+        }
+
+        match event {
+            TextInputEvent::ContentChanged => {
+                let query = input.read(cx).content().to_owned();
+                self.apply_stg_reference_query(document, target, kind, query, cx);
+            }
+            TextInputEvent::Cancel => {
+                self.apply_stg_reference_query(document, target, kind, original_query, cx);
+                self.stg_reference_search = None;
+                self.focus_stg_reference_results(document, target, kind, window);
+                cx.notify();
+            }
+            TextInputEvent::Commit(query) => {
+                self.apply_stg_reference_query(document, target, kind, query.clone(), cx);
+                self.stg_reference_search = None;
+                self.focus_stg_reference_results(document, target, kind, window);
+                cx.notify();
+            }
+        }
+    }
+
+    fn focus_stg_reference_results(
+        &self,
+        document: DocumentID,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        window: &mut gpui::Window,
+    ) {
+        let query = self
+            .stg_presentations
+            .get(document)
+            .and_then(crate::state::STGPresentationState::reference_picker)
+            .filter(|picker| picker.target() == target && picker.kind() == kind)
+            .map(STGReferencePickerState::query);
+        let has_results = query
+            .and_then(|query| {
+                let projection = self.stg_presentation_projection(document).ok()?;
+                self.stg_reference_rows(document, kind, query, &projection)
+                    .ok()
+            })
+            .is_some_and(|rows| rows.len() > 0);
+        if has_results {
+            window.focus(&self.stg_reference_list.focus);
+        } else {
+            window.focus(&self.focus);
+        }
+    }
+
+    fn apply_stg_reference_query(
+        &mut self,
+        document: DocumentID,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        query: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(current) = self
+            .stg_presentations
+            .get(document)
+            .and_then(crate::state::STGPresentationState::reference_picker)
+            .filter(|picker| picker.target() == target && picker.kind() == kind)
+            .and_then(STGReferencePickerState::cursor)
+        else {
+            let valid_without_cursor = self
+                .stg_presentations
+                .get(document)
+                .and_then(crate::state::STGPresentationState::reference_picker)
+                .is_some_and(|picker| picker.target() == target && picker.kind() == kind);
+            if !valid_without_cursor {
+                return;
+            }
+            return self
+                .apply_stg_reference_query_with_cursor(document, target, kind, query, None, cx);
+        };
+        self.apply_stg_reference_query_with_cursor(
+            document,
+            target,
+            kind,
+            query,
+            Some(current),
+            cx,
+        );
+    }
+
+    fn apply_stg_reference_query_with_cursor(
+        &mut self,
+        document: DocumentID,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        query: String,
+        current: Option<STGReferenceCursor>,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(projection) = self.stg_presentation_projection(document) else {
+            return;
+        };
+        let Ok(rows) = self.stg_reference_rows(document, kind, &query, &projection) else {
+            return;
+        };
+        let cursor = current
+            .filter(|cursor| rows.position_of(*cursor).is_some())
+            .or_else(|| rows.cursor(0));
+        let transition = self.stg_presentations.set_reference_picker(
+            document,
+            Some(STGReferencePickerState::new(target, kind, query, cursor)),
+            None,
+        );
+        if let Some(generation) = transition.generation()
+            && let Some(search) = self.stg_reference_search.as_mut().filter(|search| {
+                search.document == document && search.target == target && search.kind == kind
+            })
+        {
+            search.generation = generation;
+        }
+        self.finish_stg_presentation_transition(document, transition, cx);
+    }
+
+    pub(super) fn focus_next_stg_control(
+        &mut self,
+        _: &FocusNextSTGControl,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.stg_editor_is_visible() {
+            self.cancel_property_edit();
+            window.focus_next();
+            self.reveal_focused_stg_cursor(window);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn focus_previous_stg_control(
+        &mut self,
+        _: &FocusPreviousSTGControl,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.stg_editor_is_visible() {
+            self.cancel_property_edit();
+            window.focus_prev();
+            self.reveal_focused_stg_cursor(window);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn stg_editor_is_visible(&self) -> bool {
+        self.shell.area() == crate::state::Area::Files
+            && self.active_document.is_some_and(|document| {
+                self.workspace.document_kind(document).ok() == Some(DocumentKind::CrusadersSTG)
+            })
+    }
+
+    fn reveal_focused_stg_cursor(&self, window: &gpui::Window) {
+        if self.stg_reference_list.focus.is_focused(window) {
+            if let Some(binding) = self.stg_reference_list.binding.get() {
+                self.stg_reference_list
+                    .scroll
+                    .scroll_to_item(binding.position, ScrollStrategy::Center);
+            }
+            return;
+        }
+        for kind in [
+            STGVirtualRowKind::Unit,
+            STGVirtualRowKind::Area,
+            STGVirtualRowKind::Variable,
+            STGVirtualRowKind::Event,
+            STGVirtualRowKind::Footer,
+            STGVirtualRowKind::EventDetail,
+        ] {
+            let control = self.stg_lists.get(kind);
+            if control.focus.is_focused(window) {
+                if let Some(binding) = control.binding.get() {
+                    control
+                        .scroll
+                        .scroll_to_item(binding.position, ScrollStrategy::Center);
+                }
+                return;
+            }
+        }
+    }
+
+    fn move_stg_reference_cursor(
+        &mut self,
+        document: DocumentID,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        movement: STGListMovement,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(binding) = self.stg_reference_list.binding.get() else {
+            return;
+        };
+        let Some(state) = self.stg_presentations.get(document) else {
+            return;
+        };
+        let Some(picker) = state.reference_picker() else {
+            return;
+        };
+        if self.active_document != Some(document)
+            || binding.document != document
+            || binding.target != target
+            || binding.kind != kind
+            || binding.generation != state.binding_generation()
+            || picker.target() != target
+            || picker.kind() != kind
+            || picker.cursor() != binding.cursor
+        {
+            return;
+        }
+        let query = picker.query().to_owned();
+        let Ok(projection) = self.stg_presentation_projection(document) else {
+            return;
+        };
+        let Ok(rows) = self.stg_reference_rows(document, kind, &query, &projection) else {
+            return;
+        };
+        if rows.len() != binding.row_count
+            || binding.position >= rows.len()
+            || binding
+                .cursor
+                .is_some_and(|cursor| rows.cursor(binding.position) != Some(cursor))
+        {
+            return;
+        }
+        let page = 6_usize;
+        let position = match movement {
+            STGListMovement::Up => binding.position.saturating_sub(1),
+            STGListMovement::Down => binding
+                .position
+                .saturating_add(1)
+                .min(rows.len().saturating_sub(1)),
+            STGListMovement::Home => 0,
+            STGListMovement::End => rows.len().saturating_sub(1),
+            STGListMovement::PageUp => binding.position.saturating_sub(page),
+            STGListMovement::PageDown => binding
+                .position
+                .saturating_add(page)
+                .min(rows.len().saturating_sub(1)),
+        };
+        let Some(cursor) = rows.cursor(position) else {
+            return;
+        };
+        if !self
+            .stg_presentations
+            .set_reference_cursor(document, target, kind, Some(cursor))
+        {
+            return;
+        }
+        self.stg_reference_list
+            .binding
+            .set(Some(super::STGReferenceListBinding {
+                cursor: Some(cursor),
+                position,
+                ..binding
+            }));
+        let strategy = match movement {
+            STGListMovement::Up | STGListMovement::Home | STGListMovement::PageUp => {
+                ScrollStrategy::Top
+            }
+            STGListMovement::Down | STGListMovement::End | STGListMovement::PageDown => {
+                ScrollStrategy::Bottom
+            }
+        };
+        self.stg_reference_list
+            .scroll
+            .scroll_to_item(position, strategy);
+        window.focus(&self.stg_reference_list.focus);
+        cx.notify();
+    }
+
+    fn activate_stg_reference_cursor(
+        &mut self,
+        document: DocumentID,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(binding) = self.stg_reference_list.binding.get() else {
+            return;
+        };
+        let Some(state) = self.stg_presentations.get(document) else {
+            return;
+        };
+        let Some(picker) = state.reference_picker() else {
+            return;
+        };
+        if self.active_document != Some(document)
+            || binding.document != document
+            || binding.target != target
+            || binding.kind != kind
+            || binding.generation != state.binding_generation()
+            || picker.target() != target
+            || picker.kind() != kind
+            || picker.cursor() != binding.cursor
+        {
+            return;
+        }
+        let Ok(projection) = self.stg_presentation_projection(document) else {
+            return;
+        };
+        let Ok(rows) = self.stg_reference_rows(document, kind, picker.query(), &projection) else {
+            return;
+        };
+        if rows.len() != binding.row_count || binding.position >= rows.len() {
+            return;
+        }
+        let Some(cursor) = rows.cursor(binding.position) else {
+            return;
+        };
+        if binding.cursor.is_some() && binding.cursor != Some(cursor) {
+            return;
+        }
+        let Some(value) = self.stg_reference_payload(document, kind, cursor) else {
+            return;
+        };
+        window.dispatch_action(
+            Box::new(SelectSTGReference {
+                document,
+                section: STGSection::Events,
+                generation: binding.generation,
+                target,
+                kind,
+                cursor,
+                position: binding.position,
+                value,
+            }),
+            cx,
+        );
+    }
+
     pub(super) fn stg_editor(&self, document: DocumentID, cx: &mut Context<Self>) -> Div {
         let projection = match self.stg_presentation_projection(document) {
             Ok(projection) => projection,
@@ -812,6 +1571,7 @@ impl AppFrame {
             .is_some_and(|state| state.section() != section)
         {
             self.stg_search = None;
+            self.stg_reference_search = None;
         }
         let draft = self.active_stg_draft_status(true);
         let transition = self
@@ -832,11 +1592,10 @@ impl AppFrame {
         }) else {
             return;
         };
-        if let Some(search) = self
-            .stg_search
-            .as_ref()
-            .filter(|search| search.document == document && search.kind == kind)
-        {
+        let generation = state.binding_generation();
+        if let Some(search) = self.stg_search.as_ref().filter(|search| {
+            search.document == document && search.kind == kind && search.generation == generation
+        }) {
             window.focus(&search.input.read(cx).focus_handle());
             return;
         }
@@ -865,6 +1624,7 @@ impl AppFrame {
         self.stg_search = Some(ActiveSTGSearch {
             document,
             kind,
+            generation,
             original_query: query,
             input,
         });
@@ -878,15 +1638,25 @@ impl AppFrame {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((document, kind, original_query)) = self
+        let Some((document, kind, generation, original_query)) = self
             .stg_search
             .as_ref()
             .filter(|search| search.input == *input)
-            .map(|search| (search.document, search.kind, search.original_query.clone()))
+            .map(|search| {
+                (
+                    search.document,
+                    search.kind,
+                    search.generation,
+                    search.original_query.clone(),
+                )
+            })
         else {
             return;
         };
-        if self.active_document != Some(document) {
+        let valid = self.stg_presentations.get(document).is_some_and(|state| {
+            state.section() == kind.section() && state.binding_generation() == generation
+        });
+        if self.active_document != Some(document) || !valid {
             self.stg_search = None;
             cx.notify();
             return;
@@ -961,10 +1731,18 @@ impl AppFrame {
                     .set_event_query(document, query, &rows.visibility(), None)
             }
         };
-        if transition.changed() {
-            self.stg_lists.invalidate_all();
+        let changed = transition.changed();
+        if let Some(generation) = transition.generation()
+            && let Some(search) = self
+                .stg_search
+                .as_mut()
+                .filter(|search| search.document == document && search.kind == kind)
+        {
+            search.generation = generation;
+        }
+        self.finish_stg_presentation_transition(document, transition, cx);
+        if changed {
             self.notices.clear(NoticeSource::Editor);
-            cx.notify();
         }
     }
 
@@ -1307,6 +2085,7 @@ impl AppFrame {
         div()
             .id(selector)
             .debug_selector(move || selector.to_owned())
+            .tab_index(0)
             .flex_none()
             .p(px(10.0))
             .bg(self.theme.surface)
@@ -2080,6 +2859,161 @@ impl AppFrame {
         cx.notify();
     }
 
+    pub(super) fn apply_stg_structural_edit(
+        &mut self,
+        action: &ApplySTGStructuralEdit,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.stg_structural_edit_is_current(action) {
+            return;
+        }
+
+        if let STGStructuralEdit::RemoveEvent { target } = action.edit
+            && self
+                .workspace
+                .stg_event(action.document, target)
+                .is_ok_and(|event| event.condition_count > 0 || event.action_count > 0)
+        {
+            let action = *action;
+            let answer = window.prompt(
+                PromptLevel::Warning,
+                "Delete this event and all of its conditions and actions?",
+                Some("This cannot be undone after the document history is cleared."),
+                &["Delete Event", "Cancel"],
+                cx,
+            );
+            cx.spawn_in(window, async move |entity, cx| {
+                let answer = answer.await.ok();
+                if answer == Some(0) {
+                    let _ = entity.update_in(cx, move |frame, window, cx| {
+                        frame.apply_confirmed_stg_structural_edit(action, window, cx);
+                    });
+                }
+            })
+            .detach();
+            return;
+        }
+
+        self.apply_confirmed_stg_structural_edit(*action, window, cx);
+    }
+
+    fn apply_confirmed_stg_structural_edit(
+        &mut self,
+        action: ApplySTGStructuralEdit,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.stg_structural_edit_is_current(&action) {
+            return;
+        }
+
+        self.cancel_property_edit();
+        match self.workspace.apply(
+            action.document,
+            kufeditor_workspace::DocumentEdit::EditSTGStructure { edit: action.edit },
+        ) {
+            Ok(kufeditor_workspace::ApplyOutcome::Changed) => {
+                self.document_did_mutate_with_stg_transition(
+                    action.document,
+                    STGDocumentTransition::StructuralEdit(Some(action.edit.change())),
+                    cx,
+                );
+                self.notices.clear(NoticeSource::Editor);
+            }
+            Ok(kufeditor_workspace::ApplyOutcome::Unchanged) => {
+                self.notices.clear(NoticeSource::Editor);
+            }
+            Err(error) => self.notices.replace(
+                NoticeSource::Editor,
+                Notice::editor_error("Could not update Crusaders STG structure", &error),
+            ),
+        }
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn stg_structural_edit_is_current(&self, action: &ApplySTGStructuralEdit) -> bool {
+        let Some(state) = self.stg_presentations.get(action.document) else {
+            return false;
+        };
+        if self.active_document != Some(action.document)
+            || state.section() != action.section
+            || state.binding_generation() != action.generation
+        {
+            return false;
+        }
+
+        match action.edit {
+            STGStructuralEdit::InsertEvent { target } => {
+                action.section == STGSection::Events
+                    && self.stg_event_insert_target(action.document, state) == Some(target)
+            }
+            STGStructuralEdit::RemoveEvent { target } => {
+                action.section == STGSection::Events
+                    && state.inspected_event() == Some(target)
+                    && self.workspace.stg_event(action.document, target).is_ok()
+            }
+            STGStructuralEdit::InsertScript { target, .. } => {
+                action.section == STGSection::Events
+                    && state.inspected_event()
+                        == Some(STGEventTarget {
+                            block: target.block,
+                            event: target.event,
+                        })
+                    && self.stg_script_insert_index_is_current(action.document, target)
+            }
+            STGStructuralEdit::RemoveScript { target }
+            | STGStructuralEdit::ChangeScriptType { target, .. } => {
+                action.section == STGSection::Events
+                    && state.inspected_event()
+                        == Some(STGEventTarget {
+                            block: target.block,
+                            event: target.event,
+                        })
+                    && self.workspace.stg_script(action.document, target).is_ok()
+            }
+            STGStructuralEdit::ChangeValueType { target, .. } => match target {
+                STGValueTarget::VariableInitial { variable } => {
+                    action.section == STGSection::Variables
+                        && state.inspected_variable() == Some(variable)
+                        && self.workspace.stg_value(action.document, target).is_ok()
+                }
+                STGValueTarget::ScriptParameter(parameter) => {
+                    action.section == STGSection::Events
+                        && state.inspected_event()
+                            == Some(STGEventTarget {
+                                block: parameter.script.block,
+                                event: parameter.script.event,
+                            })
+                        && self.workspace.stg_value(action.document, target).is_ok()
+                }
+            },
+        }
+    }
+
+    fn stg_script_insert_index_is_current(
+        &self,
+        document: DocumentID,
+        target: STGScriptTarget,
+    ) -> bool {
+        self.workspace
+            .stg_event(
+                document,
+                STGEventTarget {
+                    block: target.block,
+                    event: target.event,
+                },
+            )
+            .is_ok_and(|event| {
+                let count = match target.kind {
+                    STGScriptKind::Condition => event.condition_count,
+                    STGScriptKind::Action => event.action_count,
+                };
+                target.script == count
+            })
+    }
+
     fn stg_field_element(
         &self,
         field: &STGFieldProjection,
@@ -2363,6 +3297,10 @@ impl AppFrame {
         .into_any_element()
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the GPUI field builder keeps the four STG value variants and their controls together"
+    )]
     fn stg_value_field_element(
         &self,
         field: &STGFieldProjection,
@@ -2371,37 +3309,133 @@ impl AppFrame {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let document = field.id().document();
-        match self.workspace.stg_value(document, target) {
-            Ok(STGValue::Integer(value) | STGValue::Enum(value)) => {
-                let target = STGNumberTarget::ParameterInteger { value: target };
-                let Some(editor) = target.editor() else {
+        let section = field.id().section();
+        let reference_kind = match target {
+            STGValueTarget::ScriptParameter(parameter) => self
+                .workspace
+                .stg_parameter(document, parameter)
+                .ok()
+                .and_then(|parameter| parameter.reference),
+            STGValueTarget::VariableInitial { .. } => None,
+        };
+        let Ok(value) = self.workspace.stg_value(document, target) else {
+            return self.stg_read_only_field_element(field, selector);
+        };
+        let current_kind = match &value {
+            STGValue::Integer(_) => STGValueKind::Integer,
+            STGValue::Float(_) => STGValueKind::Float,
+            STGValue::String(_) => STGValueKind::String,
+            STGValue::Enum(_) => STGValueKind::Enum,
+        };
+        let value_element = match value {
+            STGValue::Integer(value) | STGValue::Enum(value) => {
+                let number_target = STGNumberTarget::ParameterInteger { value: target };
+                let Some(editor) = number_target.editor() else {
                     return self.stg_read_only_field_element(field, selector);
                 };
-                self.stg_number_field_element(field, selector, target, i64::from(value), editor, cx)
+                self.stg_number_field_element(
+                    field,
+                    selector,
+                    number_target,
+                    i64::from(value),
+                    editor,
+                    cx,
+                )
             }
-            Ok(STGValue::Float(source)) => self.stg_float_field_element(
+            STGValue::Float(source) => self.stg_float_field_element(
                 field,
                 selector,
                 STGFloatTarget::Parameter { value: target },
                 source,
                 cx,
             ),
-            Ok(STGValue::String(STGText::Decoded(_))) => self.stg_text_field_element(
+            STGValue::String(STGText::Decoded(_)) => self.stg_text_field_element(
                 field,
                 selector,
                 STGTextTarget::ParameterString { value: target },
                 true,
                 cx,
             ),
-            Ok(STGValue::String(STGText::Raw(_))) => self.stg_text_field_element(
+            STGValue::String(STGText::Raw(_)) => self.stg_text_field_element(
                 field,
                 selector,
                 STGTextTarget::ParameterString { value: target },
                 false,
                 cx,
             ),
-            Err(_) => self.stg_read_only_field_element(field, selector),
-        }
+        };
+        let generation = self
+            .stg_presentations
+            .get(document)
+            .map_or(0, crate::state::STGPresentationState::binding_generation);
+        let choices = [
+            (STGValueKind::Integer, "Int"),
+            (STGValueKind::Float, "Float"),
+            (STGValueKind::String, "Text"),
+            (STGValueKind::Enum, "Enum"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (kind, label))| {
+            let action = ApplySTGStructuralEdit {
+                document,
+                section,
+                generation,
+                edit: STGStructuralEdit::ChangeValueType { target, kind },
+            };
+            let selector = stg_value_type_selector(target, kind);
+            components::choice_button(
+                &self.theme,
+                SharedString::from(format!("stg-value-type:{target:?}:{index}")),
+                label,
+                current_kind == kind,
+            )
+            .debug_selector(move || selector.clone())
+            .tab_index(0)
+            .on_click(cx.listener(move |_, _, window, cx| {
+                window.dispatch_action(Box::new(action), cx);
+            }))
+            .into_any_element()
+        })
+        .collect::<Vec<_>>();
+        let reference = reference_kind.map(|kind| {
+            let selector = stg_reference_open_selector(target);
+            components::choice_button(
+                &self.theme,
+                SharedString::from(format!("stg-reference-open:{target:?}")),
+                "Refs",
+                self.stg_presentations.get(document).is_some_and(|state| {
+                    state
+                        .reference_picker()
+                        .is_some_and(|picker| Some(picker.target()) == target_parameter(target))
+                }),
+            )
+            .debug_selector(move || selector.clone())
+            .tab_index(0)
+            .on_click(cx.listener(move |frame, _, window, cx| {
+                frame.open_stg_reference_picker(
+                    document, section, generation, target, kind, window, cx,
+                );
+            }))
+            .into_any_element()
+        });
+
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .child(div().flex_1().min_w_0().child(value_element))
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .children(choices)
+                    .children(reference),
+            )
+            .into_any_element()
     }
 }
 
@@ -2438,6 +3472,7 @@ impl AppFrame {
             list,
             cx,
         );
+        let list = self.stg_event_master_panel(document, state, list, cx);
         let details = state.inspected_event().map_or_else(
             || {
                 stg::empty_state(
@@ -2458,6 +3493,101 @@ impl AppFrame {
             list,
             details,
         )
+    }
+
+    fn stg_event_master_panel(
+        &self,
+        document: DocumentID,
+        state: &crate::state::STGPresentationState,
+        list: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let add = self.stg_event_insert_target(document, state).map(|target| {
+            let action = ApplySTGStructuralEdit {
+                document,
+                section: STGSection::Events,
+                generation: state.binding_generation(),
+                edit: STGStructuralEdit::InsertEvent { target },
+            };
+            components::toolbar_button(&self.theme, "stg-event-add", "Add event", true)
+                .debug_selector(|| "stg-event-add".to_owned())
+                .tab_index(0)
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    window.dispatch_action(Box::new(action), cx);
+                }))
+                .into_any_element()
+        });
+
+        div()
+            .size_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .when_some(add, |panel, add| {
+                panel.child(
+                    div()
+                        .flex_none()
+                        .p(px(8.0))
+                        .border_b_1()
+                        .border_color(self.theme.border)
+                        .child(add),
+                )
+            })
+            .child(div().flex_1().min_h_0().overflow_hidden().child(list))
+            .into_any_element()
+    }
+
+    fn stg_event_insert_target(
+        &self,
+        document: DocumentID,
+        state: &crate::state::STGPresentationState,
+    ) -> Option<STGEventTarget> {
+        let block_count = self.workspace.stg_event_block_count(document).ok()??;
+        if block_count == 0 {
+            return Some(STGEventTarget { block: 0, event: 0 });
+        }
+        if let Some(binding) = self.stg_lists.events.binding.get().filter(|binding| {
+            binding.document == document && binding.generation == state.binding_generation()
+        }) {
+            match binding.cursor {
+                STGRowCursor::EventBlock(block)
+                    if self
+                        .workspace
+                        .stg_event_block(document, block)
+                        .is_ok_and(|projection| projection.event_count == 0) =>
+                {
+                    return Some(STGEventTarget { block, event: 0 });
+                }
+                STGRowCursor::Event(target)
+                    if self.workspace.stg_event(document, target).is_ok() =>
+                {
+                    return Some(STGEventTarget {
+                        block: target.block,
+                        event: target.event.saturating_add(1),
+                    });
+                }
+                STGRowCursor::Unit(_)
+                | STGRowCursor::Area(_)
+                | STGRowCursor::Variable(_)
+                | STGRowCursor::EventBlock(_)
+                | STGRowCursor::Event(_)
+                | STGRowCursor::Footer(_)
+                | STGRowCursor::EventDetail { .. } => {}
+            }
+        }
+        let block = state
+            .inspected_event()
+            .map_or(block_count.checked_sub(1)?, |target| target.block);
+        let event_count = self
+            .workspace
+            .stg_event_block(document, block)
+            .ok()?
+            .event_count;
+        let event = state
+            .inspected_event()
+            .filter(|target| target.block == block)
+            .map_or(event_count, |target| target.event.saturating_add(1));
+        (event <= event_count).then_some(STGEventTarget { block, event })
     }
 
     fn stg_event_details(
@@ -2492,7 +3622,7 @@ impl AppFrame {
             .get(document)
             .map_or(0, crate::state::STGPresentationState::binding_generation);
         let render_rows = rows.clone();
-        self.stg_virtual_list(
+        let list = self.stg_virtual_list(
             SharedString::from(format!("stg-event-detail-list:{event:?}")),
             document,
             rows,
@@ -2501,7 +3631,659 @@ impl AppFrame {
                 frame.stg_virtual_event_detail_row(document, generation, &render_rows, location, cx)
             }),
             cx,
+        );
+        let delete_action = ApplySTGStructuralEdit {
+            document,
+            section: STGSection::Events,
+            generation,
+            edit: STGStructuralEdit::RemoveEvent { target: event },
+        };
+        let script_editor = self
+            .stg_presentations
+            .get(document)
+            .and_then(crate::state::STGPresentationState::expanded_script)
+            .filter(|target| target.block == event.block && target.event == event.event)
+            .and_then(|target| self.stg_script_type_editor(document, generation, target, cx));
+        let reference_picker = self.stg_reference_picker_element(document, generation, event, cx);
+
+        div()
+            .size_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_none()
+                    .p(px(8.0))
+                    .border_b_1()
+                    .border_color(self.theme.border)
+                    .child(
+                        components::toolbar_button(
+                            &self.theme,
+                            "stg-event-delete",
+                            "Delete event",
+                            true,
+                        )
+                        .debug_selector(|| "stg-event-delete".to_owned())
+                        .tab_index(0)
+                        .on_click(cx.listener(move |_, _, window, cx| {
+                            window.dispatch_action(Box::new(delete_action), cx);
+                        })),
+                    ),
+            )
+            .children(script_editor)
+            .children(reference_picker)
+            .child(div().flex_1().min_h_0().overflow_hidden().child(list))
+            .into_any_element()
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the GPUI picker builder keeps its header, raw fallback, search, and virtual list together"
+    )]
+    fn stg_reference_picker_element(
+        &self,
+        document: DocumentID,
+        generation: u64,
+        event: STGEventTarget,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let picker = self
+            .stg_presentations
+            .get(document)?
+            .reference_picker()?
+            .clone();
+        if picker.target().script.block != event.block
+            || picker.target().script.event != event.event
+        {
+            return None;
+        }
+        let projection = self.stg_presentation_projection(document).ok()?;
+        let rows = self
+            .stg_reference_rows(document, picker.kind(), picker.query(), &projection)
+            .ok()?;
+        let current = self
+            .workspace
+            .stg_value(document, STGValueTarget::ScriptParameter(picker.target()))
+            .ok()
+            .and_then(|value| match value {
+                STGValue::Integer(value) | STGValue::Enum(value) => Some(value),
+                STGValue::Float(_) | STGValue::String(_) => None,
+            });
+        let known_current = current.is_some_and(|current| {
+            (0..rows.len()).any(|position| {
+                rows.cursor(position).is_some_and(|cursor| {
+                    self.stg_reference_payload(document, picker.kind(), cursor) == Some(current)
+                })
+            })
+        });
+        let search = self.stg_reference_search_control(document, &picker, cx);
+        let list = self.stg_reference_list(
+            document,
+            generation,
+            picker.target(),
+            picker.kind(),
+            picker.cursor(),
+            rows,
+            cx,
+        );
+        let close_target = picker.target();
+        let close_kind = picker.kind();
+        Some(
+            div()
+                .id("stg-reference-picker")
+                .debug_selector(|| "stg-reference-picker".to_owned())
+                .flex_none()
+                .h(px(320.0))
+                .p(px(9.0))
+                .flex()
+                .flex_col()
+                .gap(px(7.0))
+                .border_b_1()
+                .border_color(self.theme.border)
+                .bg(self.theme.background)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(7.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(format!("Choose {:?} reference", picker.kind())),
+                        )
+                        .children((!known_current).then(|| {
+                            div()
+                                .id("stg-reference-current-unknown")
+                                .debug_selector(|| "stg-reference-current-unknown".to_owned())
+                                .text_size(px(10.0))
+                                .text_color(self.theme.accent)
+                                .child(format!(
+                                    "RAW {} · NO MATCH",
+                                    current
+                                        .map_or_else(|| "?".to_owned(), |value| value.to_string())
+                                ))
+                        }))
+                        .child(
+                            components::toolbar_button(
+                                &self.theme,
+                                "stg-reference-raw-number",
+                                "Edit raw number",
+                                true,
+                            )
+                            .debug_selector(|| "stg-reference-raw-number".to_owned())
+                            .tab_index(0)
+                            .on_click(cx.listener(
+                                move |frame, _, window, cx| {
+                                    frame.edit_raw_stg_reference(
+                                        document,
+                                        generation,
+                                        close_target,
+                                        close_kind,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            )),
+                        )
+                        .child(
+                            components::toolbar_button(
+                                &self.theme,
+                                "stg-reference-close",
+                                "Close",
+                                true,
+                            )
+                            .debug_selector(|| "stg-reference-close".to_owned())
+                            .tab_index(0)
+                            .on_click(cx.listener(
+                                move |frame, _, window, cx| {
+                                    frame.close_stg_reference_picker(
+                                        document,
+                                        generation,
+                                        close_target,
+                                        close_kind,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            )),
+                        ),
+                )
+                .child(search)
+                .child(div().flex_1().min_h_0().overflow_hidden().child(list))
+                .into_any_element(),
         )
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the GPUI script-type panel keeps catalog choices and repair controls in one declarative tree"
+    )]
+    fn stg_script_type_editor(
+        &self,
+        document: DocumentID,
+        generation: u64,
+        target: STGScriptTarget,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let script = self.workspace.stg_script(document, target).ok()?;
+        let catalog = match target.kind {
+            STGScriptKind::Condition => stg_catalog::conditions(),
+            STGScriptKind::Action => stg_catalog::actions(),
+        };
+        let choices = catalog
+            .iter()
+            .enumerate()
+            .map(|(index, info)| {
+                let action = ApplySTGStructuralEdit {
+                    document,
+                    section: STGSection::Events,
+                    generation,
+                    edit: STGStructuralEdit::ChangeScriptType {
+                        target,
+                        type_id: info.id,
+                    },
+                };
+                let selector = stg_script_type_selector(target, info.id);
+                components::choice_button(
+                    &self.theme,
+                    SharedString::from(format!("stg-script-type:{target:?}:{index}")),
+                    format!("{} · {} params", info.name, info.parameter_count),
+                    script.id == info.id
+                        && script.expected_parameter_count == Some(script.parameter_count),
+                )
+                .debug_selector(move || selector.clone())
+                .tab_index(0)
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    window.dispatch_action(Box::new(action), cx);
+                }))
+                .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let repair = script
+            .expected_parameter_count
+            .filter(|expected| *expected != script.parameter_count)
+            .map(|expected| {
+                let action = ApplySTGStructuralEdit {
+                    document,
+                    section: STGSection::Events,
+                    generation,
+                    edit: STGStructuralEdit::ChangeScriptType {
+                        target,
+                        type_id: script.id,
+                    },
+                };
+                let selector = stg_script_repair_selector(target);
+                components::choice_button(
+                    &self.theme,
+                    SharedString::from(format!("stg-script-repair:{target:?}")),
+                    format!(
+                        "Repair parameters · {} → {expected}",
+                        script.parameter_count
+                    ),
+                    false,
+                )
+                .debug_selector(move || selector.clone())
+                .tab_index(0)
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    window.dispatch_action(Box::new(action), cx);
+                }))
+                .into_any_element()
+            });
+        let selector = stg_script_editor_selector(target);
+        Some(
+            div()
+                .id(SharedString::from(format!("stg-script-editor:{target:?}")))
+                .debug_selector(move || selector.clone())
+                .flex_none()
+                .max_h(px(178.0))
+                .p(px(10.0))
+                .flex()
+                .flex_col()
+                .gap(px(7.0))
+                .border_b_1()
+                .border_color(self.theme.border)
+                .bg(self.theme.raised)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(div().flex_1().min_w_0().truncate().child(format!(
+                            "{} {} · {}",
+                            target.kind.label(),
+                            target.script + 1,
+                            script.label()
+                        )))
+                        .children(repair),
+                )
+                .child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "stg-script-type-choices:{target:?}"
+                        )))
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .flex()
+                        .flex_wrap()
+                        .items_start()
+                        .gap(px(5.0))
+                        .children(choices),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn stg_reference_search_control(
+        &self,
+        document: DocumentID,
+        picker: &STGReferencePickerState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let control = self
+            .stg_reference_search
+            .as_ref()
+            .filter(|search| {
+                search.document == document
+                    && search.target == picker.target()
+                    && search.kind == picker.kind()
+            })
+            .map_or_else(
+                || {
+                    let text = if picker.query().is_empty() {
+                        "Search references by name, ID, or source index".to_owned()
+                    } else {
+                        format!("⌕ {}", picker.query())
+                    };
+                    div()
+                        .h(px(36.0))
+                        .px(px(9.0))
+                        .flex()
+                        .items_center()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(self.theme.border)
+                        .bg(self.theme.raised)
+                        .text_color(if picker.query().is_empty() {
+                            self.theme.text_dim
+                        } else {
+                            self.theme.text
+                        })
+                        .child(text)
+                        .into_any_element()
+                },
+                |search| search.input.clone().into_any_element(),
+            );
+        let target = picker.target();
+        let kind = picker.kind();
+        div()
+            .id("stg-reference-search")
+            .debug_selector(|| "stg-reference-search".to_owned())
+            .tab_index(0)
+            .flex_none()
+            .cursor_pointer()
+            .on_click(cx.listener(move |frame, _, window, cx| {
+                frame.start_stg_reference_search(document, target, kind, window, cx);
+            }))
+            .child(control)
+            .into_any_element()
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "the reference virtual root binds an exact document, parameter, kind, cursor, and generation"
+    )]
+    fn stg_reference_list(
+        &self,
+        document: DocumentID,
+        generation: u64,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        selected: Option<STGReferenceCursor>,
+        rows: STGReferenceRows,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if rows.len() == 0 {
+            self.stg_reference_list.binding.set(None);
+            return stg::empty_state(
+                &self.theme,
+                "stg-reference-empty",
+                "No references match this query.",
+            )
+            .size_full()
+            .into_any_element();
+        }
+        let position = selected
+            .and_then(|cursor| rows.position_of(cursor))
+            .unwrap_or(0);
+        let binding = super::STGReferenceListBinding {
+            document,
+            target,
+            kind,
+            cursor: selected,
+            position,
+            row_count: rows.len(),
+            generation,
+        };
+        if self.stg_reference_list.binding.get() != Some(binding) {
+            self.stg_reference_list
+                .scroll
+                .scroll_to_item(position, ScrollStrategy::Center);
+            self.stg_reference_list.binding.set(Some(binding));
+        }
+        let list = stg::uniform_stg_reference_rows(
+            SharedString::from(format!(
+                "stg-reference-list:{document:?}:{target:?}:{kind:?}"
+            )),
+            rows,
+            cx.processor(move |frame, (position, cursor), _, cx| {
+                frame.stg_reference_row(document, generation, target, kind, position, cursor, cx)
+            }),
+        )
+        .track_scroll(self.stg_reference_list.scroll.clone())
+        .size_full();
+        let accent = self.theme.accent;
+        div()
+            .id("stg-reference-list-root")
+            .debug_selector(|| "stg-reference-list-root".to_owned())
+            .size_full()
+            .min_h_0()
+            .overflow_hidden()
+            .border_1()
+            .border_color(self.theme.surface)
+            .track_focus(&self.stg_reference_list.focus)
+            .tab_index(0)
+            .tab_stop(true)
+            .key_context("STGReferenceList")
+            .focus(move |style| style.border_2().border_color(accent))
+            .on_click(cx.listener(move |frame, event: &ClickEvent, window, cx| {
+                if matches!(event, ClickEvent::Keyboard(_)) {
+                    frame.activate_stg_reference_cursor(document, target, kind, window, cx);
+                }
+            }))
+            .on_action(cx.listener(move |frame, _: &MoveSTGListUp, window, cx| {
+                frame.move_stg_reference_cursor(
+                    document,
+                    target,
+                    kind,
+                    STGListMovement::Up,
+                    window,
+                    cx,
+                );
+            }))
+            .on_action(cx.listener(move |frame, _: &MoveSTGListDown, window, cx| {
+                frame.move_stg_reference_cursor(
+                    document,
+                    target,
+                    kind,
+                    STGListMovement::Down,
+                    window,
+                    cx,
+                );
+            }))
+            .on_action(cx.listener(move |frame, _: &MoveSTGListHome, window, cx| {
+                frame.move_stg_reference_cursor(
+                    document,
+                    target,
+                    kind,
+                    STGListMovement::Home,
+                    window,
+                    cx,
+                );
+            }))
+            .on_action(cx.listener(move |frame, _: &MoveSTGListEnd, window, cx| {
+                frame.move_stg_reference_cursor(
+                    document,
+                    target,
+                    kind,
+                    STGListMovement::End,
+                    window,
+                    cx,
+                );
+            }))
+            .on_action(
+                cx.listener(move |frame, _: &MoveSTGListPageUp, window, cx| {
+                    frame.move_stg_reference_cursor(
+                        document,
+                        target,
+                        kind,
+                        STGListMovement::PageUp,
+                        window,
+                        cx,
+                    );
+                }),
+            )
+            .on_action(
+                cx.listener(move |frame, _: &MoveSTGListPageDown, window, cx| {
+                    frame.move_stg_reference_cursor(
+                        document,
+                        target,
+                        kind,
+                        STGListMovement::PageDown,
+                        window,
+                        cx,
+                    );
+                }),
+            )
+            .child(list)
+            .into_any_element()
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a rendered reference row carries every exact stale-binding guard"
+    )]
+    fn stg_reference_row(
+        &self,
+        document: DocumentID,
+        generation: u64,
+        target: kufeditor_workspace::STGParameterTarget,
+        kind: STGReferenceKind,
+        position: usize,
+        cursor: STGReferenceCursor,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(value) = self.stg_reference_payload(document, kind, cursor) else {
+            return stg::empty_state(
+                &self.theme,
+                "stg-reference-row-error",
+                "This reference has an invalid source ID.",
+            )
+            .into_any_element();
+        };
+        let Some((title, metadata)) = self.stg_reference_row_projection(document, kind, cursor)
+        else {
+            return stg::empty_state(
+                &self.theme,
+                "stg-reference-row-error",
+                "This reference is no longer available.",
+            )
+            .into_any_element();
+        };
+        let selected = self
+            .stg_presentations
+            .get(document)
+            .and_then(crate::state::STGPresentationState::reference_picker)
+            .is_some_and(|picker| picker.cursor() == Some(cursor));
+        let action = SelectSTGReference {
+            document,
+            section: STGSection::Events,
+            generation,
+            target,
+            kind,
+            cursor,
+            position,
+            value,
+        };
+        let selector = stg_reference_row_selector(cursor);
+        stg::master_row(
+            &self.theme,
+            SharedString::from(format!("stg-reference-row:{target:?}:{position}")),
+            title,
+            metadata,
+            selected,
+        )
+        .h(px(58.0))
+        .debug_selector(move || selector.clone())
+        .on_click(cx.listener(move |_, _, window, cx| {
+            window.dispatch_action(Box::new(action), cx);
+        }))
+        .into_any_element()
+    }
+
+    fn stg_reference_row_projection(
+        &self,
+        document: DocumentID,
+        kind: STGReferenceKind,
+        cursor: STGReferenceCursor,
+    ) -> Option<(String, String)> {
+        match (kind, cursor) {
+            (STGReferenceKind::Troop, STGReferenceCursor::Index(unit)) => {
+                let name = self
+                    .workspace
+                    .stg_text(document, STGTextTarget::UnitName { unit })
+                    .ok()?;
+                let source = name.decoded().unwrap_or("Invalid source name");
+                let id = self
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::Unit {
+                            unit,
+                            field: STGUnitField::UniqueID,
+                        },
+                    )
+                    .ok()?;
+                Some((
+                    format!("{:03} · {}", unit + 1, empty_stg_text(source)),
+                    format!("source index {unit} · troop ID {id}"),
+                ))
+            }
+            (STGReferenceKind::Area, STGReferenceCursor::Index(area)) => {
+                let description = self
+                    .workspace
+                    .stg_text(document, STGTextTarget::AreaDescription { area })
+                    .ok()?;
+                let source = description
+                    .decoded()
+                    .unwrap_or("Invalid source description");
+                let id = self
+                    .workspace
+                    .stg_number(
+                        document,
+                        STGNumberTarget::Area {
+                            area,
+                            field: STGAreaField::AreaID,
+                        },
+                    )
+                    .ok()?;
+                Some((
+                    format!("{:03} · {}", area + 1, empty_stg_text(source)),
+                    format!("source index {area} · area ID {id}"),
+                ))
+            }
+            (STGReferenceKind::Variable, STGReferenceCursor::Index(variable)) => {
+                let name = self
+                    .workspace
+                    .stg_text(document, STGTextTarget::VariableName { variable })
+                    .ok()?;
+                let source = name.decoded().unwrap_or("Invalid source name");
+                let id = self
+                    .workspace
+                    .stg_number(document, STGNumberTarget::VariableID { variable })
+                    .ok()?;
+                Some((
+                    format!("{:03} · {}", variable + 1, empty_stg_text(source)),
+                    format!("source index {variable} · variable ID {id}"),
+                ))
+            }
+            (
+                STGReferenceKind::Event | STGReferenceKind::Trigger,
+                STGReferenceCursor::Event(target),
+            ) => {
+                let event = self.workspace.stg_event(document, target).ok()?;
+                let source = event.description.decoded().unwrap_or("Invalid event label");
+                Some((
+                    format!(
+                        "B{} · E{} · {}",
+                        target.block,
+                        target.event,
+                        empty_stg_text(source)
+                    ),
+                    format!("event ID {}", event.id),
+                ))
+            }
+            (
+                STGReferenceKind::Troop | STGReferenceKind::Area | STGReferenceKind::Variable,
+                STGReferenceCursor::Event(_),
+            )
+            | (STGReferenceKind::Event | STGReferenceKind::Trigger, STGReferenceCursor::Index(_)) => {
+                None
+            }
+        }
     }
 
     fn stg_event_detail_rows(
@@ -2595,15 +4377,15 @@ impl AppFrame {
             .get(document)
             .map_or(0, crate::state::STGPresentationState::binding_generation);
         let control = self.stg_lists.get(kind);
-        let cursor = preferred
-            .filter(|cursor| rows.position_of(*cursor).is_some())
-            .or_else(|| {
-                control.binding.get().and_then(|binding| {
-                    (binding.document == document && binding.generation == generation)
-                        .then_some(binding.cursor)
-                        .filter(|cursor| rows.position_of(*cursor).is_some())
-                })
+        let cursor = control
+            .binding
+            .get()
+            .and_then(|binding| {
+                (binding.document == document && binding.generation == generation)
+                    .then_some(binding.cursor)
+                    .filter(|cursor| rows.position_of(*cursor).is_some())
             })
+            .or_else(|| preferred.filter(|cursor| rows.position_of(*cursor).is_some()))
             .or_else(|| rows.cursor(0));
         let Some(cursor) = cursor else {
             control.binding.set(None);
@@ -2651,6 +4433,11 @@ impl AppFrame {
             .tab_stop(true)
             .key_context("STGVirtualList")
             .focus(move |style| style.border_2().border_color(accent))
+            .on_click(cx.listener(move |frame, event: &ClickEvent, window, cx| {
+                if matches!(event, ClickEvent::Keyboard(_)) {
+                    frame.activate_stg_list_cursor(document, kind, window, cx);
+                }
+            }))
             .on_action(cx.listener(move |frame, _: &MoveSTGListUp, window, cx| {
                 frame.move_stg_list_cursor(document, kind, STGListMovement::Up, window, cx);
             }))
@@ -2889,6 +4676,10 @@ impl AppFrame {
         ))
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the virtual GPUI row builder keeps each typed event-detail row in one exhaustive match"
+    )]
     fn stg_virtual_event_detail_row(
         &mut self,
         document: DocumentID,
@@ -2913,6 +4704,129 @@ impl AppFrame {
             )
             .into_any_element();
         };
+        if let STGEventDetailRow::ScriptHeader(target) = row {
+            let projection = self.stg_event_detail_row_projection(document, event, row);
+            return match projection {
+                Ok((title, metadata)) => {
+                    let selector = stg_script_header_selector(target);
+                    let delete_selector = stg_script_delete_selector(target);
+                    let delete_action = ApplySTGStructuralEdit {
+                        document,
+                        section: STGSection::Events,
+                        generation,
+                        edit: STGStructuralEdit::RemoveScript { target },
+                    };
+                    div()
+                        .h(px(64.0))
+                        .px(px(7.0))
+                        .py(px(5.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(7.0))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |frame, _, window, cx| {
+                                frame.select_stg_row(document, generation, location, window, cx);
+                            }),
+                        )
+                        .child(
+                            stg::master_row(
+                                &self.theme,
+                                SharedString::from(location.id().element_key("stg-script-header")),
+                                title,
+                                format!("{metadata} · choose type"),
+                                self.stg_presentations
+                                    .get(document)
+                                    .is_some_and(|state| state.expanded_script() == Some(target)),
+                            )
+                            .flex_1()
+                            .min_w_0()
+                            .debug_selector(move || selector.clone())
+                            .tab_index(0)
+                            .on_click(cx.listener(
+                                move |frame, _, window, cx| {
+                                    frame.expand_stg_script(
+                                        document, generation, target, window, cx,
+                                    );
+                                },
+                            )),
+                        )
+                        .child(
+                            components::toolbar_button(
+                                &self.theme,
+                                "stg-script-delete",
+                                "Delete",
+                                true,
+                            )
+                            .debug_selector(move || delete_selector.clone())
+                            .tab_index(0)
+                            .on_click(cx.listener(
+                                move |_, _, window, cx| {
+                                    window.dispatch_action(Box::new(delete_action), cx);
+                                },
+                            )),
+                        )
+                        .into_any_element()
+                }
+                Err(error) => stg::empty_state(
+                    &self.theme,
+                    "stg-event-detail-row-error",
+                    format!("Could not read this script: {error}"),
+                )
+                .into_any_element(),
+            };
+        }
+        if let STGEventDetailRow::AddScript(kind) = row {
+            let Ok(event_projection) = self.workspace.stg_event(document, event) else {
+                return stg::empty_state(
+                    &self.theme,
+                    "stg-event-detail-row-error",
+                    "This event is no longer available.",
+                )
+                .into_any_element();
+            };
+            let script = match kind {
+                STGScriptKind::Condition => event_projection.condition_count,
+                STGScriptKind::Action => event_projection.action_count,
+            };
+            let target = STGScriptTarget {
+                block: event.block,
+                event: event.event,
+                kind,
+                script,
+            };
+            let action = ApplySTGStructuralEdit {
+                document,
+                section: STGSection::Events,
+                generation,
+                edit: STGStructuralEdit::InsertScript { target, type_id: 0 },
+            };
+            let selector = match kind {
+                STGScriptKind::Condition => "stg-event-add-condition",
+                STGScriptKind::Action => "stg-event-add-action",
+            };
+            return div()
+                .h(px(64.0))
+                .px(px(7.0))
+                .py(px(5.0))
+                .flex()
+                .items_center()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |frame, _, window, cx| {
+                        frame.select_stg_row(document, generation, location, window, cx);
+                    }),
+                )
+                .child(
+                    components::toolbar_button(&self.theme, selector, selector_label(kind), true)
+                        .debug_selector(move || selector.to_owned())
+                        .tab_index(0)
+                        .on_click(cx.listener(move |_, _, window, cx| {
+                            window.dispatch_action(Box::new(action), cx);
+                        })),
+                )
+                .into_any_element();
+        }
         if let Some(field) = self.stg_event_detail_field_element(document, event, row, cx) {
             return div()
                 .h(px(64.0))
@@ -2920,6 +4834,12 @@ impl AppFrame {
                 .py(px(5.0))
                 .flex()
                 .items_center()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |frame, _, window, cx| {
+                        frame.select_stg_row(document, generation, location, window, cx);
+                    }),
+                )
                 .child(field)
                 .into_any_element();
         }
@@ -3157,6 +5077,257 @@ impl AppFrame {
         self.finish_stg_presentation_transition(document, transition, cx);
     }
 
+    fn expand_stg_script(
+        &mut self,
+        document: DocumentID,
+        generation: u64,
+        target: STGScriptTarget,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.stg_presentations.get(document) else {
+            return;
+        };
+        if self.active_document != Some(document)
+            || state.section() != STGSection::Events
+            || state.binding_generation() != generation
+            || state.inspected_event()
+                != Some(STGEventTarget {
+                    block: target.block,
+                    event: target.event,
+                })
+            || self.workspace.stg_script(document, target).is_err()
+        {
+            return;
+        }
+        let expanded = (state.expanded_script() != Some(target)).then_some(target);
+        self.cancel_property_edit();
+        let transition = self
+            .stg_presentations
+            .set_expanded_script(document, expanded, None);
+        self.finish_stg_presentation_transition(document, transition, cx);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn activate_stg_list_cursor(
+        &mut self,
+        document: DocumentID,
+        kind: STGVirtualRowKind,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(binding) = self.stg_lists.get(kind).binding.get() else {
+            return;
+        };
+        let Some(state) = self.stg_presentations.get(document) else {
+            return;
+        };
+        if self.active_document != Some(document)
+            || binding.document != document
+            || binding.generation != state.binding_generation()
+            || binding.cursor.section() != state.section()
+        {
+            return;
+        }
+        let Ok(Some(rows)) = self.stg_rows_for_kind(document, kind) else {
+            return;
+        };
+        if rows.len() != binding.row_count || rows.cursor(binding.position) != Some(binding.cursor)
+        {
+            return;
+        }
+        let Some(location) = rows
+            .locations(binding.position..binding.position.saturating_add(1))
+            .into_iter()
+            .next()
+        else {
+            return;
+        };
+        if kind != STGVirtualRowKind::EventDetail {
+            self.select_stg_row(document, binding.generation, location, window, cx);
+            return;
+        }
+        let Some(row) = rows.event_detail_row(binding.position) else {
+            return;
+        };
+        let STGRowCursor::EventDetail { event, .. } = binding.cursor else {
+            return;
+        };
+        self.activate_stg_event_detail_row(document, binding.generation, event, row, window, cx);
+    }
+
+    fn activate_stg_event_detail_row(
+        &mut self,
+        document: DocumentID,
+        generation: u64,
+        event: STGEventTarget,
+        row: STGEventDetailRow,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        match row {
+            STGEventDetailRow::EventField(STGEventDetailField::BlockHeader) => {
+                self.activate_stg_number_target(
+                    document,
+                    STGNumberTarget::EventBlockHeader { block: event.block },
+                    window,
+                    cx,
+                );
+            }
+            STGEventDetailRow::EventField(STGEventDetailField::Description) => {
+                let target = STGTextTarget::EventDescription {
+                    block: event.block,
+                    event: event.event,
+                };
+                if self
+                    .workspace
+                    .stg_text(document, target)
+                    .is_ok_and(|value| matches!(value, STGText::Decoded(_)))
+                {
+                    self.start_stg_text_edit(
+                        document,
+                        STGSection::Events,
+                        target,
+                        false,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            STGEventDetailRow::EventField(STGEventDetailField::ID) => {
+                self.activate_stg_number_target(
+                    document,
+                    STGNumberTarget::EventID {
+                        block: event.block,
+                        event: event.event,
+                    },
+                    window,
+                    cx,
+                );
+            }
+            STGEventDetailRow::ScriptHeader(target) => {
+                self.expand_stg_script(document, generation, target, window, cx);
+            }
+            STGEventDetailRow::Parameter(target) => {
+                self.activate_stg_value_target(
+                    document,
+                    STGValueTarget::ScriptParameter(target),
+                    window,
+                    cx,
+                );
+            }
+            STGEventDetailRow::AddScript(kind) => {
+                let Ok(event_projection) = self.workspace.stg_event(document, event) else {
+                    return;
+                };
+                let script = match kind {
+                    STGScriptKind::Condition => event_projection.condition_count,
+                    STGScriptKind::Action => event_projection.action_count,
+                };
+                window.dispatch_action(
+                    Box::new(ApplySTGStructuralEdit {
+                        document,
+                        section: STGSection::Events,
+                        generation,
+                        edit: STGStructuralEdit::InsertScript {
+                            target: STGScriptTarget {
+                                block: event.block,
+                                event: event.event,
+                                kind,
+                                script,
+                            },
+                            type_id: 0,
+                        },
+                    }),
+                    cx,
+                );
+            }
+        }
+    }
+
+    fn activate_stg_number_target(
+        &mut self,
+        document: DocumentID,
+        target: STGNumberTarget,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = target.editor() else {
+            return;
+        };
+        let Ok(value) = self.workspace.stg_number(document, target) else {
+            return;
+        };
+        self.start_stg_number_edit(
+            STGProjectionID::field(
+                document,
+                STGSection::Events,
+                STGProjectionField::Number(target),
+            ),
+            target,
+            value,
+            editor,
+            window,
+            cx,
+        );
+    }
+
+    fn activate_stg_value_target(
+        &mut self,
+        document: DocumentID,
+        target: STGValueTarget,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(value) = self.workspace.stg_value(document, target) else {
+            return;
+        };
+        match value {
+            STGValue::Integer(value) | STGValue::Enum(value) => {
+                let number_target = STGNumberTarget::ParameterInteger { value: target };
+                let Some(editor) = number_target.editor() else {
+                    return;
+                };
+                self.start_stg_number_edit(
+                    STGProjectionID::field(
+                        document,
+                        STGSection::Events,
+                        STGProjectionField::Value(target),
+                    ),
+                    number_target,
+                    i64::from(value),
+                    editor,
+                    window,
+                    cx,
+                );
+            }
+            STGValue::Float(value) if value.finite_value().is_some() => {
+                self.start_stg_float_edit(
+                    STGProjectionID::field(
+                        document,
+                        STGSection::Events,
+                        STGProjectionField::Value(target),
+                    ),
+                    STGFloatTarget::Parameter { value: target },
+                    value,
+                    false,
+                    window,
+                    cx,
+                );
+            }
+            STGValue::String(STGText::Decoded(_)) => self.start_stg_text_edit(
+                document,
+                STGSection::Events,
+                STGTextTarget::ParameterString { value: target },
+                false,
+                window,
+                cx,
+            ),
+            STGValue::Float(_) | STGValue::String(STGText::Raw(_)) => {}
+        }
+    }
+
     fn move_stg_list_cursor(
         &mut self,
         document: DocumentID,
@@ -3267,6 +5438,112 @@ impl AppFrame {
                     .map(|rows| STGVirtualRows::event_details(document, event, rows))
             }
         })
+    }
+}
+
+const fn selector_label(kind: STGScriptKind) -> &'static str {
+    match kind {
+        STGScriptKind::Condition => "Add condition",
+        STGScriptKind::Action => "Add action",
+    }
+}
+
+const fn stg_script_kind_slug(kind: STGScriptKind) -> &'static str {
+    match kind {
+        STGScriptKind::Condition => "condition",
+        STGScriptKind::Action => "action",
+    }
+}
+
+fn stg_script_header_selector(target: STGScriptTarget) -> String {
+    format!(
+        "stg-script-header-{}-{}",
+        stg_script_kind_slug(target.kind),
+        target.script
+    )
+}
+
+fn stg_script_editor_selector(target: STGScriptTarget) -> String {
+    format!(
+        "stg-script-editor-{}-{}",
+        stg_script_kind_slug(target.kind),
+        target.script
+    )
+}
+
+fn stg_script_delete_selector(target: STGScriptTarget) -> String {
+    format!(
+        "stg-script-delete-{}-{}",
+        stg_script_kind_slug(target.kind),
+        target.script
+    )
+}
+
+fn stg_script_repair_selector(target: STGScriptTarget) -> String {
+    format!(
+        "stg-script-repair-{}-{}",
+        stg_script_kind_slug(target.kind),
+        target.script
+    )
+}
+
+fn stg_script_type_selector(target: STGScriptTarget, type_id: u32) -> String {
+    format!(
+        "stg-script-type-{}-{}-{type_id}",
+        stg_script_kind_slug(target.kind),
+        target.script
+    )
+}
+
+fn stg_value_type_selector(target: STGValueTarget, kind: STGValueKind) -> String {
+    let kind = match kind {
+        STGValueKind::Integer => "integer",
+        STGValueKind::Float => "float",
+        STGValueKind::String => "string",
+        STGValueKind::Enum => "enum",
+    };
+    match target {
+        STGValueTarget::VariableInitial { variable } => {
+            format!("stg-value-type-variable-{variable}-{kind}")
+        }
+        STGValueTarget::ScriptParameter(parameter) => format!(
+            "stg-value-type-{}-{}-parameter-{}-{kind}",
+            stg_script_kind_slug(parameter.script.kind),
+            parameter.script.script,
+            parameter.parameter
+        ),
+    }
+}
+
+const fn target_parameter(
+    target: STGValueTarget,
+) -> Option<kufeditor_workspace::STGParameterTarget> {
+    match target {
+        STGValueTarget::ScriptParameter(parameter) => Some(parameter),
+        STGValueTarget::VariableInitial { .. } => None,
+    }
+}
+
+fn stg_reference_open_selector(target: STGValueTarget) -> String {
+    match target {
+        STGValueTarget::ScriptParameter(parameter) => format!(
+            "stg-reference-open-{}-{}-parameter-{}",
+            stg_script_kind_slug(parameter.script.kind),
+            parameter.script.script,
+            parameter.parameter
+        ),
+        STGValueTarget::VariableInitial { variable } => {
+            format!("stg-reference-open-variable-{variable}")
+        }
+    }
+}
+
+fn stg_reference_row_selector(cursor: STGReferenceCursor) -> String {
+    match cursor {
+        STGReferenceCursor::Index(index) => format!("stg-reference-row-index-{index}"),
+        STGReferenceCursor::Event(target) => {
+            format!("stg-reference-row-event-{}-{}", target.block, target.event)
+        }
     }
 }
 
@@ -3382,15 +5659,16 @@ fn stg_value_summary(value: &STGValue<'_>) -> String {
 #[cfg(test)]
 mod tests {
     #![allow(
+        clippy::too_many_lines,
         clippy::unwrap_used,
-        reason = "controlled GPUI and STG fixtures make failures fatal"
+        reason = "controlled GPUI fixtures use explicit interaction sequences and make fixture failures fatal"
     )]
 
     use std::{fs, mem::size_of, path::PathBuf};
 
     use gpui::{
-        AppContext, Context, Entity, EntityInputHandler, Modifiers, TestAppContext,
-        VisualTestContext, WindowOptions, point, px, size,
+        AppContext, Context, Entity, EntityInputHandler, KeyDownEvent, KeyUpEvent, Keystroke,
+        Modifiers, TestAppContext, VisualTestContext, WindowOptions, point, px, size,
     };
     use kufeditor_game::Game;
     use kufeditor_workspace::{
@@ -3406,6 +5684,7 @@ mod tests {
         STGListMovement, STGSearchKind,
     };
     use crate::{
+        actions::{ApplySTGStructuralEdit, SelectSTGReference},
         crusaders_catalog_status::CrusadersCatalogStatus,
         settings::SettingsStartup,
         state::{
@@ -3413,7 +5692,7 @@ mod tests {
             STGSelection,
         },
         text_input::TextInputEvent,
-        views::stg::STGVirtualRowKind,
+        views::stg::{STGRowCursor, STGVirtualRowKind},
     };
 
     fn test_startup() -> SettingsStartup {
@@ -3564,6 +5843,23 @@ mod tests {
             bytes,
             area_description,
         }
+    }
+
+    fn empty_first_event_block_fixture() -> Vec<u8> {
+        let mut bytes = unit_list_fixture(0);
+        bytes.truncate(bytes.len() - 3 * size_of::<u32>());
+        append_u32(&mut bytes, 0);
+        append_u32(&mut bytes, 2);
+        append_u32(&mut bytes, 11);
+        append_u32(&mut bytes, 0);
+        append_u32(&mut bytes, 22);
+        append_u32(&mut bytes, 1);
+        append_fixed_fixture_text::<64>(&mut bytes, b"Second block event");
+        append_u32(&mut bytes, 500);
+        append_u32(&mut bytes, 0);
+        append_u32(&mut bytes, 0);
+        append_u32(&mut bytes, 0);
+        bytes
     }
 
     fn append_scalar_variable(bytes: &mut Vec<u8>, id: u32, value: ScalarParameter<'_>) {
@@ -4107,6 +6403,861 @@ mod tests {
                     )
                     .unwrap(),
                 800,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_structure_actions_add_events_and_scripts_once(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+
+        click(cx, "stg-event-add");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(document, 0)
+                    .unwrap()
+                    .event_count,
+                2
+            );
+            assert_eq!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .inspected_event(),
+                Some(STGEventTarget { block: 0, event: 1 })
+            );
+            assert!(frame.workspace.can_undo(document).unwrap());
+        });
+        frame.update(cx, |frame, cx| frame.move_history(false, cx));
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(document, 0)
+                    .unwrap()
+                    .event_count,
+                1
+            );
+            assert!(!frame.workspace.can_undo(document).unwrap());
+        });
+        draw_stg_frame(cx, &frame);
+
+        click(cx, "stg-event-add-condition");
+        frame.update(cx, |frame, _| {
+            let event = frame
+                .workspace
+                .stg_event(document, STGEventTarget { block: 0, event: 0 })
+                .unwrap();
+            assert_eq!(event.condition_count, 2);
+            let inserted = frame
+                .workspace
+                .stg_script(
+                    document,
+                    STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Condition,
+                        script: 1,
+                    },
+                )
+                .unwrap();
+            assert_eq!(inserted.id, 0);
+            assert_eq!(inserted.parameter_count, 2);
+        });
+        frame.update(cx, |frame, cx| frame.move_history(false, cx));
+        draw_stg_frame(cx, &frame);
+
+        click(cx, "stg-event-add-action");
+        frame.update(cx, |frame, _| {
+            let event = frame
+                .workspace
+                .stg_event(document, STGEventTarget { block: 0, event: 0 })
+                .unwrap();
+            assert_eq!(event.action_count, 2);
+            let inserted = frame
+                .workspace
+                .stg_script(
+                    document,
+                    STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 1,
+                    },
+                )
+                .unwrap();
+            assert_eq!(inserted.id, 0);
+            assert_eq!(inserted.parameter_count, 1);
+        });
+    }
+
+    #[gpui::test]
+    fn stg_structure_actions_add_an_event_to_the_selected_empty_block(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, empty_first_event_block_fixture());
+        select_stg_section(&frame, cx, document, STGSection::Events);
+
+        click(cx, "stg-event-block-row-0");
+        draw_stg_frame(cx, &frame);
+        click(cx, "stg-event-add");
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(document, 0)
+                    .unwrap()
+                    .event_count,
+                1
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(document, 1)
+                    .unwrap()
+                    .event_count,
+                1
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_structure_actions_focus_insertions_in_one_reconciliation(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        let before_event = frame.update(cx, |frame, _| {
+            frame
+                .stg_presentations
+                .get(document)
+                .unwrap()
+                .binding_generation()
+        });
+
+        click(cx, "stg-event-add");
+
+        frame.update(cx, |frame, _| {
+            let state = frame.stg_presentations.get(document).unwrap();
+            assert_eq!(state.binding_generation(), before_event.wrapping_add(1));
+            assert_eq!(
+                state.inspected_event(),
+                Some(STGEventTarget { block: 0, event: 1 })
+            );
+        });
+        frame.update(cx, |frame, cx| frame.move_history(false, cx));
+        draw_stg_frame(cx, &frame);
+        let before_script = frame.update(cx, |frame, _| {
+            frame
+                .stg_presentations
+                .get(document)
+                .unwrap()
+                .binding_generation()
+        });
+
+        click(cx, "stg-event-add-condition");
+
+        frame.update(cx, |frame, _| {
+            let state = frame.stg_presentations.get(document).unwrap();
+            assert_eq!(state.binding_generation(), before_script.wrapping_add(1));
+            assert_eq!(
+                state.expanded_script(),
+                Some(STGScriptTarget {
+                    block: 0,
+                    event: 0,
+                    kind: STGScriptKind::Condition,
+                    script: 1,
+                })
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_structure_actions_repair_scripts_and_change_value_types(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+
+        click(cx, "stg-script-header-condition-0");
+        draw_stg_frame(cx, &frame);
+        assert!(cx.debug_bounds("stg-script-repair-condition-0").is_some());
+        assert!(cx.debug_bounds("stg-script-type-condition-0-0").is_some());
+        click(cx, "stg-script-repair-condition-0");
+
+        let script = STGScriptTarget {
+            block: 0,
+            event: 0,
+            kind: STGScriptKind::Condition,
+            script: 0,
+        };
+        frame.update(cx, |frame, _| {
+            let projection = frame.workspace.stg_script(document, script).unwrap();
+            assert_eq!(projection.id, 19);
+            assert_eq!(projection.parameter_count, 3);
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_value(
+                        document,
+                        STGValueTarget::ScriptParameter(STGParameterTarget {
+                            script,
+                            parameter: 2,
+                        }),
+                    )
+                    .unwrap(),
+                kufeditor_workspace::STGValue::Integer(0)
+            );
+        });
+        draw_stg_frame(cx, &frame);
+        frame.update(cx, |frame, _| {
+            let projection = frame.workspace.stg_script(document, script).unwrap();
+            assert_eq!(
+                projection.expected_parameter_count,
+                Some(projection.parameter_count)
+            );
+        });
+
+        click(cx, "stg-script-type-condition-0-0");
+        frame.update(cx, |frame, _| {
+            let projection = frame.workspace.stg_script(document, script).unwrap();
+            assert_eq!(projection.id, 0);
+            assert_eq!(projection.parameter_count, 2);
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_value(
+                        document,
+                        STGValueTarget::ScriptParameter(STGParameterTarget {
+                            script,
+                            parameter: 0,
+                        }),
+                    )
+                    .unwrap(),
+                kufeditor_workspace::STGValue::Integer(23)
+            );
+        });
+        draw_stg_frame(cx, &frame);
+
+        click(cx, "stg-value-type-condition-0-parameter-0-enum");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_value(
+                        document,
+                        STGValueTarget::ScriptParameter(STGParameterTarget {
+                            script,
+                            parameter: 0,
+                        }),
+                    )
+                    .unwrap(),
+                kufeditor_workspace::STGValue::Enum(0)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_structure_actions_create_first_block_and_confirm_destructive_deletes(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let empty_document = activate_stg(&frame, cx, unit_list_fixture(0));
+        select_stg_section(&frame, cx, empty_document, STGSection::Events);
+
+        click(cx, "stg-event-add");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block_count(empty_document)
+                    .unwrap(),
+                Some(1)
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(empty_document, 0)
+                    .unwrap()
+                    .event_count,
+                1
+            );
+        });
+        draw_stg_frame(cx, &frame);
+        click(cx, "stg-event-delete");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block_count(empty_document)
+                    .unwrap(),
+                Some(1)
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(empty_document, 0)
+                    .unwrap()
+                    .event_count,
+                0
+            );
+        });
+
+        let populated_document = frame.update(cx, |frame, cx| {
+            let document = frame.workspace.open_loaded(
+                PathBuf::from("populated.stg"),
+                Document::STG(STGDocument::parse(scalar_stg_fixture().bytes).unwrap()),
+            );
+            frame.activate_document(document, cx);
+            frame.shell.select_area(Area::Files);
+            document
+        });
+        select_stg_section(&frame, cx, populated_document, STGSection::Events);
+        click(cx, "stg-script-delete-condition-0");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event(populated_document, STGEventTarget { block: 0, event: 0 })
+                    .unwrap()
+                    .condition_count,
+                0
+            );
+        });
+        frame.update(cx, |frame, cx| frame.move_history(false, cx));
+        draw_stg_frame(cx, &frame);
+
+        click(cx, "stg-event-delete");
+        assert_eq!(
+            cx.pending_prompt().map(|prompt| prompt.0),
+            Some("Delete this event and all of its conditions and actions?".to_owned())
+        );
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(populated_document, 0)
+                    .unwrap()
+                    .event_count,
+                1
+            );
+        });
+        cx.simulate_prompt_answer("Delete Event");
+        cx.run_until_parked();
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event_block(populated_document, 0)
+                    .unwrap()
+                    .event_count,
+                0
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_reference_picker_searches_selects_and_preserves_unsigned_id_bits(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+
+        click(cx, "stg-reference-open-condition-0-parameter-0");
+        draw_stg_frame(cx, &frame);
+        assert!(cx.debug_bounds("stg-reference-picker").is_some());
+        assert!(cx.debug_bounds("stg-reference-current-unknown").is_some());
+        assert!(cx.debug_bounds("stg-reference-row-index-2").is_some());
+        click(cx, "stg-reference-row-index-2");
+
+        let parameter = STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Condition,
+                script: 0,
+            },
+            parameter: 0,
+        };
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_value(document, STGValueTarget::ScriptParameter(parameter))
+                    .unwrap(),
+                kufeditor_workspace::STGValue::Integer(102)
+            );
+            assert_eq!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .reference_picker()
+                    .unwrap()
+                    .cursor(),
+                Some(STGReferenceCursor::Index(2))
+            );
+        });
+        draw_stg_frame(cx, &frame);
+
+        click(cx, "stg-reference-search");
+        let search = frame.update(cx, |frame, _| {
+            frame.stg_reference_search.as_ref().unwrap().input.clone()
+        });
+        search.update_in(cx, |input, window, cx| {
+            input.replace_text_in_range(None, "103", window, cx);
+        });
+        draw_stg_frame(cx, &frame);
+        assert!(cx.debug_bounds("stg-reference-search-input").is_some());
+        assert!(cx.debug_bounds("stg-reference-row-index-3").is_some());
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .reference_picker()
+                    .unwrap()
+                    .query(),
+                "103"
+            );
+        });
+        search.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("103".to_owned()));
+        });
+
+        frame.update(cx, |frame, cx| {
+            frame
+                .workspace
+                .apply(
+                    document,
+                    DocumentEdit::SetSTGNumber {
+                        target: STGNumberTarget::VariableID { variable: 3 },
+                        value: i64::from(u32::MAX - 1),
+                    },
+                )
+                .unwrap();
+            frame.reconcile_stg_presentation(document, STGDocumentTransition::ScalarEdit, cx);
+        });
+        draw_stg_frame(cx, &frame);
+        click(cx, "stg-reference-search");
+        let search = frame.update(cx, |frame, _| {
+            frame.stg_reference_search.as_ref().unwrap().input.clone()
+        });
+        search.update_in(cx, |input, window, cx| {
+            input.replace_text_in_range(Some(0..3), "4294967294", window, cx);
+        });
+        draw_stg_frame(cx, &frame);
+        click(cx, "stg-reference-row-index-3");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_value(document, STGValueTarget::ScriptParameter(parameter))
+                    .unwrap(),
+                kufeditor_workspace::STGValue::Integer(-2)
+            );
+        });
+        draw_stg_frame(cx, &frame);
+        click(cx, "stg-reference-raw-number");
+        frame.update(cx, |frame, _| {
+            assert!(frame.number_edit.is_some());
+            assert!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .reference_picker()
+                    .is_none()
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_keyboard_reference_list_moves_and_activates_once(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-reference-open-condition-0-parameter-0");
+        draw_stg_frame(cx, &frame);
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.stg_reference_list.focus.is_focused(window));
+        });
+
+        cx.simulate_keystrokes("down down");
+        key_cycle(cx, "enter");
+        let parameter = STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Condition,
+                script: 0,
+            },
+            parameter: 0,
+        };
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .reference_picker()
+                    .unwrap()
+                    .cursor(),
+                Some(STGReferenceCursor::Index(2))
+            );
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_value(document, STGValueTarget::ScriptParameter(parameter))
+                    .unwrap(),
+                kufeditor_workspace::STGValue::Integer(102)
+            );
+            assert!(frame.workspace.undo(document).unwrap());
+            assert!(!frame.workspace.undo(document).unwrap());
+        });
+    }
+
+    #[gpui::test]
+    fn stg_keyboard_reaches_reference_search_from_the_stable_list_root(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-reference-open-condition-0-parameter-0");
+        draw_stg_frame(cx, &frame);
+
+        cx.simulate_keystrokes("shift-tab");
+        key_cycle(cx, "enter");
+
+        frame.update(cx, |frame, _| {
+            assert!(frame.stg_reference_search.is_some());
+            assert!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .reference_picker()
+                    .is_some()
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_keyboard_empty_reference_results_restore_frame_focus(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-reference-open-condition-0-parameter-0");
+        draw_stg_frame(cx, &frame);
+        click(cx, "stg-reference-search");
+        let search = frame.update(cx, |frame, _| {
+            frame.stg_reference_search.as_ref().unwrap().input.clone()
+        });
+        search.update_in(cx, |input, window, cx| {
+            input.replace_text_in_range(None, "missing", window, cx);
+        });
+        search.update(cx, |_, cx| {
+            cx.emit(TextInputEvent::Commit("missing".to_owned()));
+        });
+        draw_stg_frame(cx, &frame);
+
+        assert!(cx.debug_bounds("stg-reference-empty").is_some());
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.focus.is_focused(window));
+        });
+    }
+
+    #[gpui::test]
+    fn stg_keyboard_event_detail_activates_typed_rows(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+
+        frame.update_in(cx, |frame, window, _| {
+            window.focus(&frame.stg_lists.event_detail.focus);
+        });
+        key_cycle(cx, "enter");
+        frame.update(cx, |frame, _| {
+            assert!(matches!(
+                frame.number_edit.as_ref().map(|edit| edit.target),
+                Some(super::super::NumberEditTarget::STG {
+                    target: STGNumberTarget::EventBlockHeader { block: 0 },
+                    ..
+                })
+            ));
+        });
+        cx.simulate_keystrokes("escape");
+
+        frame.update_in(cx, |frame, window, _| {
+            window.focus(&frame.stg_lists.event_detail.focus);
+        });
+        cx.simulate_keystrokes("down down down");
+        key_cycle(cx, "enter");
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .expanded_script(),
+                Some(STGScriptTarget {
+                    block: 0,
+                    event: 0,
+                    kind: STGScriptKind::Condition,
+                    script: 0,
+                })
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_keyboard_pointer_synchronizes_the_event_detail_cursor(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+
+        click(cx, "stg-event-0-0-id");
+
+        frame.update(cx, |frame, _| {
+            let binding = frame.stg_lists.event_detail.binding.get().unwrap();
+            assert_eq!(binding.position, 2);
+            assert_eq!(
+                binding.cursor,
+                STGRowCursor::EventDetail {
+                    event: STGEventTarget { block: 0, event: 0 },
+                    row: 2,
+                }
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_keyboard_tab_cancels_a_property_draft_before_moving_focus(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-event-block-0-header");
+        cx.simulate_keystrokes("9");
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_some()));
+
+        cx.simulate_keystrokes("tab");
+        frame.update(cx, |frame, _| {
+            assert!(frame.number_edit.is_none());
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_number(document, STGNumberTarget::EventBlockHeader { block: 0 })
+                    .unwrap(),
+                0x0102_0304
+            );
+            assert!(!frame.workspace.can_undo(document).unwrap());
+        });
+    }
+
+    #[gpui::test]
+    fn stg_stale_binding_rejects_structural_and_reference_callbacks(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+
+        let stale_structure = frame.update(cx, |frame, _| ApplySTGStructuralEdit {
+            document,
+            section: STGSection::Events,
+            generation: frame
+                .stg_presentations
+                .get(document)
+                .unwrap()
+                .binding_generation(),
+            edit: STGStructuralEdit::InsertScript {
+                target: STGScriptTarget {
+                    block: 0,
+                    event: 0,
+                    kind: STGScriptKind::Condition,
+                    script: 1,
+                },
+                type_id: 0,
+            },
+        });
+        frame.update(cx, |frame, cx| {
+            frame
+                .workspace
+                .apply(
+                    document,
+                    DocumentEdit::SetSTGNumber {
+                        target: STGNumberTarget::EventID { block: 0, event: 0 },
+                        value: 501,
+                    },
+                )
+                .unwrap();
+            frame.reconcile_stg_presentation(document, STGDocumentTransition::ScalarEdit, cx);
+        });
+        frame.update_in(cx, |_, window, cx| {
+            window.dispatch_action(Box::new(stale_structure), cx);
+        });
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_event(document, STGEventTarget { block: 0, event: 0 })
+                    .unwrap()
+                    .condition_count,
+                1
+            );
+            assert!(frame.workspace.undo(document).unwrap());
+            assert!(!frame.workspace.undo(document).unwrap());
+        });
+        frame.update(cx, |frame, cx| {
+            frame.reconcile_stg_presentation(document, STGDocumentTransition::Undo(None), cx);
+        });
+        draw_stg_frame(cx, &frame);
+
+        click(cx, "stg-reference-open-condition-0-parameter-0");
+        draw_stg_frame(cx, &frame);
+        let parameter = STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Condition,
+                script: 0,
+            },
+            parameter: 0,
+        };
+        let stale_reference = frame.update(cx, |frame, _| SelectSTGReference {
+            document,
+            section: STGSection::Events,
+            generation: frame
+                .stg_presentations
+                .get(document)
+                .unwrap()
+                .binding_generation(),
+            target: parameter,
+            kind: STGReferenceKind::Variable,
+            cursor: STGReferenceCursor::Index(1),
+            position: 1,
+            value: 101,
+        });
+        frame.update(cx, |frame, cx| {
+            frame.apply_stg_reference_query(
+                document,
+                parameter,
+                STGReferenceKind::Variable,
+                "101".to_owned(),
+                cx,
+            );
+        });
+        frame.update_in(cx, |_, window, cx| {
+            window.dispatch_action(Box::new(stale_reference), cx);
+        });
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .stg_value(document, STGValueTarget::ScriptParameter(parameter))
+                    .unwrap(),
+                kufeditor_workspace::STGValue::Integer(23)
+            );
+            assert!(!frame.workspace.can_undo(document).unwrap());
+        });
+    }
+
+    #[gpui::test]
+    fn stg_stale_binding_discards_reference_search_after_reconciliation(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Events);
+        click(cx, "stg-reference-open-condition-0-parameter-0");
+        draw_stg_frame(cx, &frame);
+        click(cx, "stg-reference-search");
+        let search = frame.update(cx, |frame, _| {
+            frame.stg_reference_search.as_ref().unwrap().input.clone()
+        });
+
+        frame.update(cx, |frame, cx| {
+            frame
+                .workspace
+                .apply(
+                    document,
+                    DocumentEdit::SetSTGNumber {
+                        target: STGNumberTarget::EventID { block: 0, event: 0 },
+                        value: 501,
+                    },
+                )
+                .unwrap();
+            frame.reconcile_stg_presentation(document, STGDocumentTransition::ScalarEdit, cx);
+            assert!(frame.stg_reference_search.is_none());
+        });
+        search.update_in(cx, |input, window, cx| {
+            input.replace_text_in_range(None, "stale", window, cx);
+        });
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .stg_presentations
+                    .get(document)
+                    .unwrap()
+                    .reference_picker()
+                    .unwrap()
+                    .query(),
+                ""
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stg_stale_binding_discards_master_search_after_reconciliation(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_stg(&frame, cx, scalar_stg_fixture().bytes);
+        select_stg_section(&frame, cx, document, STGSection::Units);
+        click(cx, "stg-unit-search");
+        let search = frame.update(cx, |frame, _| {
+            frame.stg_search.as_ref().unwrap().input.clone()
+        });
+
+        frame.update(cx, |frame, cx| {
+            frame
+                .workspace
+                .apply(
+                    document,
+                    DocumentEdit::SetSTGNumber {
+                        target: STGNumberTarget::Unit {
+                            unit: 0,
+                            field: STGUnitField::EnabledFlag,
+                        },
+                        value: 1,
+                    },
+                )
+                .unwrap();
+            frame.reconcile_stg_presentation(document, STGDocumentTransition::ScalarEdit, cx);
+            assert!(frame.stg_search.is_none());
+        });
+        search.update_in(cx, |input, window, cx| {
+            input.replace_text_in_range(None, "stale", window, cx);
+        });
+
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame.stg_presentations.get(document).unwrap().unit_query(),
+                ""
             );
         });
     }
@@ -4951,6 +8102,15 @@ mod tests {
             .debug_bounds(selector)
             .unwrap_or_else(|| panic!("missing click target {selector}"));
         cx.simulate_click(bounds.center(), Modifiers::none());
+    }
+
+    fn key_cycle(cx: &mut VisualTestContext, key: &str) {
+        let keystroke = Keystroke::parse(key).unwrap();
+        cx.simulate_event(KeyDownEvent {
+            keystroke: keystroke.clone(),
+            is_held: false,
+        });
+        cx.simulate_event(KeyUpEvent { keystroke });
     }
 
     #[test]
