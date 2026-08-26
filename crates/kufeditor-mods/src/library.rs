@@ -212,8 +212,10 @@ impl ModService {
     }
 }
 
-fn existing_package_directory(paths: &ModStorePaths) -> Result<Option<PathBuf>, ModError> {
-    if !validate_existing_directory(paths.root())? {
+pub(crate) fn existing_package_directory(
+    paths: &ModStorePaths,
+) -> Result<Option<PathBuf>, ModError> {
+    if existing_mod_store_root(paths)?.is_none() {
         return Ok(None);
     }
     let packages = paths.packages();
@@ -221,11 +223,7 @@ fn existing_package_directory(paths: &ModStorePaths) -> Result<Option<PathBuf>, 
 }
 
 fn prepare_package_directory(paths: &ModStorePaths) -> Result<PathBuf, ModError> {
-    let root = paths.root();
-    if !validate_existing_directory(root)? {
-        fs::create_dir_all(root).map_err(|error| ModError::io("create mod store", root, error))?;
-        require_directory(root)?;
-    }
+    prepare_mod_store_root(paths)?;
 
     let packages = paths.packages();
     if !validate_existing_directory(&packages)? {
@@ -234,6 +232,20 @@ fn prepare_package_directory(paths: &ModStorePaths) -> Result<PathBuf, ModError>
         require_directory(&packages)?;
     }
     Ok(packages)
+}
+
+pub(crate) fn existing_mod_store_root(paths: &ModStorePaths) -> Result<Option<PathBuf>, ModError> {
+    let root = paths.root();
+    validate_existing_directory(root).map(|exists| exists.then(|| root.to_path_buf()))
+}
+
+pub(crate) fn prepare_mod_store_root(paths: &ModStorePaths) -> Result<PathBuf, ModError> {
+    let root = paths.root();
+    if !validate_existing_directory(root)? {
+        fs::create_dir_all(root).map_err(|error| ModError::io("create mod store", root, error))?;
+        require_directory(root)?;
+    }
+    Ok(root.to_path_buf())
 }
 
 fn validate_existing_directory(path: &Path) -> Result<bool, ModError> {

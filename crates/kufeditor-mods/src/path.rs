@@ -346,12 +346,30 @@ macro_rules! digest_id {
 }
 
 digest_id!(ModPackageID, "mod package");
+digest_id!(InstallationID, "installation");
+digest_id!(FileSHA256, "file SHA256");
 digest_id!(BackupID, "backup");
 digest_id!(OperationID, "operation");
 digest_id!(GameRootKey, "game root");
 
+impl InstallationID {
+    #[allow(dead_code, reason = "used by the apply transaction in Task 5")]
+    pub(crate) fn for_installation(
+        root: GameRootKey,
+        package: ModPackageID,
+        operation: OperationID,
+    ) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(b"kufeditor-installation-v1\0");
+        hasher.update(root.as_bytes());
+        hasher.update(package.as_bytes());
+        hasher.update(operation.as_bytes());
+        Self(hasher.finalize().into())
+    }
+}
+
 impl GameRootKey {
-    fn for_root(game: Game, root: &Path) -> Self {
+    pub(crate) fn for_root(game: Game, root: &Path) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(match game {
             Game::Crusaders => b"crusaders".as_slice(),

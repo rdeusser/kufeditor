@@ -192,7 +192,7 @@ impl ModManifest {
     }
 }
 
-fn parse_game(value: &str) -> Result<Game, ModError> {
+pub(crate) fn parse_game(value: &str) -> Result<Game, ModError> {
     if value.eq_ignore_ascii_case("crusaders") {
         Ok(Game::Crusaders)
     } else if value.eq_ignore_ascii_case("heroes") {
@@ -202,7 +202,7 @@ fn parse_game(value: &str) -> Result<Game, ModError> {
     }
 }
 
-const fn game_name(game: Game) -> &'static str {
+pub(crate) const fn game_name(game: Game) -> &'static str {
     match game {
         Game::Crusaders => "crusaders",
         Game::Heroes => "heroes",

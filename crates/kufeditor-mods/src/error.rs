@@ -103,6 +103,8 @@ pub enum PackageErrorKind {
     SourceChanged,
     UnexpectedLibraryName,
     DestinationCollision,
+    ReferencedPackage,
+    MissingLibraryPackage,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -157,6 +159,56 @@ impl std::fmt::Display for PackageErrorKind {
             Self::SourceChanged => "the package changed while it was inspected",
             Self::UnexpectedLibraryName => "the library filename is not its package identity",
             Self::DestinationCollision => "the package identity collides with different content",
+            Self::ReferencedPackage => "an installation still references the package",
+            Self::MissingLibraryPackage => "the requested library package does not exist",
+        };
+        formatter.write_str(message)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegistryErrorKind {
+    TooLarge,
+    TooManyRecords,
+    InvalidJSON,
+    UnsupportedVersion,
+    SymbolicLink,
+    NotRegularFile,
+    Changed,
+    InvalidRecord,
+}
+
+impl std::fmt::Display for RegistryErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::TooLarge => "the installation registry exceeds its byte limit",
+            Self::TooManyRecords => "the installation registry exceeds its record limit",
+            Self::InvalidJSON => "the installation registry is not valid JSON",
+            Self::UnsupportedVersion => "the installation registry version is unsupported",
+            Self::SymbolicLink => "the installation registry is a symbolic link",
+            Self::NotRegularFile => "the installation registry is not a regular file",
+            Self::Changed => "the installation registry changed while it was read",
+            Self::InvalidRecord => "the installation registry contains invalid records",
+        };
+        formatter.write_str(message)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InstalledFileErrorKind {
+    SymbolicLink,
+    NotRegularFile,
+    TooLarge,
+    Changed,
+}
+
+impl std::fmt::Display for InstalledFileErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::SymbolicLink => "the installed path contains a symbolic link",
+            Self::NotRegularFile => "the installed path is not a regular file",
+            Self::TooLarge => "the installed file exceeds its byte limit",
+            Self::Changed => "the installed file changed while its health was checked",
         };
         formatter.write_str(message)
     }
@@ -208,6 +260,16 @@ pub enum ModError {
     InvalidSourceFile {
         path: PathBuf,
         kind: SourceFileErrorKind,
+    },
+    #[error("invalid installation registry {path:?}: {kind}")]
+    InvalidRegistry {
+        path: PathBuf,
+        kind: RegistryErrorKind,
+    },
+    #[error("invalid installed file {path:?}: {kind}")]
+    InvalidInstalledFile {
+        path: PathBuf,
+        kind: InstalledFileErrorKind,
     },
     #[error("could not read ZIP package {path:?}: {source}")]
     ZIP {
@@ -262,6 +324,20 @@ impl ModError {
 
     pub(crate) fn source(path: impl Into<PathBuf>, kind: SourceFileErrorKind) -> Self {
         Self::InvalidSourceFile {
+            path: path.into(),
+            kind,
+        }
+    }
+
+    pub(crate) fn registry(path: impl Into<PathBuf>, kind: RegistryErrorKind) -> Self {
+        Self::InvalidRegistry {
+            path: path.into(),
+            kind,
+        }
+    }
+
+    pub(crate) fn installed_file(path: impl Into<PathBuf>, kind: InstalledFileErrorKind) -> Self {
+        Self::InvalidInstalledFile {
             path: path.into(),
             kind,
         }

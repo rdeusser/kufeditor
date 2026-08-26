@@ -6,18 +6,24 @@ mod manifest;
 mod package;
 mod path;
 mod progress;
+mod registry;
 
 pub use error::{
-    GameRootErrorKind, ManifestErrorKind, ModError, PackageErrorKind, RelativeGamePathErrorKind,
-    SourceFileErrorKind,
+    GameRootErrorKind, InstalledFileErrorKind, ManifestErrorKind, ModError, PackageErrorKind,
+    RegistryErrorKind, RelativeGamePathErrorKind, SourceFileErrorKind,
 };
 pub use library::{ImportedMod, ImportedModDisposition, ModLibraryIssue, ModLibraryScan};
 pub use manifest::{ModManifest, ModMetadata, ModTimestamp};
 pub use package::{CreateModRequest, CreatedMod, ModPackageInfo};
 pub use path::{
-    BackupID, GameRoot, GameRootKey, ModPackageID, ModStorePaths, OperationID, RelativeGamePath,
+    BackupID, FileSHA256, GameRoot, GameRootKey, InstallationID, ModPackageID, ModStorePaths,
+    OperationID, RelativeGamePath,
 };
 pub use progress::{ModProgress, ModProgressPhase, ModProgressReporter};
+pub use registry::{
+    InstallationIssue, InstallationIssueKind, InstallationScan, InstalledFile, InstalledMod,
+    InstalledModStatus,
+};
 
 /// Resource ceilings for package, path, and backup operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
