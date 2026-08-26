@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::Context;
-use kufeditor_game::{CatalogLoad, Game, GameInstallation, load_name_dictionary};
+use kufeditor_game::{CatalogLoad, Game, GameInstallation, NameDictionary, load_name_dictionary};
 use kufeditor_workspace::DocumentKind;
 
 use super::AppFrame;
@@ -9,6 +9,7 @@ use crate::{catalog_status::CatalogRequestError, save_catalog_status::SaveCatalo
 
 impl AppFrame {
     pub(crate) fn reconcile_save_catalog(&mut self, cx: &mut Context<Self>) {
+        let previous_dictionary = self.visible_save_dictionary();
         let active_save = self.active_document.is_some_and(|document| {
             self.workspace.document_kind(document).ok() == Some(DocumentKind::CrusadersSave)
         });
@@ -18,6 +19,7 @@ impl AppFrame {
             if self.save_catalog.dormant(root.as_deref()) {
                 self.shell.invalidate_save_catalog();
             }
+            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         }
@@ -25,11 +27,13 @@ impl AppFrame {
         let Some(root) = root else {
             self.shell.invalidate_save_catalog();
             self.save_catalog.not_configured();
+            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         };
 
         if self.save_catalog.activate(&root) {
+            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         }
@@ -42,6 +46,7 @@ impl AppFrame {
         {
             self.task_launches.save_catalog += 1;
         }
+        self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
         cx.notify();
 
         let work_key = key.clone();
@@ -71,6 +76,7 @@ impl AppFrame {
             return;
         }
 
+        let previous_dictionary = self.visible_save_dictionary();
         let accepted = match result {
             Ok(CatalogLoad { dictionary, issues }) => {
                 self.save_catalog
@@ -79,8 +85,43 @@ impl AppFrame {
             Err(error) => self.save_catalog.finish_failed(key, error),
         };
         if accepted {
+            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
         }
+    }
+
+    fn visible_save_dictionary(&self) -> Option<Arc<NameDictionary>> {
+        match self.save_catalog.status() {
+            crate::save_catalog_status::SaveCatalogStatus::Ready { dictionary, .. } => {
+                Some(Arc::clone(dictionary))
+            }
+            crate::save_catalog_status::SaveCatalogStatus::NotConfigured
+            | crate::save_catalog_status::SaveCatalogStatus::Dormant
+            | crate::save_catalog_status::SaveCatalogStatus::Loading { .. }
+            | crate::save_catalog_status::SaveCatalogStatus::Failed { .. } => None,
+        }
+    }
+
+    fn reconcile_save_presentation_if_dictionary_changed(
+        &mut self,
+        previous: Option<Arc<NameDictionary>>,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.visible_save_dictionary();
+        let unchanged = match (previous, current) {
+            (Some(previous), Some(current)) => Arc::ptr_eq(&previous, &current),
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+        };
+        if unchanged {
+            return;
+        }
+        let Some(document) = self.active_document.filter(|document| {
+            self.workspace.document_kind(*document).ok() == Some(DocumentKind::CrusadersSave)
+        }) else {
+            return;
+        };
+        self.reconcile_save_presentation(document, cx);
     }
 }
 
@@ -97,15 +138,22 @@ mod tests {
     use kufeditor_game::{
         CatalogLoad, CatalogRole, Game, GameInstallation, InstallationError, load_name_dictionary,
     };
-    use kufeditor_workspace::{Document, DocumentID, SaveDocument, TroopDocument, load_path};
+    use kufeditor_workspace::{
+        Document, DocumentID, SaveDocument, SaveNumberTarget, SaveUnitField, TroopDocument,
+        TroopField, load_path,
+    };
     use tempfile::TempDir;
 
-    use super::super::AppFrame;
+    use super::super::{ActiveNumberEdit, AppFrame};
     use crate::{
         catalog_status::{CatalogKey, CatalogRequestError, CatalogStatus},
         notices::{Notice, NoticeSource},
+        number_edit::{NumberCommand, NumberOutcome},
         save_catalog_status::{SaveCatalogKey, SaveCatalogStatus},
         settings::SettingsStartup,
+        state::SaveSection,
+        test_support::SaveFixture,
+        views::save::SaveRows,
     };
 
     const SAVE_CONTEXT_SIZE: usize = 0x438;
@@ -361,6 +409,131 @@ mod tests {
                 assert_eq!(frame.task_launches.save_catalog, 1);
                 assert_eq!(frame.active_document, Some(second));
                 assert_ne!(frame.active_document, Some(first));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn ready_catalog_reconciles_a_filtered_unit_draft_before_stale_enter(cx: &mut TestAppContext) {
+        let tree = CatalogTree::with_troop_catalog();
+        let root = tree.root.clone();
+        let window = test_window(cx);
+        let (document, target) = window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(root.clone()));
+                let document = frame.workspace.open_loaded(
+                    PathBuf::from("campaign.sav"),
+                    Document::Save(SaveDocument::parse(SaveFixture::new(2, 0, 0).build()).unwrap()),
+                );
+                frame.activate_document(document, cx);
+                let key = visible_key(frame);
+                let rows = SaveRows::units(&frame.workspace, document, None, "Job").unwrap();
+                let visibility = rows.unit_visibility().unwrap();
+                frame
+                    .save_presentations
+                    .select_section(document, SaveSection::Units, false);
+                frame.save_presentations.set_unit_filter(
+                    document,
+                    "Job".to_owned(),
+                    visibility,
+                    false,
+                );
+                frame
+                    .save_presentations
+                    .inspect_unit(document, 0, visibility, false);
+                let target = SaveNumberTarget::Unit {
+                    unit: 0,
+                    field: SaveUnitField::TroopInfoIndex,
+                };
+                let value = frame.workspace.save_number(document, target).unwrap();
+                let editor = frame
+                    .workspace
+                    .save_number_editor(document, target)
+                    .unwrap();
+                frame.begin_number_edit(
+                    ActiveNumberEdit::save(document, target, value, editor).unwrap(),
+                );
+                assert_eq!(
+                    frame
+                        .number_edit
+                        .as_mut()
+                        .unwrap()
+                        .editor
+                        .apply(NumberCommand::Insert('9')),
+                    NumberOutcome::Continue,
+                );
+
+                frame.finish_save_catalog_load(key, Ok(tree.load()), cx);
+                (document, target)
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+        cx.simulate_keystrokes(window.into(), "enter");
+        cx.run_until_parked();
+
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame
+                        .save_presentations
+                        .get(document)
+                        .unwrap()
+                        .inspected_unit(),
+                    1,
+                );
+                assert!(frame.number_edit.is_none());
+                assert_eq!(frame.workspace.save_number(document, target).unwrap(), 2);
+                assert!(!frame.workspace.is_dirty(document).unwrap());
+                assert!(!frame.workspace.can_undo(document).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn retained_ready_catalog_reconciles_cached_filter_on_save_activation(cx: &mut TestAppContext) {
+        let tree = CatalogTree::with_troop_catalog();
+        let root = tree.root.clone();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(root.clone()));
+                let save = frame.workspace.open_loaded(
+                    PathBuf::from("campaign.sav"),
+                    Document::Save(SaveDocument::parse(SaveFixture::new(2, 0, 0).build()).unwrap()),
+                );
+                let sox = open_sox(frame, "TroopInfo.sox");
+                frame.activate_document(save, cx);
+                let key = visible_key(frame);
+                let rows = SaveRows::units(&frame.workspace, save, None, "Job").unwrap();
+                let visibility = rows.unit_visibility().unwrap();
+                frame
+                    .save_presentations
+                    .set_unit_filter(save, "Job".to_owned(), visibility, false);
+                frame
+                    .save_presentations
+                    .inspect_unit(save, 0, visibility, false);
+
+                frame.activate_document(sox, cx);
+                frame.begin_number_edit(ActiveNumberEdit::troop_field(
+                    sox,
+                    0,
+                    TroopField::MoveSpeed,
+                    0,
+                ));
+                frame.finish_save_catalog_load(key, Ok(tree.load()), cx);
+                assert!(frame.number_edit.is_some());
+
+                frame.activate_document(save, cx);
+                assert_eq!(
+                    frame.save_presentations.get(save).unwrap().inspected_unit(),
+                    1,
+                );
             })
             .unwrap();
     }

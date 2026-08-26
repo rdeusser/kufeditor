@@ -672,6 +672,16 @@ impl AppFrame {
         }
 
         match event {
+            TextInputEvent::ContentChanged => {
+                if matches!(target, TextEditTarget::Save { .. })
+                    && let Some(edit) = self
+                        .text_edit
+                        .as_mut()
+                        .filter(|edit| edit.target == target && edit.input == *input)
+                {
+                    edit.validation_error = None;
+                }
+            }
             TextInputEvent::Cancel => self.cancel_property_edit(),
             TextInputEvent::Commit(value) => {
                 let (document, edit) = target.document_edit(value.clone());
@@ -1481,7 +1491,7 @@ impl AppFrame {
             self.close_pending = false;
             self.close_armed = false;
         }
-        self.reconcile_save_presentation_after_document_change(document, cx);
+        self.reconcile_save_presentation(document, cx);
     }
 
     fn top_bar(&self, cx: &mut Context<Self>) -> Div {

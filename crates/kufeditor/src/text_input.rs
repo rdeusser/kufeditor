@@ -34,6 +34,7 @@ actions!(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TextInputEvent {
+    ContentChanged,
     Commit(String),
     Cancel,
 }
@@ -147,25 +148,26 @@ impl TextBuffer {
         self.selection_reversed = false;
     }
 
-    fn backspace(&mut self) {
+    fn backspace(&mut self) -> bool {
         if self.selection.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()));
         }
-        self.replace_selected("");
+        self.replace_selected("")
     }
 
-    fn delete(&mut self) {
+    fn delete(&mut self) -> bool {
         if self.selection.is_empty() {
             self.select_to(self.next_boundary(self.cursor_offset()));
         }
-        self.replace_selected("");
+        self.replace_selected("")
     }
 
-    fn replace_text(&mut self, range_utf16: Option<Range<usize>>, new_text: &str) {
+    fn replace_text(&mut self, range_utf16: Option<Range<usize>>, new_text: &str) -> bool {
         let range = self.replacement_range(range_utf16);
         let normalized = normalize_single_line(new_text);
-        self.replace_range(range, &normalized.text);
+        let changed = self.replace_range(range, &normalized.text);
         self.marked_range = None;
+        changed
     }
 
     fn replace_and_mark(
@@ -173,7 +175,7 @@ impl TextBuffer {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         selected_range_utf16: Option<Range<usize>>,
-    ) {
+    ) -> bool {
         let range = self.replacement_range(range_utf16);
         let normalized = normalize_single_line(new_text);
         let selection = selected_range_utf16.map(|relative| {
@@ -182,12 +184,13 @@ impl TextBuffer {
         });
         let start = range.start;
 
-        self.replace_range(range, &normalized.text);
+        let changed = self.replace_range(range, &normalized.text);
         self.marked_range =
             (!normalized.text.is_empty()).then(|| start..start + normalized.text.len());
         if let Some(selection) = selection {
             self.selection = start + selection.start..start + selection.end;
         }
+        changed
     }
 
     fn unmark(&mut self) {
@@ -245,16 +248,19 @@ impl TextBuffer {
             .unwrap_or_else(|| self.selection.clone())
     }
 
-    fn replace_selected(&mut self, new_text: &str) {
-        self.replace_range(self.selection.clone(), new_text);
+    fn replace_selected(&mut self, new_text: &str) -> bool {
+        let changed = self.replace_range(self.selection.clone(), new_text);
         self.marked_range = None;
+        changed
     }
 
-    fn replace_range(&mut self, range: Range<usize>, new_text: &str) {
+    fn replace_range(&mut self, range: Range<usize>, new_text: &str) -> bool {
+        let changed = self.content.get(range.clone()) != Some(new_text);
         self.content.replace_range(range.clone(), new_text);
         let cursor = range.start + new_text.len();
         self.selection = cursor..cursor;
         self.selection_reversed = false;
+        changed
     }
 
     fn commit(&self) -> TextInputEvent {
@@ -411,6 +417,13 @@ impl TextInput {
         self.buffer.content()
     }
 
+    fn finish_content_edit(changed: bool, cx: &mut Context<Self>) {
+        if changed {
+            cx.emit(TextInputEvent::ContentChanged);
+        }
+        cx.notify();
+    }
+
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         self.buffer.left();
         cx.notify();
@@ -447,13 +460,13 @@ impl TextInput {
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
-        self.buffer.backspace();
-        cx.notify();
+        let changed = self.buffer.backspace();
+        Self::finish_content_edit(changed, cx);
     }
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
-        self.buffer.delete();
-        cx.notify();
+        let changed = self.buffer.delete();
+        Self::finish_content_edit(changed, cx);
     }
 
     fn show_character_palette(
@@ -468,8 +481,8 @@ impl TextInput {
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.buffer.replace_text(None, &text);
-            cx.notify();
+            let changed = self.buffer.replace_text(None, &text);
+            Self::finish_content_edit(changed, cx);
         }
     }
 
@@ -482,8 +495,8 @@ impl TextInput {
     fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = self.buffer.selected_text() {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
-            self.buffer.replace_selected("");
-            cx.notify();
+            let changed = self.buffer.replace_selected("");
+            Self::finish_content_edit(changed, cx);
         }
     }
 
@@ -592,8 +605,8 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.buffer.replace_text(range_utf16, text);
-        cx.notify();
+        let changed = self.buffer.replace_text(range_utf16, text);
+        Self::finish_content_edit(changed, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -604,9 +617,10 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.buffer
+        let changed = self
+            .buffer
             .replace_and_mark(range_utf16, text, selected_range_utf16);
-        cx.notify();
+        Self::finish_content_edit(changed, cx);
     }
 
     fn bounds_for_range(
@@ -871,9 +885,13 @@ impl Focusable for TextInput {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use gpui::{AppContext, EntityInputHandler, TestAppContext, WindowOptions, rgb};
 
     use super::{TextBuffer, TextInput, TextInputColors, TextInputEvent};
+
+    struct TextInputEventObserver;
 
     fn colors() -> TextInputColors {
         let color = rgb(0).into();
@@ -911,6 +929,39 @@ mod tests {
                 assert_eq!(input.content(), "replacement");
             })
             .unwrap();
+    }
+
+    #[gpui::test]
+    fn content_change_event_emits_only_for_a_different_buffer_value(cx: &mut TestAppContext) {
+        let input = cx.new(|cx| {
+            TextInput::new(
+                "original",
+                "placeholder",
+                "text-input:test-content-change-event",
+                colors(),
+                cx,
+            )
+        });
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let observer_events = Rc::clone(&events);
+        let input_for_observer = input.clone();
+        let _observer = cx.new(|cx| {
+            cx.subscribe(&input_for_observer, move |_, _, event, _| {
+                observer_events.borrow_mut().push(event.clone());
+            })
+            .detach();
+            TextInputEventObserver
+        });
+        let cx = cx.add_empty_window();
+
+        input.update_in(cx, |input, window, cx| {
+            input.replace_text_in_range(None, "changed", window, cx);
+        });
+        input.update_in(cx, |input, window, cx| {
+            input.replace_text_in_range(Some(0..7), "changed", window, cx);
+        });
+
+        assert_eq!(*events.borrow(), [TextInputEvent::ContentChanged]);
     }
 
     #[test]

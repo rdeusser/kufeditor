@@ -1245,7 +1245,7 @@ impl AppFrame {
         SaveRows::units(&self.workspace, document, self.save_dictionary(), filter)
     }
 
-    pub(super) fn reconcile_save_presentation_after_document_change(
+    pub(super) fn reconcile_save_presentation(
         &mut self,
         document: DocumentID,
         cx: &mut Context<Self>,
@@ -1981,7 +1981,7 @@ mod tests {
             "x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x enter",
         );
         cx.run_until_parked();
-        frame.update(cx, |frame, cx| {
+        let input = frame.update(cx, |frame, cx| {
             let edit = frame.text_edit.as_ref().unwrap();
             assert_eq!(
                 edit.input.read(cx).content(),
@@ -1994,9 +1994,27 @@ mod tests {
                     .unwrap(),
                 "Bravo",
             );
+            edit.input.clone()
         });
         draw_frame(cx, &frame);
         assert!(cx.debug_bounds("save-text-validation-error").is_some());
+
+        cx.simulate_keystrokes("backspace");
+        frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input, input);
+            assert_eq!(edit.input.read(cx).content().len(), 31);
+            assert!(edit.validation_error.is_none());
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Bravo",
+            );
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-text-editor-set-file").is_some());
     }
 
     #[gpui::test]
@@ -2019,7 +2037,7 @@ mod tests {
             cx.write_to_clipboard(ClipboardItem::new_string("é".to_owned()));
         });
         cx.simulate_keystrokes("cmd-v enter");
-        frame.update(cx, |frame, cx| {
+        let ascii_input = frame.update(cx, |frame, cx| {
             let edit = frame.text_edit.as_ref().unwrap();
             assert_eq!(edit.input.read(cx).content(), "é");
             assert!(
@@ -2034,7 +2052,25 @@ mod tests {
                     .unwrap(),
                 "Alpha",
             );
+            edit.input.clone()
         });
+
+        cx.simulate_keystrokes("backspace");
+        frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input, ascii_input);
+            assert_eq!(edit.input.read(cx).content(), "");
+            assert!(edit.validation_error.is_none());
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Alpha",
+            );
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-text-editor-set-file").is_some());
 
         cx.simulate_keystrokes("escape");
         draw_frame(cx, &frame);
@@ -2043,7 +2079,7 @@ mod tests {
             cx.write_to_clipboard(ClipboardItem::new_string("\0".to_owned()));
         });
         cx.simulate_keystrokes("cmd-v enter");
-        frame.update(cx, |frame, cx| {
+        let zero_input = frame.update(cx, |frame, cx| {
             let edit = frame.text_edit.as_ref().unwrap();
             assert_eq!(edit.input.read(cx).content(), "\0");
             assert!(
@@ -2058,9 +2094,68 @@ mod tests {
                     .unwrap(),
                 "Alpha",
             );
+            edit.input.clone()
         });
         draw_frame(cx, &frame);
         assert!(cx.debug_bounds("save-text-validation-error").is_some());
+
+        cx.simulate_keystrokes("backspace");
+        frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input, zero_input);
+            assert_eq!(edit.input.read(cx).content(), "");
+            assert!(edit.validation_error.is_none());
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::SetFile)
+                    .unwrap(),
+                "Alpha",
+            );
+        });
+        draw_frame(cx, &frame);
+        assert!(cx.debug_bounds("save-text-editor-set-file").is_some());
+    }
+
+    #[gpui::test]
+    fn save_edit_stale_content_change_keeps_the_active_validation(cx: &mut TestAppContext) {
+        cx.update(crate::text_input::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(0, 0, 0)
+                .with_save_file_name(b"Alpha")
+                .build(),
+        );
+        let stale = start_hidden_save_text(&frame, cx, document);
+        frame.update_in(cx, |frame, window, cx| {
+            frame.start_text_edit(
+                crate::frame::TextEditTarget::save(document, SaveTextField::MapName),
+                "Map".to_owned(),
+                window,
+                cx,
+            );
+            frame.text_edit.as_mut().unwrap().validation_error =
+                Some("active validation".to_owned());
+        });
+
+        stale.update(cx, |_, cx| cx.emit(TextInputEvent::ContentChanged));
+        cx.run_until_parked();
+
+        frame.update(cx, |frame, cx| {
+            let edit = frame.text_edit.as_ref().unwrap();
+            assert_eq!(edit.input.read(cx).content(), "Map");
+            assert_eq!(edit.validation_error.as_deref(), Some("active validation"));
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_text(document, SaveTextField::MapName)
+                    .unwrap(),
+                "",
+            );
+            assert!(!frame.workspace.is_dirty(document).unwrap());
+        });
     }
 
     #[gpui::test]
