@@ -12,7 +12,14 @@ actions!(
         Redo,
         FocusNextSaveControl,
         FocusPreviousSaveControl,
-        ActivateSaveControl,
+        MoveSaveListUp,
+        MoveSaveListDown,
+        MoveSaveListHome,
+        MoveSaveListEnd,
+        MoveSaveListPageUp,
+        MoveSaveListPageDown,
+        MoveSaveListLeft,
+        MoveSaveListRight,
     ]
 );
 
@@ -38,7 +45,13 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-shift-z", Redo, None),
         KeyBinding::new("tab", FocusNextSaveControl, Some("SaveEditor")),
         KeyBinding::new("shift-tab", FocusPreviousSaveControl, Some("SaveEditor")),
-        KeyBinding::new("enter", ActivateSaveControl, Some("SaveControl")),
-        KeyBinding::new("space", ActivateSaveControl, Some("SaveControl")),
+        KeyBinding::new("up", MoveSaveListUp, Some("SaveVirtualList")),
+        KeyBinding::new("down", MoveSaveListDown, Some("SaveVirtualList")),
+        KeyBinding::new("home", MoveSaveListHome, Some("SaveVirtualList")),
+        KeyBinding::new("end", MoveSaveListEnd, Some("SaveVirtualList")),
+        KeyBinding::new("pageup", MoveSaveListPageUp, Some("SaveVirtualList")),
+        KeyBinding::new("pagedown", MoveSaveListPageDown, Some("SaveVirtualList")),
+        KeyBinding::new("left", MoveSaveListLeft, Some("SaveVirtualList")),
+        KeyBinding::new("right", MoveSaveListRight, Some("SaveVirtualList")),
     ]);
 }

@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -7,7 +8,7 @@ use gpui::prelude::*;
 use gpui::{
     Action, AnyElement, AnyWindowHandle, App, AsyncApp, BackgroundExecutor, Context, Div, Entity,
     FocusHandle, Focusable, KeyDownEvent, PathPromptOptions, PromptLevel, Stateful, Task,
-    WeakEntity, Window, div, px,
+    UniformListScrollHandle, WeakEntity, Window, div, px,
 };
 use kufeditor_game::{Game, NameDictionary};
 use kufeditor_workspace::{
@@ -28,8 +29,8 @@ use crate::{
     save_catalog_status::SaveCatalogSession,
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
     state::{
-        Area, ClosePolicy, RecordSelections, RequestID, SavePresentationStates, ShellState,
-        navigation_projection,
+        Area, ClosePolicy, RecordSelections, RequestID, SaveListCursor, SaveListKind,
+        SavePresentationStates, ShellState, navigation_projection,
     },
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
@@ -345,6 +346,73 @@ struct ActiveTextEdit {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SaveListBinding {
+    document: DocumentID,
+    cursor: SaveListCursor,
+    position: usize,
+    row_count: usize,
+}
+
+struct SaveListControl {
+    focus: FocusHandle,
+    scroll: UniformListScrollHandle,
+    binding: Cell<Option<SaveListBinding>>,
+    generation: Cell<u64>,
+}
+
+impl SaveListControl {
+    fn new(cx: &mut Context<AppFrame>) -> Self {
+        Self {
+            focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            scroll: UniformListScrollHandle::new(),
+            binding: Cell::new(None),
+            generation: Cell::new(0),
+        }
+    }
+
+    fn invalidate(&self) {
+        self.binding.set(None);
+        self.generation.set(self.generation.get().wrapping_add(1));
+    }
+
+    fn next_generation(&self) -> u64 {
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
+        generation
+    }
+}
+
+struct SaveListControls {
+    units: SaveListControl,
+    roster: SaveListControl,
+    second_array: SaveListControl,
+}
+
+impl SaveListControls {
+    fn new(cx: &mut Context<AppFrame>) -> Self {
+        Self {
+            units: SaveListControl::new(cx),
+            roster: SaveListControl::new(cx),
+            second_array: SaveListControl::new(cx),
+        }
+    }
+
+    const fn get(&self, kind: SaveListKind) -> &SaveListControl {
+        match kind {
+            SaveListKind::Units => &self.units,
+            SaveListKind::Roster => &self.roster,
+            SaveListKind::SecondArray => &self.second_array,
+        }
+    }
+
+    fn invalidate_all(&self) {
+        self.units.invalidate();
+        self.roster.invalidate();
+        self.second_array.invalidate();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditorRoute {
     Troop,
     Skill,
@@ -504,6 +572,7 @@ pub struct AppFrame {
     active_document: Option<DocumentID>,
     selections: RecordSelections,
     save_presentations: SavePresentationStates,
+    save_lists: SaveListControls,
     number_edit: Option<ActiveNumberEdit>,
     text_edit: Option<ActiveTextEdit>,
     game_paths: kufeditor_game::GamePaths,
@@ -559,6 +628,7 @@ impl AppFrame {
             active_document: None,
             selections: RecordSelections::default(),
             save_presentations: SavePresentationStates::default(),
+            save_lists: SaveListControls::new(cx),
             number_edit: None,
             text_edit: None,
             game_paths,
@@ -599,6 +669,7 @@ impl AppFrame {
     }
 
     fn activate_document(&mut self, document: DocumentID, cx: &mut Context<Self>) {
+        self.save_lists.invalidate_all();
         if self.workspace.document_kind(document).ok() == Some(DocumentKind::CrusadersSave) {
             self.activate_save_presentation(document, cx);
         } else {

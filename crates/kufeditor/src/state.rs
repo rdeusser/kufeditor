@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use kufeditor_game::Game;
-use kufeditor_workspace::{DocumentID, SaveEquipmentSlot};
+use kufeditor_workspace::{DocumentID, SaveEquipmentSlot, SaveRosterField};
 
 #[derive(Debug, Default)]
 pub struct RecordSelections {
@@ -32,6 +32,54 @@ pub enum SaveSection {
 pub enum SaveUnitVisibility<'a> {
     All { unit_count: usize },
     Filtered(&'a [usize]),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SaveListKind {
+    Units,
+    Roster,
+    SecondArray,
+}
+
+impl SaveListKind {
+    pub const fn section(self) -> SaveSection {
+        match self {
+            Self::Units => SaveSection::Units,
+            Self::Roster => SaveSection::Roster,
+            Self::SecondArray => SaveSection::Missions,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SaveListCursor {
+    Unit {
+        source_index: usize,
+    },
+    Roster {
+        record: usize,
+        field: SaveRosterField,
+    },
+    SecondArray {
+        record: usize,
+    },
+}
+
+impl SaveListCursor {
+    pub const fn kind(self) -> SaveListKind {
+        match self {
+            Self::Unit { .. } => SaveListKind::Units,
+            Self::Roster { .. } => SaveListKind::Roster,
+            Self::SecondArray { .. } => SaveListKind::SecondArray,
+        }
+    }
+
+    pub const fn source_index(self) -> usize {
+        match self {
+            Self::Unit { source_index } => source_index,
+            Self::Roster { record, .. } | Self::SecondArray { record } => record,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,6 +116,9 @@ pub struct SavePresentationState {
     inspected_unit: usize,
     equipment_slot: SaveEquipmentSlot,
     player_only: bool,
+    roster_record: usize,
+    roster_field: SaveRosterField,
+    second_array_record: usize,
 }
 
 impl SavePresentationState {
@@ -86,6 +137,21 @@ impl SavePresentationState {
     pub const fn player_only(&self) -> bool {
         self.player_only
     }
+
+    pub const fn list_cursor(&self, kind: SaveListKind) -> SaveListCursor {
+        match kind {
+            SaveListKind::Units => SaveListCursor::Unit {
+                source_index: self.inspected_unit,
+            },
+            SaveListKind::Roster => SaveListCursor::Roster {
+                record: self.roster_record,
+                field: self.roster_field,
+            },
+            SaveListKind::SecondArray => SaveListCursor::SecondArray {
+                record: self.second_array_record,
+            },
+        }
+    }
 }
 
 impl Default for SavePresentationState {
@@ -95,6 +161,9 @@ impl Default for SavePresentationState {
             inspected_unit: 0,
             equipment_slot: SaveEquipmentSlot::LeaderWeapon,
             player_only: false,
+            roster_record: 0,
+            roster_field: SaveRosterField::Byte60,
+            second_array_record: 0,
         }
     }
 }
@@ -173,25 +242,6 @@ impl SavePresentationStates {
         changed_transition(draft_active)
     }
 
-    pub fn inspect_unit(
-        &mut self,
-        document: DocumentID,
-        unit: usize,
-        visibility: SaveUnitVisibility<'_>,
-        draft_active: bool,
-    ) -> SavePresentationTransition {
-        let state = self.documents.entry(document).or_default();
-        let reconciliation = visibility.reconcile(unit);
-        let transition = unit_reconciliation_transition(
-            state.inspected_unit,
-            reconciliation,
-            false,
-            draft_active,
-        );
-        state.inspected_unit = reconciliation.inspected_unit;
-        transition
-    }
-
     pub fn select_equipment_slot(
         &mut self,
         document: DocumentID,
@@ -223,6 +273,52 @@ impl SavePresentationStates {
         );
         state.player_only = player_only;
         state.inspected_unit = reconciliation.inspected_unit;
+        transition
+    }
+
+    pub fn set_list_cursor(
+        &mut self,
+        document: DocumentID,
+        cursor: SaveListCursor,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        let state = self.documents.entry(document).or_default();
+        if state.list_cursor(cursor.kind()) == cursor {
+            return SavePresentationTransition::Unchanged;
+        }
+        match cursor {
+            SaveListCursor::Unit { source_index } => state.inspected_unit = source_index,
+            SaveListCursor::Roster { record, field } => {
+                state.roster_record = record;
+                state.roster_field = field;
+            }
+            SaveListCursor::SecondArray { record } => state.second_array_record = record,
+        }
+        changed_transition(draft_active)
+    }
+
+    pub fn reconcile_list_cursor(
+        &mut self,
+        document: DocumentID,
+        kind: SaveListKind,
+        visibility: SaveUnitVisibility<'_>,
+        draft_active: bool,
+    ) -> SavePresentationTransition {
+        if kind == SaveListKind::Units {
+            return self.reconcile_document(document, visibility, draft_active);
+        }
+        let state = self.documents.entry(document).or_default();
+        let previous = state.list_cursor(kind).source_index();
+        let reconciliation = visibility.reconcile(previous);
+        let transition =
+            unit_reconciliation_transition(previous, reconciliation, false, draft_active);
+        match kind {
+            SaveListKind::Units => state.inspected_unit = reconciliation.inspected_unit,
+            SaveListKind::Roster => state.roster_record = reconciliation.inspected_unit,
+            SaveListKind::SecondArray => {
+                state.second_array_record = reconciliation.inspected_unit;
+            }
+        }
         transition
     }
 
@@ -268,10 +364,12 @@ const fn unit_reconciliation_transition(
     presentation_changed: bool,
     draft_active: bool,
 ) -> SavePresentationTransition {
-    if presentation_changed || previous_unit != reconciliation.inspected_unit {
+    if previous_unit != reconciliation.inspected_unit {
         changed_transition(draft_active)
     } else if draft_active && !reconciliation.requested_visible {
         SavePresentationTransition::ChangedAndCancelDraft
+    } else if presentation_changed {
+        SavePresentationTransition::Changed
     } else {
         SavePresentationTransition::Unchanged
     }
@@ -640,11 +738,13 @@ mod close_tests {
 mod save_presentation_tests {
     use std::path::PathBuf;
 
-    use kufeditor_workspace::{Document, DocumentID, SaveEquipmentSlot, TroopDocument, Workspace};
+    use kufeditor_workspace::{
+        Document, DocumentID, SaveEquipmentSlot, SaveRosterField, TroopDocument, Workspace,
+    };
 
     use super::{
-        SavePresentationState, SavePresentationStates, SavePresentationTransition, SaveSection,
-        SaveUnitVisibility,
+        SaveListCursor, SaveListKind, SavePresentationState, SavePresentationStates,
+        SavePresentationTransition, SaveSection, SaveUnitVisibility,
     };
 
     const fn all_units(unit_count: usize) -> SaveUnitVisibility<'static> {
@@ -707,7 +807,7 @@ mod save_presentation_tests {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
         states.activate_document(document, all_units(10), false);
-        states.inspect_unit(document, 8, all_units(10), false);
+        states.set_list_cursor(document, SaveListCursor::Unit { source_index: 8 }, false);
 
         assert_eq!(
             states.reconcile_document(document, all_units(3), true),
@@ -721,7 +821,7 @@ mod save_presentation_tests {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
         states.activate_document(document, all_units(10), false);
-        states.inspect_unit(document, 8, all_units(10), false);
+        states.set_list_cursor(document, SaveListCursor::Unit { source_index: 8 }, false);
 
         assert_eq!(
             states.activate_document(document, all_units(3), true),
@@ -748,7 +848,7 @@ mod save_presentation_tests {
     fn save_presentation_player_only_moves_inspection_to_the_first_visible_unit() {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
-        states.inspect_unit(document, 7, all_units(10), false);
+        states.set_list_cursor(document, SaveListCursor::Unit { source_index: 7 }, false);
 
         assert_eq!(
             states.set_player_only(document, true, filtered_units(&[2, 4]), true),
@@ -770,12 +870,12 @@ mod save_presentation_tests {
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(
-            states.inspect_unit(first, 1, all_units(5), true),
+            states.set_list_cursor(first, SaveListCursor::Unit { source_index: 1 }, true),
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(
             states.set_player_only(first, true, filtered_units(&[1, 3]), true),
-            SavePresentationTransition::ChangedAndCancelDraft,
+            SavePresentationTransition::Changed,
         );
         assert_eq!(
             states.select_equipment_slot(first, SaveEquipmentSlot::LeaderArmor, true),
@@ -792,7 +892,7 @@ mod save_presentation_tests {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
         states.set_player_only(document, true, filtered_units(&[1, 3]), false);
-        states.inspect_unit(document, 3, filtered_units(&[1, 3]), false);
+        states.set_list_cursor(document, SaveListCursor::Unit { source_index: 3 }, false);
 
         assert_eq!(
             states.reconcile_document(document, filtered_units(&[1, 2]), true),
@@ -807,7 +907,7 @@ mod save_presentation_tests {
     fn save_presentation_empty_filtered_results_reset_inspection() {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
-        states.inspect_unit(document, 3, all_units(5), false);
+        states.set_list_cursor(document, SaveListCursor::Unit { source_index: 3 }, false);
 
         assert_eq!(
             states.set_player_only(document, true, filtered_units(&[]), true),
@@ -843,19 +943,6 @@ mod save_presentation_tests {
     }
 
     #[test]
-    fn save_presentation_inspection_cancels_unit_zero_draft_when_visibility_empties() {
-        let (document, _) = document_ids();
-        let mut states = SavePresentationStates::default();
-        states.inspect_unit(document, 0, all_units(1), false);
-
-        assert_eq!(
-            states.inspect_unit(document, 0, all_units(0), true),
-            SavePresentationTransition::ChangedAndCancelDraft,
-        );
-        assert_eq!(states.get(document).unwrap().inspected_unit(), 0);
-    }
-
-    #[test]
     fn save_presentation_active_activation_cancels_unit_zero_draft_when_visibility_empties() {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
@@ -873,13 +960,94 @@ mod save_presentation_tests {
         let (document, _) = document_ids();
         let mut states = SavePresentationStates::default();
         states.activate_document(document, filtered_units(&[1, 3]), false);
-        states.inspect_unit(document, 3, filtered_units(&[1, 3]), false);
+        states.set_list_cursor(document, SaveListCursor::Unit { source_index: 3 }, false);
 
         assert_eq!(
             states.activate_document(document, filtered_units(&[1, 2]), true),
             SavePresentationTransition::ChangedAndCancelDraft,
         );
         assert_eq!(states.get(document).unwrap().inspected_unit(), 1);
+    }
+
+    #[test]
+    fn save_presentation_reconciles_roster_and_second_array_cursors_after_list_shrink() {
+        let (document, _) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.set_list_cursor(
+            document,
+            SaveListCursor::Roster {
+                record: 9,
+                field: SaveRosterField::Value64,
+            },
+            false,
+        );
+        states.set_list_cursor(document, SaveListCursor::SecondArray { record: 7 }, false);
+
+        assert_eq!(
+            states.reconcile_list_cursor(document, SaveListKind::Roster, all_units(3), true),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(
+            states
+                .get(document)
+                .unwrap()
+                .list_cursor(SaveListKind::Roster),
+            SaveListCursor::Roster {
+                record: 2,
+                field: SaveRosterField::Value64,
+            },
+        );
+        assert_eq!(
+            states.reconcile_list_cursor(document, SaveListKind::SecondArray, all_units(0), true,),
+            SavePresentationTransition::ChangedAndCancelDraft,
+        );
+        assert_eq!(
+            states
+                .get(document)
+                .unwrap()
+                .list_cursor(SaveListKind::SecondArray),
+            SaveListCursor::SecondArray { record: 0 },
+        );
+    }
+
+    #[test]
+    fn save_presentation_keeps_virtual_list_cursors_per_document() {
+        let (first, second) = document_ids();
+        let mut states = SavePresentationStates::default();
+        states.set_list_cursor(
+            first,
+            SaveListCursor::Roster {
+                record: 7,
+                field: SaveRosterField::Value64,
+            },
+            false,
+        );
+        states.set_list_cursor(
+            second,
+            SaveListCursor::Roster {
+                record: 2,
+                field: SaveRosterField::Byte62,
+            },
+            false,
+        );
+
+        assert_eq!(
+            states.get(first).unwrap().list_cursor(SaveListKind::Roster),
+            SaveListCursor::Roster {
+                record: 7,
+                field: SaveRosterField::Value64,
+            },
+        );
+        assert_eq!(
+            states
+                .get(second)
+                .unwrap()
+                .list_cursor(SaveListKind::Roster),
+            SaveListCursor::Roster {
+                record: 2,
+                field: SaveRosterField::Byte62,
+            },
+        );
     }
 
     #[test]

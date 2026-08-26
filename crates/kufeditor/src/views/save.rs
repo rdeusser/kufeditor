@@ -253,6 +253,13 @@ impl SaveRowIndices {
             Self::Filtered(indices) => indices.get(virtual_index).copied(),
         }
     }
+
+    fn position_of(&self, source_index: usize) -> Option<usize> {
+        match self {
+            Self::Contiguous(count) => (source_index < *count).then_some(source_index),
+            Self::Filtered(indices) => indices.iter().position(|index| *index == source_index),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -327,6 +334,24 @@ impl SaveRows {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn source_index(&self, position: usize) -> Option<usize> {
+        self.indices.source_index(position)
+    }
+
+    pub fn position_of(&self, source_index: usize) -> Option<usize> {
+        self.indices.position_of(source_index)
+    }
+
+    pub fn reconciled_source_index(&self, source_index: usize) -> Option<usize> {
+        self.position_of(source_index).map_or_else(
+            || match &self.indices {
+                SaveRowIndices::Contiguous(count) => count.checked_sub(1),
+                SaveRowIndices::Filtered(indices) => indices.first().copied(),
+            },
+            |_| Some(source_index),
+        )
     }
 
     pub fn unit_visibility(&self) -> Option<SaveUnitVisibility<'_>> {
@@ -1949,7 +1974,6 @@ mod tests {
         let mut presentations = SavePresentationStates::default();
         presentations.select_section(document, SaveSection::Units, false);
         presentations.set_player_only(document, true, SaveUnitVisibility::Filtered(&[0, 1]), false);
-        presentations.inspect_unit(document, 0, SaveUnitVisibility::Filtered(&[0, 1]), false);
         assert_eq!(
             workspace
                 .apply(

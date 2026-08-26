@@ -444,9 +444,6 @@ mod tests {
                 frame
                     .save_presentations
                     .set_player_only(document, true, visibility, false);
-                frame
-                    .save_presentations
-                    .inspect_unit(document, 0, visibility, false);
                 let target = SaveNumberTarget::Unit {
                     unit: 0,
                     field: SaveUnitField::TroopInfoIndex,
@@ -527,9 +524,6 @@ mod tests {
                 frame
                     .save_presentations
                     .set_player_only(save, true, visibility, false);
-                frame
-                    .save_presentations
-                    .inspect_unit(save, 0, visibility, false);
 
                 frame.activate_document(sox, cx);
                 frame.begin_number_edit(ActiveNumberEdit::troop_field(
