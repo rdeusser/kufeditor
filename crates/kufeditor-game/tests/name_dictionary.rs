@@ -4,6 +4,7 @@
 )]
 
 use std::{
+    borrow::Cow,
     collections::HashSet,
     fs,
     path::{Path, PathBuf},
@@ -157,6 +158,114 @@ fn unit_name_missing_data_returns_none() {
     let dictionary = unit_name_dictionary();
 
     assert_eq!(dictionary.unit_name(0, 74, 41), None);
+}
+
+#[test]
+fn stg_unit_name_uses_special_prefix_rules_in_catalog_order() {
+    let dictionary = stg_unit_name_dictionary();
+
+    assert_eq!(
+        dictionary.stg_unit_name("-hErOAlpha", 45, 0),
+        "First Special"
+    );
+    assert_eq!(
+        dictionary.stg_unit_name("pAlAdInGuard", 6, 13),
+        "Paladin Special"
+    );
+    assert_eq!(dictionary.stg_unit_name("PaladinGuard", 6, 12), "Troop 6");
+    assert_eq!(
+        dictionary.stg_unit_name("eLfArcherGuard", 19, 7),
+        "Elf Special"
+    );
+    assert_eq!(
+        dictionary.stg_unit_name("ElfArcherGuard", 19, 6),
+        "Troop 19"
+    );
+    assert_eq!(dictionary.stg_unit_name("-", 45, 0), "-");
+    assert_eq!(dictionary.stg_unit_name("MissingDisplay", 6, 13), "Troop 6");
+    assert_eq!(
+        dictionary.stg_unit_name("MissingDisplayGuard", 6, 13),
+        "Troop 6"
+    );
+    assert_eq!(
+        dictionary.stg_unit_name("--wRaPpEdPrEfIx--Unit", 45, 0),
+        "--Wrapped Display--"
+    );
+    assert_eq!(
+        dictionary.translate("WrappedPrefix"),
+        Some("Wrapped Display".to_owned())
+    );
+}
+
+#[test]
+fn stg_unit_name_prefers_dark_orc_and_every_character_job() {
+    let dictionary = stg_unit_name_dictionary();
+
+    assert_eq!(dictionary.stg_unit_name("DarkOrc", 26, 0), "Character 26");
+    assert_eq!(dictionary.stg_unit_name("DarkOrc", 26, 1), "Troop 26");
+
+    for job_type in [32_u8, 33, 34, 35, 36, 37, 38, 43, 44, 46, 47] {
+        assert_eq!(
+            dictionary.stg_unit_name("CharacterInternal", job_type, 0),
+            format!("Character {job_type}")
+        );
+    }
+}
+
+#[test]
+fn stg_unit_name_falls_back_through_troop_translation_internal_and_unknown() {
+    let dictionary = stg_unit_name_dictionary();
+
+    assert_eq!(
+        dictionary.stg_unit_name("StandardInternal", 7, 0),
+        "Troop 7"
+    );
+    assert_eq!(
+        dictionary.stg_unit_name("BoundaryInternal", 42, 0),
+        "Troop 42"
+    );
+    assert_eq!(
+        dictionary.stg_unit_name("TranslatedInternal", 45, 0),
+        "Translated Unit"
+    );
+    assert_eq!(
+        dictionary.stg_unit_name("RawInternal", 45, 0),
+        "RawInternal"
+    );
+    assert_eq!(dictionary.stg_unit_name("", 45, 0), "Unknown");
+    assert_eq!(dictionary.stg_unit_name("", u8::MAX, u8::MAX), "Unknown");
+}
+
+#[test]
+fn stg_unit_name_borrows_catalog_and_internal_names_but_owns_translations() {
+    let dictionary = stg_unit_name_dictionary();
+
+    assert!(matches!(
+        dictionary.stg_unit_name("StandardInternal", 7, 0),
+        Cow::Borrowed("Troop 7")
+    ));
+    assert!(matches!(
+        dictionary.stg_unit_name("TranslatedInternal", 45, 0),
+        Cow::Owned(name) if name == "Translated Unit"
+    ));
+    assert!(matches!(
+        dictionary.stg_unit_name("RawInternal", 45, 0),
+        Cow::Borrowed("RawInternal")
+    ));
+}
+
+#[test]
+fn stg_unit_name_continues_after_missing_character_catalog_entries() {
+    let dictionary = stg_missing_character_dictionary();
+
+    assert_eq!(
+        dictionary.stg_unit_name("CharacterInternal", 32, 0),
+        "Troop 32"
+    );
+    assert_eq!(
+        dictionary.stg_unit_name("DarkOrcInternal", 26, 0),
+        "Troop 26"
+    );
 }
 
 #[test]
@@ -543,6 +652,64 @@ fn unit_name_dictionary() -> NameDictionary {
     tree.write(
         CatalogRole::LeaderPools,
         &indexed_table(&[(73, b"LeaderZero LeaderOne"), (u32::MAX, b"WrappedLeader")]),
+    );
+    load_name_dictionary(&tree.sox).unwrap().dictionary
+}
+
+fn stg_unit_name_dictionary() -> NameDictionary {
+    let tree = CatalogTree::new();
+    let troop_names = [6_u32, 7, 19, 26, 32, 33, 34, 35, 36, 37, 38, 42, 45]
+        .map(|job_type| (job_type, format!("Troop {job_type}").into_bytes()));
+    let troop_records = troop_names
+        .iter()
+        .map(|(job_type, name)| (*job_type, name.as_slice()))
+        .collect::<Vec<_>>();
+    tree.write(CatalogRole::TroopNames, &indexed_table(&troop_records));
+
+    let character_names = [26_u32, 32, 33, 34, 35, 36, 37, 38, 43, 44, 46, 47]
+        .map(|job_type| (job_type, format!("Character {job_type}").into_bytes()));
+    let character_records = character_names
+        .iter()
+        .map(|(job_type, name)| (*job_type, name.as_slice()))
+        .collect::<Vec<_>>();
+    tree.write(
+        CatalogRole::CharacterNames,
+        &indexed_table(&character_records),
+    );
+    tree.write(
+        CatalogRole::SpecialNameKeys,
+        &special_names_table(&[
+            (b"-Hero", b"First Special"),
+            (b"-HeroAlpha", b"Second Special"),
+            (b"Paladin", b"Paladin Special"),
+            (b"ElfArcher", b"Elf Special"),
+            (b"MissingDisplay", b""),
+            (b"MissingDisplayGuard", b"Later Special"),
+            (b"TranslatedInternal", b"Translated Unit"),
+            (b"--WrappedPrefix--", b"--Wrapped Display--"),
+        ]),
+    );
+    tree.write(
+        CatalogRole::SpecialDisplayNames,
+        &sequential_table(&[
+            b"First Special",
+            b"Second Special",
+            b"Paladin Special",
+            b"Elf Special",
+            b"",
+            b"Later Special",
+            b"Translated Unit",
+            b"--Wrapped Display--",
+        ]),
+    );
+    load_name_dictionary(&tree.sox).unwrap().dictionary
+}
+
+fn stg_missing_character_dictionary() -> NameDictionary {
+    let tree = CatalogTree::new();
+    tree.write(
+        CatalogRole::TroopNames,
+        &indexed_table(&[(26, b"Troop 26"), (32, b"Troop 32")]),
     );
     load_name_dictionary(&tree.sox).unwrap().dictionary
 }

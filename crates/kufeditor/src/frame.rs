@@ -24,9 +24,9 @@ use crate::{
     },
     catalog_status::{CatalogRequestError, CatalogSession},
     components,
+    crusaders_catalog_status::CrusadersCatalogSession,
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
-    save_catalog_status::SaveCatalogSession,
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
     state::{
         Area, ClosePolicy, RecordSelections, RequestID, SaveListCursor, SaveListKind,
@@ -38,11 +38,11 @@ use crate::{
 };
 
 mod catalog;
+mod crusaders_catalog;
 mod discovery;
 #[path = "discovery_status.rs"]
 pub(crate) mod discovery_status;
 mod save;
-mod save_catalog;
 mod settings;
 use self::discovery::{BrowsePromptLauncher, PlatformBrowsePromptLauncher};
 use self::settings::protected_settings_notice;
@@ -53,7 +53,7 @@ struct TaskLaunchCounts {
     catalog: usize,
     discovery: usize,
     inspection: usize,
-    save_catalog: usize,
+    crusaders_catalog: usize,
     settings: usize,
 }
 
@@ -581,7 +581,7 @@ pub struct AppFrame {
     root_revisions: discovery_status::RootRevisions,
     recent_files: kufeditor_workspace::RecentFiles,
     catalog: CatalogSession<NameDictionary, CatalogRequestError>,
-    save_catalog: SaveCatalogSession,
+    crusaders_catalog: CrusadersCatalogSession,
     discovery: discovery_status::DiscoveryStatus,
     settings: SettingsWritePump,
     notices: NoticeCenter,
@@ -637,7 +637,7 @@ impl AppFrame {
             root_revisions: discovery_status::RootRevisions::default(),
             recent_files,
             catalog: CatalogSession::default(),
-            save_catalog: SaveCatalogSession::default(),
+            crusaders_catalog: CrusadersCatalogSession::default(),
             discovery: discovery_status::DiscoveryStatus::default(),
             settings,
             notices,
@@ -678,14 +678,14 @@ impl AppFrame {
             self.cancel_property_edit();
         }
         self.active_document = Some(document);
-        self.reconcile_save_catalog(cx);
+        self.reconcile_crusaders_catalog(cx);
     }
 
     fn select_record(&mut self, document: DocumentID, record: usize, cx: &mut Context<Self>) {
         self.cancel_property_edit();
         self.active_document = Some(document);
         self.selections.select(document, record);
-        self.reconcile_save_catalog(cx);
+        self.reconcile_crusaders_catalog(cx);
     }
 
     fn text_input_colors(&self) -> TextInputColors {

@@ -15,7 +15,7 @@ use crate::{
         MoveSaveListPageDown, MoveSaveListPageUp, MoveSaveListRight, MoveSaveListUp, SetSaveChoice,
     },
     components,
-    save_catalog_status::SaveCatalogStatus,
+    crusaders_catalog_status::CrusadersCatalogStatus,
     state::{
         SaveListCursor, SaveListKind, SavePresentationState, SavePresentationTransition,
         SaveSection, SaveUnitVisibility,
@@ -141,7 +141,7 @@ impl AppFrame {
         save::render_editor(
             &self.theme,
             self.save_section_rail(document, state.section(), cx),
-            self.save_catalog_status_element(),
+            self.crusaders_catalog_status_element(),
             content,
         )
         .tab_group()
@@ -1367,9 +1367,9 @@ impl AppFrame {
             .collect()
     }
 
-    fn save_catalog_status_element(&self) -> Option<AnyElement> {
-        match self.save_catalog.status() {
-            SaveCatalogStatus::NotConfigured => Some(
+    fn crusaders_catalog_status_element(&self) -> Option<AnyElement> {
+        match self.crusaders_catalog.status() {
+            CrusadersCatalogStatus::NotConfigured => Some(
                 save::catalog_status(
                     &self.theme,
                     "save-catalog-not-configured",
@@ -1378,7 +1378,7 @@ impl AppFrame {
                 )
                 .into_any_element(),
             ),
-            SaveCatalogStatus::Dormant => Some(
+            CrusadersCatalogStatus::Dormant => Some(
                 save::catalog_status(
                     &self.theme,
                     "save-catalog-dormant",
@@ -1387,7 +1387,7 @@ impl AppFrame {
                 )
                 .into_any_element(),
             ),
-            SaveCatalogStatus::Loading { .. } => Some(
+            CrusadersCatalogStatus::Loading { .. } => Some(
                 save::catalog_status(
                     &self.theme,
                     "save-catalog-loading",
@@ -1396,7 +1396,7 @@ impl AppFrame {
                 )
                 .into_any_element(),
             ),
-            SaveCatalogStatus::Failed { error, .. } => Some(
+            CrusadersCatalogStatus::Failed { error, .. } => Some(
                 save::catalog_status(
                     &self.theme,
                     "save-catalog-failed",
@@ -1405,8 +1405,8 @@ impl AppFrame {
                 )
                 .into_any_element(),
             ),
-            SaveCatalogStatus::Ready { issue_count: 0, .. } => None,
-            SaveCatalogStatus::Ready { issue_count, .. } => Some(
+            CrusadersCatalogStatus::Ready { issue_count: 0, .. } => None,
+            CrusadersCatalogStatus::Ready { issue_count, .. } => Some(
                 save::catalog_status(
                     &self.theme,
                     "save-catalog-ready-issues",
@@ -1419,12 +1419,12 @@ impl AppFrame {
     }
 
     fn save_dictionary(&self) -> Option<&NameDictionary> {
-        match self.save_catalog.status() {
-            SaveCatalogStatus::Ready { dictionary, .. } => Some(dictionary.as_ref()),
-            SaveCatalogStatus::NotConfigured
-            | SaveCatalogStatus::Dormant
-            | SaveCatalogStatus::Loading { .. }
-            | SaveCatalogStatus::Failed { .. } => None,
+        match self.crusaders_catalog.status() {
+            CrusadersCatalogStatus::Ready { dictionary, .. } => Some(dictionary.as_ref()),
+            CrusadersCatalogStatus::NotConfigured
+            | CrusadersCatalogStatus::Dormant
+            | CrusadersCatalogStatus::Loading { .. }
+            | CrusadersCatalogStatus::Failed { .. } => None,
         }
     }
 
@@ -2211,8 +2211,8 @@ mod tests {
     use crate::{
         actions::{Redo, Undo},
         catalog_status::CatalogRequestError,
+        crusaders_catalog_status::CrusadersCatalogKey,
         notices::{Notice, NoticeSource},
-        save_catalog_status::SaveCatalogKey,
         settings::SettingsStartup,
         state::{Area, SaveListCursor, SaveListKind, SaveSection},
         test_support::SaveFixture,
@@ -4204,14 +4204,14 @@ mod tests {
     ) {
         let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
         let document = activate_save(&frame, cx, SaveFixture::new(0, 0, 0).build());
-        let (global_request, save_key, settings_revision, settings_settled, task_launches) = frame
-            .update(cx, |frame, cx| {
+        let (global_request, crusaders_key, settings_revision, settings_settled, task_launches) =
+            frame.update(cx, |frame, cx| {
                 let global_request = frame.shell.begin_catalog();
-                let save_key = SaveCatalogKey::new(
-                    frame.shell.begin_save_catalog(),
+                let crusaders_key = CrusadersCatalogKey::new(
+                    frame.shell.begin_crusaders_catalog(),
                     PathBuf::from("/catalog/editing"),
                 );
-                frame.save_catalog.begin(save_key.clone());
+                frame.crusaders_catalog.begin(crusaders_key.clone());
                 frame.notices.replace(
                     NoticeSource::Workspace,
                     Notice::info("Persistent workspace notice"),
@@ -4219,7 +4219,7 @@ mod tests {
                 cx.notify();
                 (
                     global_request,
-                    save_key,
+                    crusaders_key,
                     frame.settings.latest_revision_for_test(),
                     frame.settings.is_settled(),
                     frame.task_launches,
@@ -4232,7 +4232,11 @@ mod tests {
         cx.simulate_keystrokes("enter");
         frame.update(cx, |frame, cx| {
             assert!(frame.shell.accepts_catalog(global_request));
-            assert!(frame.shell.accepts_save_catalog(save_key.request()));
+            assert!(
+                frame
+                    .shell
+                    .accepts_crusaders_catalog(crusaders_key.request())
+            );
             assert_eq!(frame.shell.game(), Game::Crusaders);
             assert_eq!(frame.shell.area(), Area::Files);
             assert_eq!(frame.settings.latest_revision_for_test(), settings_revision);
@@ -4242,8 +4246,8 @@ mod tests {
                 frame.notices.current().map(Notice::summary),
                 Some("Persistent workspace notice"),
             );
-            assert!(frame.save_catalog.finish_failed(
-                save_key.clone(),
+            assert!(frame.crusaders_catalog.finish_failed(
+                crusaders_key.clone(),
                 CatalogRequestError::Installation(InstallationError::RootMissing {
                     game: Game::Crusaders,
                     root: PathBuf::from("/catalog/editing"),
@@ -4265,7 +4269,11 @@ mod tests {
                 7,
             );
             assert!(frame.shell.accepts_catalog(global_request));
-            assert!(frame.shell.accepts_save_catalog(save_key.request()));
+            assert!(
+                frame
+                    .shell
+                    .accepts_crusaders_catalog(crusaders_key.request())
+            );
             assert_eq!(frame.shell.game(), Game::Crusaders);
             assert_eq!(frame.shell.area(), Area::Files);
             assert_eq!(frame.settings.latest_revision_for_test(), settings_revision);
@@ -4674,8 +4682,9 @@ mod tests {
         assert!(cx.debug_bounds("save-catalog-not-configured").is_some());
 
         let loading_key = frame.update(cx, |frame, cx| {
-            let key = SaveCatalogKey::new(frame.shell.begin_save_catalog(), "/catalog/loading");
-            frame.save_catalog.begin(key.clone());
+            let key =
+                CrusadersCatalogKey::new(frame.shell.begin_crusaders_catalog(), "/catalog/loading");
+            frame.crusaders_catalog.begin(key.clone());
             cx.notify();
             key
         });
@@ -4683,7 +4692,7 @@ mod tests {
         assert!(cx.debug_bounds("save-catalog-loading").is_some());
 
         frame.update(cx, |frame, cx| {
-            assert!(frame.save_catalog.finish_failed(
+            assert!(frame.crusaders_catalog.finish_failed(
                 loading_key,
                 CatalogRequestError::Installation(InstallationError::RootMissing {
                     game: Game::Crusaders,
@@ -4696,13 +4705,14 @@ mod tests {
         assert!(cx.debug_bounds("save-catalog-failed").is_some());
 
         frame.update(cx, |frame, cx| {
-            let key = SaveCatalogKey::new(frame.shell.begin_save_catalog(), "/catalog/ready");
-            frame.save_catalog.begin(key.clone());
-            assert!(
-                frame
-                    .save_catalog
-                    .finish_ready(key, Arc::new(missing_name_dictionary()), 2,)
-            );
+            let key =
+                CrusadersCatalogKey::new(frame.shell.begin_crusaders_catalog(), "/catalog/ready");
+            frame.crusaders_catalog.begin(key.clone());
+            assert!(frame.crusaders_catalog.finish_ready(
+                key,
+                Arc::new(missing_name_dictionary()),
+                2,
+            ));
             frame.select_save_section(document, SaveSection::Units, cx);
             cx.notify();
         });

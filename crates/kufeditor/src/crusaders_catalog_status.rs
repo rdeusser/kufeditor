@@ -5,47 +5,47 @@ use std::{
 
 use kufeditor_game::NameDictionary;
 
-use crate::{catalog_status::CatalogRequestError, state::SaveCatalogRequestID};
+use crate::{catalog_status::CatalogRequestError, state::CrusadersCatalogRequestID};
 
 #[derive(Debug)]
-pub(crate) enum SaveCatalogStatus {
+pub(crate) enum CrusadersCatalogStatus {
     NotConfigured,
     Dormant,
     Loading {
-        key: SaveCatalogKey,
+        key: CrusadersCatalogKey,
     },
     Ready {
-        key: SaveCatalogKey,
+        key: CrusadersCatalogKey,
         dictionary: Arc<NameDictionary>,
         issue_count: usize,
     },
     Failed {
-        key: SaveCatalogKey,
+        key: CrusadersCatalogKey,
         error: CatalogRequestError,
     },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SaveCatalogKey {
-    request: SaveCatalogRequestID,
+pub(crate) struct CrusadersCatalogKey {
+    request: CrusadersCatalogRequestID,
     root: PathBuf,
 }
 
-pub(crate) struct SaveCatalogSession {
-    status: SaveCatalogStatus,
-    retained: Option<SaveCatalogStatus>,
+pub(crate) struct CrusadersCatalogSession {
+    status: CrusadersCatalogStatus,
+    retained: Option<CrusadersCatalogStatus>,
     root: Option<PathBuf>,
 }
 
-impl SaveCatalogKey {
-    pub(crate) fn new(request: SaveCatalogRequestID, root: impl Into<PathBuf>) -> Self {
+impl CrusadersCatalogKey {
+    pub(crate) fn new(request: CrusadersCatalogRequestID, root: impl Into<PathBuf>) -> Self {
         Self {
             request,
             root: root.into(),
         }
     }
 
-    pub(crate) const fn request(&self) -> SaveCatalogRequestID {
+    pub(crate) const fn request(&self) -> CrusadersCatalogRequestID {
         self.request
     }
 
@@ -54,11 +54,11 @@ impl SaveCatalogKey {
     }
 }
 
-impl SaveCatalogSession {
-    pub(crate) fn begin(&mut self, key: SaveCatalogKey) {
+impl CrusadersCatalogSession {
+    pub(crate) fn begin(&mut self, key: CrusadersCatalogKey) {
         self.root = Some(key.root.clone());
         self.retained = None;
-        self.status = SaveCatalogStatus::Loading { key };
+        self.status = CrusadersCatalogStatus::Loading { key };
     }
 
     pub(crate) fn activate(&mut self, root: &Path) -> bool {
@@ -67,10 +67,10 @@ impl SaveCatalogSession {
         }
 
         match &self.status {
-            SaveCatalogStatus::Loading { key }
-            | SaveCatalogStatus::Ready { key, .. }
-            | SaveCatalogStatus::Failed { key, .. } => key.root() == root,
-            SaveCatalogStatus::Dormant => {
+            CrusadersCatalogStatus::Loading { key }
+            | CrusadersCatalogStatus::Ready { key, .. }
+            | CrusadersCatalogStatus::Failed { key, .. } => key.root() == root,
+            CrusadersCatalogStatus::Dormant => {
                 if !self
                     .retained
                     .as_ref()
@@ -83,7 +83,7 @@ impl SaveCatalogSession {
                 }
                 true
             }
-            SaveCatalogStatus::NotConfigured => false,
+            CrusadersCatalogStatus::NotConfigured => false,
         }
     }
 
@@ -92,16 +92,16 @@ impl SaveCatalogSession {
         if root_changed {
             self.root = root.map(ToOwned::to_owned);
             self.retained = None;
-            self.status = SaveCatalogStatus::Dormant;
+            self.status = CrusadersCatalogStatus::Dormant;
             return true;
         }
 
-        let status = std::mem::replace(&mut self.status, SaveCatalogStatus::Dormant);
+        let status = std::mem::replace(&mut self.status, CrusadersCatalogStatus::Dormant);
         match status {
-            SaveCatalogStatus::Loading { .. }
-            | SaveCatalogStatus::Ready { .. }
-            | SaveCatalogStatus::Failed { .. } => self.retained = Some(status),
-            SaveCatalogStatus::NotConfigured | SaveCatalogStatus::Dormant => {}
+            CrusadersCatalogStatus::Loading { .. }
+            | CrusadersCatalogStatus::Ready { .. }
+            | CrusadersCatalogStatus::Failed { .. } => self.retained = Some(status),
+            CrusadersCatalogStatus::NotConfigured | CrusadersCatalogStatus::Dormant => {}
         }
         false
     }
@@ -109,12 +109,12 @@ impl SaveCatalogSession {
     pub(crate) fn not_configured(&mut self) {
         self.root = None;
         self.retained = None;
-        self.status = SaveCatalogStatus::NotConfigured;
+        self.status = CrusadersCatalogStatus::NotConfigured;
     }
 
     pub(crate) fn finish_ready(
         &mut self,
-        key: SaveCatalogKey,
+        key: CrusadersCatalogKey,
         dictionary: Arc<NameDictionary>,
         issue_count: usize,
     ) -> bool {
@@ -123,9 +123,9 @@ impl SaveCatalogSession {
         }
         if matches!(
             &self.status,
-            SaveCatalogStatus::Loading { key: current } if current == &key
+            CrusadersCatalogStatus::Loading { key: current } if current == &key
         ) {
-            self.status = SaveCatalogStatus::Ready {
+            self.status = CrusadersCatalogStatus::Ready {
                 key,
                 dictionary,
                 issue_count,
@@ -134,9 +134,9 @@ impl SaveCatalogSession {
         }
         if matches!(
             self.retained.as_ref(),
-            Some(SaveCatalogStatus::Loading { key: current }) if current == &key
+            Some(CrusadersCatalogStatus::Loading { key: current }) if current == &key
         ) {
-            self.retained = Some(SaveCatalogStatus::Ready {
+            self.retained = Some(CrusadersCatalogStatus::Ready {
                 key,
                 dictionary,
                 issue_count,
@@ -148,7 +148,7 @@ impl SaveCatalogSession {
 
     pub(crate) fn finish_failed(
         &mut self,
-        key: SaveCatalogKey,
+        key: CrusadersCatalogKey,
         error: CatalogRequestError,
     ) -> bool {
         if self.root.as_deref() != Some(key.root()) {
@@ -156,42 +156,42 @@ impl SaveCatalogSession {
         }
         if matches!(
             &self.status,
-            SaveCatalogStatus::Loading { key: current } if current == &key
+            CrusadersCatalogStatus::Loading { key: current } if current == &key
         ) {
-            self.status = SaveCatalogStatus::Failed { key, error };
+            self.status = CrusadersCatalogStatus::Failed { key, error };
             return true;
         }
         if matches!(
             self.retained.as_ref(),
-            Some(SaveCatalogStatus::Loading { key: current }) if current == &key
+            Some(CrusadersCatalogStatus::Loading { key: current }) if current == &key
         ) {
-            self.retained = Some(SaveCatalogStatus::Failed { key, error });
+            self.retained = Some(CrusadersCatalogStatus::Failed { key, error });
             return true;
         }
         false
     }
 
-    pub(crate) const fn status(&self) -> &SaveCatalogStatus {
+    pub(crate) const fn status(&self) -> &CrusadersCatalogStatus {
         &self.status
     }
 }
 
-impl Default for SaveCatalogSession {
+impl Default for CrusadersCatalogSession {
     fn default() -> Self {
         Self {
-            status: SaveCatalogStatus::Dormant,
+            status: CrusadersCatalogStatus::Dormant,
             retained: None,
             root: None,
         }
     }
 }
 
-fn status_has_root(status: &SaveCatalogStatus, root: &Path) -> bool {
+fn status_has_root(status: &CrusadersCatalogStatus, root: &Path) -> bool {
     match status {
-        SaveCatalogStatus::Loading { key }
-        | SaveCatalogStatus::Ready { key, .. }
-        | SaveCatalogStatus::Failed { key, .. } => key.root() == root,
-        SaveCatalogStatus::NotConfigured | SaveCatalogStatus::Dormant => false,
+        CrusadersCatalogStatus::Loading { key }
+        | CrusadersCatalogStatus::Ready { key, .. }
+        | CrusadersCatalogStatus::Failed { key, .. } => key.root() == root,
+        CrusadersCatalogStatus::NotConfigured | CrusadersCatalogStatus::Dormant => false,
     }
 }
 
@@ -199,20 +199,20 @@ fn status_has_root(status: &SaveCatalogStatus, root: &Path) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::SaveCatalogKey;
+    use super::CrusadersCatalogKey;
     use crate::state::ShellState;
 
     #[test]
-    fn save_catalog_keys_include_the_request_and_exact_root() {
+    fn crusaders_catalog_keys_include_the_request_and_exact_root() {
         let mut shell = ShellState::default();
-        let request = shell.begin_save_catalog();
-        let key = SaveCatalogKey::new(request, "/games/crusaders");
+        let request = shell.begin_crusaders_catalog();
+        let key = CrusadersCatalogKey::new(request, "/games/crusaders");
 
         assert_eq!(key.request(), request);
         assert_eq!(key.root(), Path::new("/games/crusaders"));
         assert_ne!(
             key,
-            SaveCatalogKey::new(request, "/games/crusaders/../crusaders")
+            CrusadersCatalogKey::new(request, "/games/crusaders/../crusaders")
         );
     }
 }

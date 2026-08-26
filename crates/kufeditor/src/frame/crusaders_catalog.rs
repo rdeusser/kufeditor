@@ -5,19 +5,22 @@ use kufeditor_game::{CatalogLoad, Game, GameInstallation, NameDictionary, load_n
 use kufeditor_workspace::DocumentKind;
 
 use super::AppFrame;
-use crate::{catalog_status::CatalogRequestError, save_catalog_status::SaveCatalogKey};
+use crate::{catalog_status::CatalogRequestError, crusaders_catalog_status::CrusadersCatalogKey};
 
 impl AppFrame {
-    pub(crate) fn reconcile_save_catalog(&mut self, cx: &mut Context<Self>) {
-        let previous_dictionary = self.visible_save_dictionary();
-        let active_save = self.active_document.is_some_and(|document| {
-            self.workspace.document_kind(document).ok() == Some(DocumentKind::CrusadersSave)
+    pub(crate) fn reconcile_crusaders_catalog(&mut self, cx: &mut Context<Self>) {
+        let previous_dictionary = self.visible_crusaders_dictionary();
+        let active_crusaders_document = self.active_document.is_some_and(|document| {
+            matches!(
+                self.workspace.document_kind(document),
+                Ok(DocumentKind::CrusadersSave | DocumentKind::CrusadersSTG)
+            )
         });
         let root = self.game_paths.root(Game::Crusaders).map(ToOwned::to_owned);
 
-        if !active_save {
-            if self.save_catalog.dormant(root.as_deref()) {
-                self.shell.invalidate_save_catalog();
+        if !active_crusaders_document {
+            if self.crusaders_catalog.dormant(root.as_deref()) {
+                self.shell.invalidate_crusaders_catalog();
             }
             self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
@@ -25,26 +28,26 @@ impl AppFrame {
         }
 
         let Some(root) = root else {
-            self.shell.invalidate_save_catalog();
-            self.save_catalog.not_configured();
+            self.shell.invalidate_crusaders_catalog();
+            self.crusaders_catalog.not_configured();
             self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         };
 
-        if self.save_catalog.activate(&root) {
+        if self.crusaders_catalog.activate(&root) {
             self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         }
 
-        self.shell.invalidate_save_catalog();
-        let request = self.shell.begin_save_catalog();
-        let key = SaveCatalogKey::new(request, root);
-        self.save_catalog.begin(key.clone());
+        self.shell.invalidate_crusaders_catalog();
+        let request = self.shell.begin_crusaders_catalog();
+        let key = CrusadersCatalogKey::new(request, root);
+        self.crusaders_catalog.begin(key.clone());
         #[cfg(test)]
         {
-            self.task_launches.save_catalog += 1;
+            self.task_launches.crusaders_catalog += 1;
         }
         self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
         cx.notify();
@@ -58,31 +61,31 @@ impl AppFrame {
         cx.spawn(async move |entity, cx| {
             let result = task.await;
             let _ = entity.update(cx, move |frame, cx| {
-                frame.finish_save_catalog_load(key, result, cx);
+                frame.finish_crusaders_catalog_load(key, result, cx);
             });
         })
         .detach();
     }
 
-    fn finish_save_catalog_load(
+    fn finish_crusaders_catalog_load(
         &mut self,
-        key: SaveCatalogKey,
+        key: CrusadersCatalogKey,
         result: Result<CatalogLoad, CatalogRequestError>,
         cx: &mut Context<Self>,
     ) {
-        if !self.shell.accepts_save_catalog(key.request())
+        if !self.shell.accepts_crusaders_catalog(key.request())
             || self.game_paths.root(Game::Crusaders) != Some(key.root())
         {
             return;
         }
 
-        let previous_dictionary = self.visible_save_dictionary();
+        let previous_dictionary = self.visible_crusaders_dictionary();
         let accepted = match result {
             Ok(CatalogLoad { dictionary, issues }) => {
-                self.save_catalog
+                self.crusaders_catalog
                     .finish_ready(key, Arc::new(dictionary), issues.len())
             }
-            Err(error) => self.save_catalog.finish_failed(key, error),
+            Err(error) => self.crusaders_catalog.finish_failed(key, error),
         };
         if accepted {
             self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
@@ -90,15 +93,15 @@ impl AppFrame {
         }
     }
 
-    fn visible_save_dictionary(&self) -> Option<Arc<NameDictionary>> {
-        match self.save_catalog.status() {
-            crate::save_catalog_status::SaveCatalogStatus::Ready { dictionary, .. } => {
-                Some(Arc::clone(dictionary))
-            }
-            crate::save_catalog_status::SaveCatalogStatus::NotConfigured
-            | crate::save_catalog_status::SaveCatalogStatus::Dormant
-            | crate::save_catalog_status::SaveCatalogStatus::Loading { .. }
-            | crate::save_catalog_status::SaveCatalogStatus::Failed { .. } => None,
+    pub(super) fn visible_crusaders_dictionary(&self) -> Option<Arc<NameDictionary>> {
+        match self.crusaders_catalog.status() {
+            crate::crusaders_catalog_status::CrusadersCatalogStatus::Ready {
+                dictionary, ..
+            } => Some(Arc::clone(dictionary)),
+            crate::crusaders_catalog_status::CrusadersCatalogStatus::NotConfigured
+            | crate::crusaders_catalog_status::CrusadersCatalogStatus::Dormant
+            | crate::crusaders_catalog_status::CrusadersCatalogStatus::Loading { .. }
+            | crate::crusaders_catalog_status::CrusadersCatalogStatus::Failed { .. } => None,
         }
     }
 
@@ -107,7 +110,7 @@ impl AppFrame {
         previous: Option<Arc<NameDictionary>>,
         cx: &mut Context<Self>,
     ) {
-        let current = self.visible_save_dictionary();
+        let current = self.visible_crusaders_dictionary();
         let unchanged = match (previous, current) {
             (Some(previous), Some(current)) => Arc::ptr_eq(&previous, &current),
             (None, None) => true,
@@ -139,17 +142,17 @@ mod tests {
         CatalogLoad, CatalogRole, Game, GameInstallation, InstallationError, load_name_dictionary,
     };
     use kufeditor_workspace::{
-        Document, DocumentID, SaveDocument, SaveNumberTarget, SaveUnitField, TroopDocument,
-        TroopField, load_path,
+        Document, DocumentID, STGDocument, SaveDocument, SaveNumberTarget, SaveUnitField,
+        TroopDocument, TroopField, load_path,
     };
     use tempfile::TempDir;
 
     use super::super::{ActiveNumberEdit, AppFrame};
     use crate::{
         catalog_status::{CatalogKey, CatalogRequestError, CatalogStatus},
+        crusaders_catalog_status::{CrusadersCatalogKey, CrusadersCatalogStatus},
         notices::{Notice, NoticeSource},
         number_edit::{NumberCommand, NumberOutcome},
-        save_catalog_status::{SaveCatalogKey, SaveCatalogStatus},
         settings::SettingsStartup,
         state::SaveSection,
         test_support::SaveFixture,
@@ -234,6 +237,16 @@ mod tests {
         bytes
     }
 
+    fn stg_fixture() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        append_u32(&mut bytes, 1_001);
+        bytes.resize(bytes.len() + 620, 0);
+        for _ in 0..5 {
+            append_u32(&mut bytes, 0);
+        }
+        bytes
+    }
+
     fn append_u32(bytes: &mut Vec<u8>, value: u32) {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
@@ -274,44 +287,51 @@ mod tests {
         )
     }
 
+    fn open_stg(frame: &mut AppFrame, path: &str) -> DocumentID {
+        frame.workspace.open_loaded(
+            PathBuf::from(path),
+            Document::STG(STGDocument::parse(stg_fixture()).unwrap()),
+        )
+    }
+
     fn open_sox(frame: &mut AppFrame, path: &str) -> DocumentID {
         frame
             .workspace
             .open_loaded(PathBuf::from(path), Document::Troop(troop_document()))
     }
 
-    fn visible_key(frame: &AppFrame) -> SaveCatalogKey {
-        match frame.save_catalog.status() {
-            SaveCatalogStatus::Loading { key }
-            | SaveCatalogStatus::Ready { key, .. }
-            | SaveCatalogStatus::Failed { key, .. } => key.clone(),
-            SaveCatalogStatus::NotConfigured | SaveCatalogStatus::Dormant => {
-                panic!("save catalog does not have a visible key")
+    fn visible_key(frame: &AppFrame) -> CrusadersCatalogKey {
+        match frame.crusaders_catalog.status() {
+            CrusadersCatalogStatus::Loading { key }
+            | CrusadersCatalogStatus::Ready { key, .. }
+            | CrusadersCatalogStatus::Failed { key, .. } => key.clone(),
+            CrusadersCatalogStatus::NotConfigured | CrusadersCatalogStatus::Dormant => {
+                panic!("Crusaders catalog does not have a visible key")
             }
         }
     }
 
     #[gpui::test]
-    fn no_active_save_or_active_sox_keeps_the_save_catalog_dormant(cx: &mut TestAppContext) {
+    fn no_active_crusaders_document_keeps_the_crusaders_catalog_dormant(cx: &mut TestAppContext) {
         let window = test_window(cx);
 
         window
             .update(cx, |frame, _, cx| {
                 frame.shell.select_game(Game::Heroes);
-                frame.reconcile_save_catalog(cx);
+                frame.reconcile_crusaders_catalog(cx);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Dormant
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Dormant
                 ));
 
                 let sox = open_sox(frame, "TroopInfo.sox");
                 frame.activate_document(sox, cx);
 
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Dormant
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Dormant
                 ));
-                assert_eq!(frame.task_launches.save_catalog, 0);
+                assert_eq!(frame.task_launches.crusaders_catalog, 0);
             })
             .unwrap();
     }
@@ -326,10 +346,28 @@ mod tests {
                 frame.activate_document(save, cx);
 
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::NotConfigured
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::NotConfigured
                 ));
-                assert_eq!(frame.task_launches.save_catalog, 0);
+                assert_eq!(frame.task_launches.crusaders_catalog, 0);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn active_stg_without_a_crusaders_root_is_not_configured(cx: &mut TestAppContext) {
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                let stg = open_stg(frame, "mission.stg");
+                frame.activate_document(stg, cx);
+
+                assert!(matches!(
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::NotConfigured
+                ));
+                assert_eq!(frame.task_launches.crusaders_catalog, 0);
             })
             .unwrap();
     }
@@ -349,13 +387,168 @@ mod tests {
                 frame.activate_document(save, cx);
 
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Loading { key } if key.root() == root
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Loading { key } if key.root() == root
                 ));
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
 
-                frame.reconcile_save_catalog(cx);
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                frame.reconcile_crusaders_catalog(cx);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn crusaders_catalog_reuses_one_request_from_save_to_stg(cx: &mut TestAppContext) {
+        let tree = CatalogTree::with_troop_catalog();
+        let root = tree.root.clone();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.shell.select_game(Game::Heroes);
+                let global_request = frame.shell.begin_catalog();
+                let global_key = CatalogKey::new(global_request, Game::Heroes, "/heroes");
+                frame.catalog.begin(global_key.clone());
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(root.clone()));
+                let save = open_save(frame, "campaign.sav");
+                let stg = open_stg(frame, "mission.stg");
+                frame.activate_document(save, cx);
+                let key = visible_key(frame);
+
+                frame.activate_document(stg, cx);
+                assert!(matches!(
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Loading { key: current } if current == &key
+                ));
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
+                assert_eq!(frame.shell.game(), Game::Heroes);
+                assert!(frame.shell.accepts_catalog(global_request));
+                assert!(matches!(
+                    frame.catalog.status(),
+                    CatalogStatus::Loading { key } if key == &global_key
+                ));
+
+                frame.finish_crusaders_catalog_load(key.clone(), Ok(tree.load()), cx);
+                let CrusadersCatalogStatus::Ready {
+                    dictionary,
+                    key: ready,
+                    ..
+                } = frame.crusaders_catalog.status()
+                else {
+                    panic!("Crusaders catalog did not become ready for STG");
+                };
+                assert_eq!(ready, &key);
+                let dictionary = Arc::clone(dictionary);
+
+                frame.activate_document(save, cx);
+                assert!(matches!(
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Ready {
+                        dictionary: current,
+                        key: ready,
+                        ..
+                    } if ready == &key && Arc::ptr_eq(current, &dictionary)
+                ));
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
+                assert_eq!(frame.shell.game(), Game::Heroes);
+                assert!(frame.shell.accepts_catalog(global_request));
+                assert!(matches!(
+                    frame.catalog.status(),
+                    CatalogStatus::Loading { key } if key == &global_key
+                ));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn crusaders_catalog_reuses_one_request_from_stg_to_save(cx: &mut TestAppContext) {
+        let tree = CatalogTree::with_troop_catalog();
+        let root = tree.root.clone();
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.shell.select_game(Game::Heroes);
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(root.clone()));
+                let stg = open_stg(frame, "mission.stg");
+                let save = open_save(frame, "campaign.sav");
+                frame.activate_document(stg, cx);
+                let key = visible_key(frame);
+
+                frame.activate_document(save, cx);
+                assert!(matches!(
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Loading { key: current } if current == &key
+                ));
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
+                assert_eq!(frame.shell.game(), Game::Heroes);
+
+                frame.finish_crusaders_catalog_load(key.clone(), Ok(tree.load()), cx);
+                assert!(matches!(
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Ready { key: ready, .. } if ready == &key
+                ));
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn crusaders_catalog_rejects_old_root_results_for_an_active_stg(cx: &mut TestAppContext) {
+        let dictionary = CatalogTree::with_troop_catalog();
+        let old_root = PathBuf::from("/old/crusaders");
+        let new_root = PathBuf::from("/new/crusaders");
+        let window = test_window(cx);
+
+        window
+            .update(cx, |frame, _, cx| {
+                frame.shell.select_game(Game::Heroes);
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(old_root.clone()));
+                let stg = open_stg(frame, "mission.stg");
+                let sox = open_sox(frame, "TroopInfo.sox");
+                frame.activate_document(stg, cx);
+                let old_key = visible_key(frame);
+
+                frame
+                    .game_paths
+                    .set_root(Game::Crusaders, Some(new_root.clone()));
+                frame.reconcile_crusaders_catalog(cx);
+                let new_key = visible_key(frame);
+                assert_ne!(new_key.request(), old_key.request());
+                assert_eq!(new_key.root(), new_root);
+                assert_eq!(frame.task_launches.crusaders_catalog, 2);
+
+                frame.finish_crusaders_catalog_load(old_key.clone(), Ok(dictionary.load()), cx);
+                frame.finish_crusaders_catalog_load(
+                    old_key,
+                    Err(CatalogRequestError::Installation(
+                        InstallationError::RootMissing {
+                            game: Game::Crusaders,
+                            root: old_root,
+                        },
+                    )),
+                    cx,
+                );
+                assert!(matches!(
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Loading { key } if key == &new_key
+                ));
+                assert!(frame.shell.accepts_crusaders_catalog(new_key.request()));
+                assert_eq!(frame.shell.game(), Game::Heroes);
+
+                frame.activate_document(sox, cx);
+                assert!(matches!(
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Dormant
+                ));
+                assert_eq!(frame.shell.game(), Game::Heroes);
             })
             .unwrap();
     }
@@ -380,16 +573,16 @@ mod tests {
 
         let first_dictionary = window
             .update(cx, |frame, _, cx| {
-                let dictionary = match frame.save_catalog.status() {
-                    SaveCatalogStatus::Ready {
+                let dictionary = match frame.crusaders_catalog.status() {
+                    CrusadersCatalogStatus::Ready {
                         dictionary,
                         issue_count,
                         key,
                     } if key.root() == root && *issue_count > 0 => Arc::clone(dictionary),
-                    _ => panic!("save catalog did not become ready"),
+                    _ => panic!("Crusaders catalog did not become ready"),
                 };
                 assert_eq!(dictionary.troop_name(2), Some("Footman"));
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
 
                 frame.activate_document(second, cx);
                 dictionary
@@ -398,15 +591,15 @@ mod tests {
 
         window
             .update(cx, |frame, _, _| {
-                let SaveCatalogStatus::Ready {
+                let CrusadersCatalogStatus::Ready {
                     dictionary: second_dictionary,
                     ..
-                } = frame.save_catalog.status()
+                } = frame.crusaders_catalog.status()
                 else {
                     panic!("ready dictionary was not reused");
                 };
                 assert!(Arc::ptr_eq(&first_dictionary, second_dictionary));
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
                 assert_eq!(frame.active_document, Some(second));
                 assert_ne!(frame.active_document, Some(first));
             })
@@ -466,7 +659,7 @@ mod tests {
                     NumberOutcome::Continue,
                 );
 
-                frame.finish_save_catalog_load(key, Ok(tree.load()), cx);
+                frame.finish_crusaders_catalog_load(key, Ok(tree.load()), cx);
                 app_window.focus(&frame.focus);
                 (document, target)
             })
@@ -532,7 +725,7 @@ mod tests {
                     TroopField::MoveSpeed,
                     0,
                 ));
-                frame.finish_save_catalog_load(key, Ok(tree.load()), cx);
+                frame.finish_crusaders_catalog_load(key, Ok(tree.load()), cx);
                 assert!(frame.number_edit.is_some());
 
                 frame.activate_document(save, cx);
@@ -565,15 +758,15 @@ mod tests {
             .update(cx, |frame, _, cx| {
                 let failed = visible_key(frame);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Failed { key, .. } if key == &failed
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Failed { key, .. } if key == &failed
                 ));
-                frame.reconcile_save_catalog(cx);
+                frame.reconcile_crusaders_catalog(cx);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Failed { key, .. } if key == &failed
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Failed { key, .. } if key == &failed
                 ));
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
             })
             .unwrap();
     }
@@ -597,15 +790,15 @@ mod tests {
                 frame
                     .game_paths
                     .set_root(Game::Crusaders, Some(new_root.clone()));
-                frame.reconcile_save_catalog(cx);
+                frame.reconcile_crusaders_catalog(cx);
                 let new_key = visible_key(frame);
 
                 assert_ne!(old_key.request(), new_key.request());
                 assert_eq!(new_key.root(), new_root);
-                assert_eq!(frame.task_launches.save_catalog, 2);
+                assert_eq!(frame.task_launches.crusaders_catalog, 2);
 
-                frame.finish_save_catalog_load(old_key.clone(), Ok(dictionary.load()), cx);
-                frame.finish_save_catalog_load(
+                frame.finish_crusaders_catalog_load(old_key.clone(), Ok(dictionary.load()), cx);
+                frame.finish_crusaders_catalog_load(
                     old_key,
                     Err(CatalogRequestError::Installation(
                         InstallationError::RootMissing {
@@ -617,10 +810,10 @@ mod tests {
                 );
 
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Loading { key } if key == &new_key
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Loading { key } if key == &new_key
                 ));
-                assert!(frame.shell.accepts_save_catalog(new_key.request()));
+                assert!(frame.shell.accepts_crusaders_catalog(new_key.request()));
             })
             .unwrap();
     }
@@ -643,29 +836,29 @@ mod tests {
 
                 frame.activate_document(sox, cx);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Dormant
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Dormant
                 ));
 
-                frame.finish_save_catalog_load(key, Ok(tree.load()), cx);
+                frame.finish_crusaders_catalog_load(key, Ok(tree.load()), cx);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Dormant
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Dormant
                 ));
 
                 frame.activate_document(save, cx);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Ready { dictionary, key, .. }
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Ready { dictionary, key, .. }
                         if key.root() == root && dictionary.troop_name(2) == Some("Footman")
                 ));
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
             })
             .unwrap();
     }
 
     #[gpui::test]
-    fn successful_open_and_cross_document_selection_reconcile_the_save_catalog(
+    fn successful_open_and_cross_document_selection_reconcile_the_crusaders_catalog(
         cx: &mut TestAppContext,
     ) {
         let tree = CatalogTree::with_troop_catalog();
@@ -685,10 +878,10 @@ mod tests {
                 frame.finish_open_paths(request, vec![(save_path.clone(), Ok(loaded))], cx);
 
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Loading { key } if key.root() == root
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Loading { key } if key.root() == root
                 ));
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
                 frame.active_document.unwrap()
             })
             .unwrap();
@@ -698,16 +891,16 @@ mod tests {
                 let sox = open_sox(frame, "TroopInfo.sox");
                 frame.activate_document(sox, cx);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Dormant
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Dormant
                 ));
 
                 frame.select_record(opened, 0, cx);
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Loading { .. }
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Loading { .. }
                 ));
-                assert_eq!(frame.task_launches.save_catalog, 1);
+                assert_eq!(frame.task_launches.crusaders_catalog, 1);
             })
             .unwrap();
     }
@@ -752,9 +945,9 @@ mod tests {
                     Some("Loading Heroes catalogs")
                 );
 
-                let save_key = visible_key(frame);
+                let crusaders_key = visible_key(frame);
 
-                frame.finish_save_catalog_load(save_key, Ok(tree.load()), cx);
+                frame.finish_crusaders_catalog_load(crusaders_key, Ok(tree.load()), cx);
 
                 assert_eq!(frame.shell.game(), Game::Heroes);
                 assert_eq!(frame.game_paths, paths);
@@ -788,7 +981,7 @@ mod tests {
                 let key = visible_key(frame);
                 assert!(frame.notices.current().is_none());
 
-                frame.finish_save_catalog_load(
+                frame.finish_crusaders_catalog_load(
                     key.clone(),
                     Err(CatalogRequestError::Installation(
                         InstallationError::RootMissing {
@@ -800,8 +993,8 @@ mod tests {
                 );
 
                 assert!(matches!(
-                    frame.save_catalog.status(),
-                    SaveCatalogStatus::Failed {
+                    frame.crusaders_catalog.status(),
+                    CrusadersCatalogStatus::Failed {
                         key: current,
                         error: CatalogRequestError::Installation(
                             InstallationError::RootMissing { game, root: failed_root }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{borrow::Cow, collections::HashMap, path::Path};
 
 use encoding_rs::EUC_KR;
 
@@ -12,6 +12,7 @@ use crate::{
 };
 
 const MAX_STANDARD_JOB_TYPE: u32 = 42;
+const STG_CHARACTER_JOB_TYPES: [u8; 11] = [32, 33, 34, 35, 36, 37, 38, 43, 44, 46, 47];
 
 #[derive(Debug)]
 pub struct NameDictionary {
@@ -21,6 +22,7 @@ pub struct NameDictionary {
     weapon_types: Vec<Vec<RawWeaponVariant>>,
     item_attributes: HashMap<u32, ItemAttribute>,
     item_type_prefixes: HashMap<u32, [Option<String>; 3]>,
+    special_names: Vec<(String, String)>,
     forward_translations: HashMap<String, String>,
     reverse_translations: HashMap<String, String>,
     reverse_phrases: Vec<(String, String)>,
@@ -42,6 +44,11 @@ struct TranslationMaps {
     forward: HashMap<String, String>,
     reverse: HashMap<String, String>,
     phrases: Vec<(String, String)>,
+}
+
+struct DecodedSpecialNames {
+    entries: Vec<(String, String)>,
+    translations: Vec<(String, String)>,
 }
 
 pub fn load_name_dictionary(sox_directory: &Path) -> Result<CatalogLoad, CatalogLoadError> {
@@ -80,7 +87,11 @@ pub fn load_name_dictionary(sox_directory: &Path) -> Result<CatalogLoad, Catalog
     let item_type_prefixes =
         decode_item_type_prefixes(raw_item_type_prefixes, sox_directory, &mut issues);
 
-    if troop_names.is_empty() && character_names.is_empty() && special_names.is_empty() {
+    let has_usable_special_name = special_names
+        .entries
+        .iter()
+        .any(|(_, display)| !display.is_empty());
+    if troop_names.is_empty() && character_names.is_empty() && !has_usable_special_name {
         return Err(CatalogLoadError::NoUsableCatalogs { issues });
     }
 
@@ -88,7 +99,7 @@ pub fn load_name_dictionary(sox_directory: &Path) -> Result<CatalogLoad, Catalog
         forward: forward_translations,
         reverse: reverse_translations,
         phrases: reverse_phrases,
-    } = build_translation_maps(special_names);
+    } = build_translation_maps(&special_names.translations);
 
     Ok(CatalogLoad {
         dictionary: NameDictionary {
@@ -98,6 +109,7 @@ pub fn load_name_dictionary(sox_directory: &Path) -> Result<CatalogLoad, Catalog
             weapon_types,
             item_attributes,
             item_type_prefixes,
+            special_names: special_names.entries,
             forward_translations,
             reverse_translations,
             reverse_phrases,
@@ -151,6 +163,46 @@ impl NameDictionary {
 
         let character_index = u8::try_from(job_type).ok()?;
         self.character_name(character_index)
+    }
+
+    pub fn stg_unit_name<'a>(
+        &'a self,
+        internal_name: &'a str,
+        job_type: u8,
+        model_id: u8,
+    ) -> Cow<'a, str> {
+        let uses_special_name = internal_name.starts_with('-')
+            || (job_type == 6 && model_id > 12)
+            || (job_type == 19 && model_id > 6);
+        if uses_special_name
+            && let Some((_, display)) = self
+                .special_names
+                .iter()
+                .find(|(prefix, _)| ascii_prefix_matches(prefix, internal_name))
+            && !display.is_empty()
+        {
+            return Cow::Borrowed(display);
+        }
+
+        if ((job_type == 26 && model_id < 1) || STG_CHARACTER_JOB_TYPES.contains(&job_type))
+            && let Some(name) = self.character_name(job_type)
+        {
+            return Cow::Borrowed(name);
+        }
+
+        if u32::from(job_type) <= MAX_STANDARD_JOB_TYPE
+            && let Some(name) = self.troop_name(u32::from(job_type))
+        {
+            return Cow::Borrowed(name);
+        }
+
+        if let Some(translated) = self.translate(internal_name) {
+            return Cow::Owned(translated);
+        }
+        if !internal_name.is_empty() {
+            return Cow::Borrowed(internal_name);
+        }
+        Cow::Borrowed("Unknown")
     }
 
     pub fn weapon_name(
@@ -318,12 +370,13 @@ fn decode_special_names(
     raw_displays: &[Vec<u8>],
     sox_directory: &Path,
     issues: &mut Vec<CatalogIssue>,
-) -> Vec<(String, String)> {
+) -> DecodedSpecialNames {
     let key_role = CatalogRole::SpecialNameKeys;
     let display_role = CatalogRole::SpecialDisplayNames;
     let key_path = role_path(sox_directory, key_role);
     let display_path = role_path(sox_directory, display_role);
-    let mut pairs = Vec::new();
+    let mut entries = Vec::new();
+    let mut translations = Vec::new();
     let decoded_displays = raw_displays
         .iter()
         .enumerate()
@@ -332,7 +385,7 @@ fn decode_special_names(
 
     for (record, raw_name) in raw_names.iter().enumerate() {
         let decoded_key = decode_cp949(&raw_name.key, key_role, &key_path, record, 0, issues);
-        let key = decoded_key.as_deref().and_then(normalize_dynamic_value);
+        let key = decoded_key.as_deref().filter(|value| !value.is_empty());
         let default_value = decode_cp949(
             &raw_name.default_value,
             key_role,
@@ -344,15 +397,24 @@ fn decode_special_names(
         let localized = decoded_displays.get(record).and_then(Option::as_deref);
         let display = localized
             .filter(|value| !value.is_empty())
-            .or_else(|| default_value.as_deref().filter(|value| !value.is_empty()))
-            .and_then(normalize_dynamic_value);
+            .or(default_value.as_deref())
+            .unwrap_or_default();
 
-        if let (Some(key), Some(display)) = (key, display) {
-            pairs.push((key, display));
+        if let Some(key) = key {
+            entries.push((key.to_owned(), display.to_owned()));
+            if let (Some(key), Some(display)) = (
+                normalize_dynamic_value(key),
+                normalize_dynamic_value(display),
+            ) {
+                translations.push((key, display));
+            }
         }
     }
 
-    pairs
+    DecodedSpecialNames {
+        entries,
+        translations,
+    }
 }
 
 fn decode_item_attributes(
@@ -463,9 +525,16 @@ fn strip_delimiters(mut value: &str) -> &str {
     value
 }
 
-fn build_translation_maps(dynamic_pairs: Vec<(String, String)>) -> TranslationMaps {
+fn ascii_prefix_matches(prefix: &str, value: &str) -> bool {
+    value
+        .as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+fn build_translation_maps(dynamic_pairs: &[(String, String)]) -> TranslationMaps {
     let mut forward = HashMap::new();
-    for (key, display) in &dynamic_pairs {
+    for (key, display) in dynamic_pairs {
         forward.insert(key.clone(), display.clone());
     }
     for &(key, display) in STATIC_TRANSLATIONS {
@@ -479,7 +548,9 @@ fn build_translation_maps(dynamic_pairs: Vec<(String, String)>) -> TranslationMa
             .or_insert_with(|| key.to_owned());
     }
     for (key, display) in dynamic_pairs {
-        reverse.entry(display).or_insert(key);
+        reverse
+            .entry(display.clone())
+            .or_insert_with(|| key.clone());
     }
 
     let mut phrases = reverse

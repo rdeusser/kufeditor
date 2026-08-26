@@ -385,9 +385,9 @@ impl RequestID {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SaveCatalogRequestID(u64);
+pub struct CrusadersCatalogRequestID(u64);
 
-impl SaveCatalogRequestID {
+impl CrusadersCatalogRequestID {
     #[cfg(test)]
     pub const fn get(self) -> u64 {
         self.0
@@ -462,10 +462,10 @@ pub struct ShellState {
     area: Area,
     game: Game,
     next_request_id: u64,
-    next_save_catalog_request_id: u64,
+    next_crusaders_catalog_request_id: u64,
     active_open_request: Option<RequestID>,
     active_catalog_request: Option<RequestID>,
-    active_save_catalog_request: Option<SaveCatalogRequestID>,
+    active_crusaders_catalog_request: Option<CrusadersCatalogRequestID>,
     active_crusaders_browse_request: Option<RequestID>,
     active_heroes_browse_request: Option<RequestID>,
     active_discovery_request: Option<RequestID>,
@@ -521,19 +521,19 @@ impl ShellState {
         self.active_catalog_request = None;
     }
 
-    pub fn begin_save_catalog(&mut self) -> SaveCatalogRequestID {
-        self.next_save_catalog_request_id += 1;
-        let request = SaveCatalogRequestID(self.next_save_catalog_request_id);
-        self.active_save_catalog_request = Some(request);
+    pub fn begin_crusaders_catalog(&mut self) -> CrusadersCatalogRequestID {
+        self.next_crusaders_catalog_request_id += 1;
+        let request = CrusadersCatalogRequestID(self.next_crusaders_catalog_request_id);
+        self.active_crusaders_catalog_request = Some(request);
         request
     }
 
-    pub fn accepts_save_catalog(&self, request: SaveCatalogRequestID) -> bool {
-        self.active_save_catalog_request == Some(request)
+    pub fn accepts_crusaders_catalog(&self, request: CrusadersCatalogRequestID) -> bool {
+        self.active_crusaders_catalog_request == Some(request)
     }
 
-    pub fn invalidate_save_catalog(&mut self) {
-        self.active_save_catalog_request = None;
+    pub fn invalidate_crusaders_catalog(&mut self) {
+        self.active_crusaders_catalog_request = None;
     }
 
     pub fn begin_browse(&mut self, game: Game) -> RequestID {
@@ -628,40 +628,40 @@ mod tests {
     }
 
     #[test]
-    fn global_and_save_catalog_requests_use_independent_generations() {
+    fn global_and_crusaders_catalog_requests_use_independent_generations() {
         let mut state = ShellState::default();
 
         let first_global = state.begin_catalog();
-        let first_save = state.begin_save_catalog();
+        let first_crusaders = state.begin_crusaders_catalog();
         let second_global = state.begin_catalog();
-        let second_save = state.begin_save_catalog();
+        let second_crusaders = state.begin_crusaders_catalog();
 
         assert_eq!(first_global.get(), 1);
         assert_eq!(second_global.get(), 2);
-        assert_eq!(first_save.get(), 1);
-        assert_eq!(second_save.get(), 2);
+        assert_eq!(first_crusaders.get(), 1);
+        assert_eq!(second_crusaders.get(), 2);
         assert!(!state.accepts_catalog(first_global));
         assert!(state.accepts_catalog(second_global));
-        assert!(!state.accepts_save_catalog(first_save));
-        assert!(state.accepts_save_catalog(second_save));
+        assert!(!state.accepts_crusaders_catalog(first_crusaders));
+        assert!(state.accepts_crusaders_catalog(second_crusaders));
     }
 
     #[test]
-    fn global_and_save_catalog_invalidations_are_independent() {
+    fn global_and_crusaders_catalog_invalidations_are_independent() {
         let mut state = ShellState::default();
         let global = state.begin_catalog();
-        let save = state.begin_save_catalog();
+        let crusaders = state.begin_crusaders_catalog();
 
-        state.invalidate_save_catalog();
+        state.invalidate_crusaders_catalog();
 
         assert!(state.accepts_catalog(global));
-        assert!(!state.accepts_save_catalog(save));
+        assert!(!state.accepts_crusaders_catalog(crusaders));
 
-        let next_save = state.begin_save_catalog();
+        let next_crusaders = state.begin_crusaders_catalog();
         state.invalidate_catalog();
 
         assert!(!state.accepts_catalog(global));
-        assert!(state.accepts_save_catalog(next_save));
+        assert!(state.accepts_crusaders_catalog(next_crusaders));
     }
 
     #[test]
