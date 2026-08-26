@@ -1526,6 +1526,10 @@ impl STGPresentationStates {
 pub struct RequestID(u64);
 
 impl RequestID {
+    pub(crate) const fn from_value(value: u64) -> Self {
+        Self(value)
+    }
+
     pub const fn get(self) -> u64 {
         self.0
     }

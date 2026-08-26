@@ -11,6 +11,7 @@ use gpui::{
     UniformListScrollHandle, WeakEntity, Window, div, px,
 };
 use kufeditor_game::{Game, NameDictionary};
+use kufeditor_mods::{ModService, ModStorePaths};
 use kufeditor_workspace::{
     ApplyOutcome, DiagnosticLocation, DocumentEdit, DocumentID, DocumentKind, LoadedDocument,
     STGEditor, STGFloatTarget, STGFloatValue, STGNumberTarget, STGParameterTarget,
@@ -28,6 +29,7 @@ use crate::{
     components,
     crusaders_catalog_status::CrusadersCatalogSession,
     float_edit::{FloatCommand, FloatEdit, FloatOutcome},
+    mod_status::ModPresentationState,
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
@@ -46,6 +48,7 @@ mod crusaders_catalog;
 mod discovery;
 #[path = "discovery_status.rs"]
 pub(crate) mod discovery_status;
+mod mods;
 mod save;
 mod settings;
 mod stg;
@@ -60,6 +63,7 @@ struct TaskLaunchCounts {
     inspection: usize,
     crusaders_catalog: usize,
     settings: usize,
+    mods: usize,
 }
 
 struct ActiveNumberEdit {
@@ -783,6 +787,10 @@ pub struct AppFrame {
     text_edit: Option<ActiveTextEdit>,
     game_paths: kufeditor_game::GamePaths,
     root_revisions: discovery_status::RootRevisions,
+    mod_stores: ModStorePaths,
+    mod_service: ModService,
+    mods: ModPresentationState,
+    mods_focus: FocusHandle,
     recent_files: kufeditor_workspace::RecentFiles,
     catalog: CatalogSession<NameDictionary, CatalogRequestError>,
     crusaders_catalog: CrusadersCatalogSession,
@@ -812,6 +820,13 @@ impl AppFrame {
             persistence,
             warning,
         } = startup;
+        let application_data = path
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        let mod_stores = ModStorePaths::new(application_data);
+        let mod_service = ModService::new(mod_stores.clone());
+        let mut mods = ModPresentationState::default();
+        let _ = mods.set_context(active_game, 0);
         let settings = SettingsWritePump::new(path, persistence);
         let mut notices = NoticeCenter::default();
         if let Some(warning) = warning {
@@ -845,6 +860,10 @@ impl AppFrame {
             text_edit: None,
             game_paths,
             root_revisions: discovery_status::RootRevisions::default(),
+            mod_stores,
+            mod_service,
+            mods,
+            mods_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             recent_files,
             catalog: CatalogSession::default(),
             crusaders_catalog: CrusadersCatalogSession::default(),
@@ -2086,13 +2105,14 @@ impl AppFrame {
     }
 
     fn select_game(&mut self, game: Game, cx: &mut Context<Self>) {
-        if self.shell.game() == game {
+        if self.shell.game() == game || self.mods.active_operation().is_some() {
             return;
         }
         if !self.schedule_settings_write(game, cx) {
             return;
         }
         self.shell.select_game(game);
+        self.active_mod_context_changed(cx);
         self.cancel_property_edit();
         self.start_catalog_load(cx);
         cx.notify();
@@ -2107,6 +2127,9 @@ impl AppFrame {
         }
         self.shell.select_area(area);
         self.cancel_property_edit();
+        if area == Area::Mods {
+            self.start_mod_scan(cx);
+        }
         if area == Area::Files
             && let Some(document) = self.active_document.filter(|document| {
                 self.workspace.document_kind(*document).ok() == Some(DocumentKind::CrusadersSTG)
@@ -2244,7 +2267,10 @@ impl AppFrame {
                     .map(|document_id| self.document_editor(document_id, cx));
                 views::files::render(&self.theme, self.document_tabs(cx), editor).into_any_element()
             }
-            Area::Mods => views::mods::render(&self.theme).into_any_element(),
+            Area::Mods => {
+                let model = views::mods::project_mods(&self.mods);
+                views::mods::render(&self.theme, &model, &self.mods_focus, cx).into_any_element()
+            }
             Area::Patches => views::patches::render(&self.theme).into_any_element(),
             Area::Settings => {
                 let projection = views::settings::project_settings(

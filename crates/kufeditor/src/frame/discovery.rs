@@ -238,6 +238,7 @@ impl AppFrame {
         self.notices
             .complete(NoticeSource::Browse(game), request.get(), None);
         if self.shell.game() == game {
+            self.active_mod_context_changed(cx);
             #[cfg(test)]
             {
                 self.task_launches.catalog += 1;
@@ -258,6 +259,9 @@ impl AppFrame {
 
         let previous = self.game_paths.root(game).map(ToOwned::to_owned);
         if previous.is_none() {
+            if self.shell.game() == game {
+                self.active_mod_context_changed(cx);
+            }
             if game == Game::Crusaders {
                 self.reconcile_crusaders_catalog(cx);
             }
@@ -267,6 +271,9 @@ impl AppFrame {
         self.game_paths.set_root(game, None);
         if !self.schedule_settings_write(self.shell.game(), cx) {
             self.game_paths.set_root(game, previous);
+            if self.shell.game() == game {
+                self.active_mod_context_changed(cx);
+            }
             if game == Game::Crusaders {
                 self.reconcile_crusaders_catalog(cx);
             }
@@ -277,6 +284,7 @@ impl AppFrame {
             self.task_launches.settings += 1;
         }
         if self.shell.game() == game {
+            self.active_mod_context_changed(cx);
             #[cfg(test)]
             {
                 self.task_launches.catalog += 1;
@@ -376,6 +384,7 @@ impl AppFrame {
                         self.root_revisions = previous_revisions;
                     }
                 }
+                self.active_mod_context_changed(cx);
                 self.reconcile_crusaders_catalog(cx);
 
                 let notice = if update.installation_count == 0 {

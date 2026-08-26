@@ -4,6 +4,7 @@ mod components;
 mod crusaders_catalog_status;
 mod float_edit;
 mod frame;
+mod mod_status;
 mod notices;
 mod number_edit;
 mod settings;
@@ -51,6 +52,7 @@ fn main() -> ExitCode {
                 let frame = cx.new(|cx| AppFrame::new(startup, cx));
                 frame.update(cx, AppFrame::start_catalog_load);
                 frame.update(cx, AppFrame::reconcile_crusaders_catalog);
+                frame.update(cx, AppFrame::start_mod_library_scan);
                 let weak_frame = frame.downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
                     weak_frame
