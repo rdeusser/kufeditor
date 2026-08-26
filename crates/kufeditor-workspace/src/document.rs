@@ -1,7 +1,7 @@
 use kufeditor_formats::{
-    FormatError, STGDocument, STGEncodeError, STGFloatTarget, STGFloatValue, STGNumberTarget,
-    STGRebaseError, STGStructuralEdit, STGTextTarget, SaveDocument, SaveMutation, SaveNumberTarget,
-    SaveTextField, SkillDocument, SkillTextField, TextSOXDocument, TroopDocument, TroopField,
+    FormatError, STGDocument, STGFloatTarget, STGFloatValue, STGNumberTarget, STGRebaseError,
+    STGStructuralEdit, STGTextTarget, SaveDocument, SaveMutation, SaveNumberTarget, SaveTextField,
+    SkillDocument, SkillTextField, TextSOXDocument, TroopDocument, TroopField,
 };
 
 use crate::{
@@ -336,9 +336,7 @@ impl Document {
             Self::Skill(document) => document.encode(),
             Self::TextSOX(document) => document.encode(),
             Self::Save(document) => document.encode(),
-            Self::STG(_) => Err(FormatError::STGEncode(
-                STGEncodeError::DirectSinkUnavailable,
-            )),
+            Self::STG(document) => document.encode(),
         }
     }
 

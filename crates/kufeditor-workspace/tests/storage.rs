@@ -10,11 +10,20 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
 use kufeditor_formats::FormatError;
 use kufeditor_workspace::{
-    Document, DocumentEdit, DocumentID, SUPPORTED_OPEN_EXTENSIONS, SaveDocument, SaveNumberTarget,
+    Document, DocumentEdit, DocumentID, STGAreaFloatField, STGDocument, STGEventTarget,
+    STGFloatTarget, STGFloatValue, STGFooterField, STGNumberTarget, STGStructuralEdit,
+    STGTailStatus, STGUnitField, SUPPORTED_OPEN_EXTENSIONS, SaveDocument, SaveNumberTarget,
     SkillDocument, SkillTextField, TextSOXDocument, TroopDocument, TroopField, Workspace,
     WorkspaceError, load_path,
 };
 use tempfile::tempdir;
+
+#[path = "../../kufeditor-formats/tests/support/stg.rs"]
+#[allow(
+    dead_code,
+    reason = "the shared STG fixture exposes offsets used by format-level tests"
+)]
+mod stg_support;
 
 const SAVE_CONTEXT_SIZE: usize = 0x438;
 const SAVE_MAIN_SIZE: usize = 0x154;
@@ -169,6 +178,17 @@ fn save_fixture() -> Vec<u8> {
     bytes
 }
 
+fn stg_fixture(suffix: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    append_u32(&mut bytes, 1_001);
+    bytes.resize(bytes.len() + 620, 0);
+    for _ in 0..5 {
+        append_u32(&mut bytes, 0);
+    }
+    bytes.extend_from_slice(suffix);
+    bytes
+}
+
 fn append_u32(bytes: &mut Vec<u8>, value: u32) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
@@ -293,8 +313,362 @@ fn load_rejects_a_non_sox_file() {
 }
 
 #[test]
-fn supported_open_extensions_cover_both_document_families() {
-    assert_eq!(SUPPORTED_OPEN_EXTENSIONS, ["sox", "sav"]);
+fn supported_open_extensions_include_stg_in_stable_order() {
+    assert_eq!(
+        SUPPORTED_OPEN_EXTENSIONS.as_slice(),
+        ["sox", "sav", "stg"].as_slice()
+    );
+}
+
+#[test]
+fn load_supports_stg_extensions_case_insensitively() {
+    let directory = tempdir().unwrap();
+    let source = stg_fixture(&[0xde, 0xad, 0xbe, 0xef]);
+
+    for name in ["mission.stg", "mission.STG", "mission.StG"] {
+        let path = directory.path().join(name);
+        fs::write(&path, &source).unwrap();
+
+        let loaded = load_path(path.clone()).unwrap();
+        assert_eq!(loaded.path(), path);
+        let Document::STG(document) = loaded.document() else {
+            panic!("Crusaders STG was detected as another document kind");
+        };
+        assert_eq!(document.unit_count(), 0);
+        assert_eq!(document.area_count(), Some(0));
+        assert_eq!(document.variable_count(), Some(0));
+        assert_eq!(document.event_block_count(), Some(0));
+        assert_eq!(document.footer_count(), Some(0));
+    }
+}
+
+#[test]
+fn stg_save_as_rejects_sox_and_sav_targets_without_starting_a_save() {
+    for extension in ["sox", "sav"] {
+        let target = PathBuf::from(format!("mission.{extension}"));
+        let document = STGDocument::parse(stg_fixture(&[])).unwrap();
+        let mut workspace = Workspace::new();
+        let id = workspace.open_loaded(PathBuf::from("mission.stg"), Document::STG(document));
+
+        let error = workspace
+            .prepare_save(id, Some(target.clone()))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WorkspaceError::WrongExtension {
+                path,
+                expected: "stg",
+                actual,
+            } if path == target && actual == extension
+        ));
+        assert!(!workspace.save_in_progress(id).unwrap());
+    }
+}
+
+#[test]
+fn stg_save_as_without_an_extension_appends_stg() {
+    let target = PathBuf::from("mission-copy");
+    let document = STGDocument::parse(stg_fixture(&[])).unwrap();
+    let mut workspace = Workspace::new();
+    let id = workspace.open_loaded(PathBuf::from("mission.stg"), Document::STG(document));
+
+    let request = workspace.prepare_save(id, Some(target.clone())).unwrap();
+
+    assert_eq!(request.path(), target.with_extension("stg"));
+    workspace.finish_save_failure(id, request.token()).unwrap();
+}
+
+#[test]
+fn stg_save_round_trips_unchanged_parsed_and_edited_raw_documents() {
+    let directory = tempdir().unwrap();
+
+    let parsed_source = stg_support::complete_stg_fixture().bytes;
+    let parsed_target = directory.path().join("parsed.stg");
+    let mut parsed_workspace = Workspace::new();
+    let parsed_id = parsed_workspace.open_loaded(
+        PathBuf::from("source.stg"),
+        Document::STG(STGDocument::parse(parsed_source.clone()).unwrap()),
+    );
+    let saved = parsed_workspace
+        .prepare_save(parsed_id, Some(parsed_target.clone()))
+        .unwrap()
+        .run()
+        .unwrap();
+    parsed_workspace.finish_save(saved).unwrap();
+    assert_eq!(fs::read(&parsed_target).unwrap(), parsed_source);
+    assert!(!parsed_workspace.is_dirty(parsed_id).unwrap());
+    let parsed = load_path(parsed_target).unwrap();
+    let Document::STG(parsed) = parsed.document() else {
+        panic!("saved parsed STG was detected as another document kind");
+    };
+    assert_eq!(parsed.footer_count(), Some(2));
+    assert!(matches!(
+        parsed.tail_status(),
+        STGTailStatus::Parsed { suffix } if suffix == [0xf0, 0x0d, 0xca, 0xfe]
+    ));
+
+    let edited_target = directory.path().join("parsed-edited.stg");
+    let edited_number = STGNumberTarget::Footer {
+        entry: 1,
+        field: STGFooterField::SlotData2,
+    };
+    let mut edited_workspace = Workspace::new();
+    let edited_id = edited_workspace.open_loaded(
+        PathBuf::from("parsed-source.stg"),
+        Document::STG(STGDocument::parse(parsed_source).unwrap()),
+    );
+    edited_workspace
+        .apply(
+            edited_id,
+            DocumentEdit::SetSTGNumber {
+                target: edited_number,
+                value: 0x1020_3040,
+            },
+        )
+        .unwrap();
+    let saved = edited_workspace
+        .prepare_save(edited_id, Some(edited_target.clone()))
+        .unwrap()
+        .run()
+        .unwrap();
+    edited_workspace.finish_save(saved).unwrap();
+    assert!(!edited_workspace.is_dirty(edited_id).unwrap());
+    let edited = load_path(edited_target).unwrap();
+    let Document::STG(edited) = edited.document() else {
+        panic!("saved edited STG was detected as another document kind");
+    };
+    assert_eq!(edited.number(edited_number).unwrap(), 0x1020_3040);
+    assert!(matches!(
+        edited.tail_status(),
+        STGTailStatus::Parsed { suffix } if suffix == [0xf0, 0x0d, 0xca, 0xfe]
+    ));
+
+    let raw_tail = [0xaa, 0xbb, 0xcc];
+    let mut raw_source = stg_support::stg_prefix_fixture(1);
+    raw_source.extend_from_slice(&raw_tail);
+    let raw_target = directory.path().join("raw.stg");
+    let raw_number = STGNumberTarget::Unit {
+        unit: 0,
+        field: STGUnitField::UniqueID,
+    };
+    let mut raw_workspace = Workspace::new();
+    let raw_id = raw_workspace.open_loaded(
+        PathBuf::from("raw-source.stg"),
+        Document::STG(STGDocument::parse(raw_source).unwrap()),
+    );
+    raw_workspace
+        .apply(
+            raw_id,
+            DocumentEdit::SetSTGNumber {
+                target: raw_number,
+                value: 0x1020_3040,
+            },
+        )
+        .unwrap();
+    let saved = raw_workspace
+        .prepare_save(raw_id, Some(raw_target.clone()))
+        .unwrap()
+        .run()
+        .unwrap();
+    raw_workspace.finish_save(saved).unwrap();
+    assert!(!raw_workspace.is_dirty(raw_id).unwrap());
+    let raw = load_path(raw_target).unwrap();
+    let Document::STG(raw) = raw.document() else {
+        panic!("saved raw-tail STG was detected as another document kind");
+    };
+    assert_eq!(raw.number(raw_number).unwrap(), 0x1020_3040);
+    assert!(matches!(
+        raw.tail_status(),
+        STGTailStatus::Raw { bytes, .. } if bytes == raw_tail
+    ));
+}
+
+#[test]
+fn stg_scalar_snapshot_rebases_over_a_newer_structural_edit() {
+    let directory = tempdir().unwrap();
+    let target = directory.path().join("scalar-snapshot.stg");
+    let mut fixture = stg_support::complete_stg_fixture();
+    fixture
+        .bytes
+        .get_mut(fixture.offsets.area_bound_x1..fixture.offsets.area_bound_x1 + 4)
+        .unwrap()
+        .copy_from_slice(&0x7fc0_0001_u32.to_le_bytes());
+    let float_target = STGFloatTarget::Area {
+        area: 0,
+        field: STGAreaFloatField::BoundX1,
+    };
+    let mut workspace = Workspace::new();
+    let id = workspace.open_loaded(
+        PathBuf::from("source.stg"),
+        Document::STG(STGDocument::parse(fixture.bytes).unwrap()),
+    );
+    workspace
+        .apply(
+            id,
+            DocumentEdit::SetSTGFloat {
+                target: float_target,
+                value: STGFloatValue::from_bits((-0.0_f32).to_bits()),
+            },
+        )
+        .unwrap();
+    let request = workspace.prepare_save(id, Some(target.clone())).unwrap();
+    workspace
+        .apply(
+            id,
+            DocumentEdit::EditSTGStructure {
+                edit: STGStructuralEdit::InsertEvent {
+                    target: STGEventTarget { block: 0, event: 1 },
+                },
+            },
+        )
+        .unwrap();
+    let saved = request.run().unwrap();
+    workspace.finish_save(saved).unwrap();
+    let committed = fs::read(&target).unwrap();
+
+    assert!(workspace.is_dirty(id).unwrap());
+    assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 3);
+    assert!(workspace.undo(id).unwrap());
+    assert!(!workspace.is_dirty(id).unwrap());
+    assert_eq!(
+        stg_snapshot_bytes(&mut workspace, id, directory.path()),
+        committed
+    );
+    assert!(workspace.redo(id).unwrap());
+    assert!(workspace.is_dirty(id).unwrap());
+    assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 3);
+}
+
+#[test]
+fn stg_structural_snapshot_rebases_over_a_newer_nan_edit() {
+    let directory = tempdir().unwrap();
+    let target = directory.path().join("structural-snapshot.stg");
+    let mut fixture = stg_support::complete_stg_fixture();
+    fixture
+        .bytes
+        .get_mut(fixture.offsets.area_bound_x1..fixture.offsets.area_bound_x1 + 4)
+        .unwrap()
+        .copy_from_slice(&0x7fc0_0001_u32.to_le_bytes());
+    let float_target = STGFloatTarget::Area {
+        area: 0,
+        field: STGAreaFloatField::BoundX1,
+    };
+    let mut workspace = Workspace::new();
+    let id = workspace.open_loaded(
+        PathBuf::from("source.stg"),
+        Document::STG(STGDocument::parse(fixture.bytes).unwrap()),
+    );
+    workspace
+        .apply(
+            id,
+            DocumentEdit::EditSTGStructure {
+                edit: STGStructuralEdit::InsertEvent {
+                    target: STGEventTarget { block: 0, event: 1 },
+                },
+            },
+        )
+        .unwrap();
+    let request = workspace.prepare_save(id, Some(target.clone())).unwrap();
+    workspace
+        .apply(
+            id,
+            DocumentEdit::SetSTGFloat {
+                target: float_target,
+                value: STGFloatValue::from_bits(0x7fc0_0002),
+            },
+        )
+        .unwrap();
+    let saved = request.run().unwrap();
+    workspace.finish_save(saved).unwrap();
+    let committed = fs::read(&target).unwrap();
+
+    assert!(workspace.is_dirty(id).unwrap());
+    assert_eq!(
+        workspace.stg_float(id, float_target).unwrap().to_bits(),
+        0x7fc0_0002
+    );
+    assert!(workspace.undo(id).unwrap());
+    assert!(!workspace.is_dirty(id).unwrap());
+    assert_eq!(
+        stg_snapshot_bytes(&mut workspace, id, directory.path()),
+        committed
+    );
+    assert!(workspace.redo(id).unwrap());
+    assert!(workspace.is_dirty(id).unwrap());
+    assert_eq!(
+        workspace.stg_float(id, float_target).unwrap().to_bits(),
+        0x7fc0_0002
+    );
+}
+
+#[test]
+fn stg_raw_tail_snapshot_rebases_over_a_newer_prefix_edit() {
+    let directory = tempdir().unwrap();
+    let target = directory.path().join("raw-concurrent.stg");
+    let raw_tail = [0xaa, 0xbb, 0xcc];
+    let mut source = stg_support::stg_prefix_fixture(1);
+    source.extend_from_slice(&raw_tail);
+    let number_target = STGNumberTarget::Unit {
+        unit: 0,
+        field: STGUnitField::UniqueID,
+    };
+    let mut workspace = Workspace::new();
+    let id = workspace.open_loaded(
+        PathBuf::from("raw-source.stg"),
+        Document::STG(STGDocument::parse(source).unwrap()),
+    );
+    workspace
+        .apply(
+            id,
+            DocumentEdit::SetSTGNumber {
+                target: number_target,
+                value: 100,
+            },
+        )
+        .unwrap();
+    let request = workspace.prepare_save(id, Some(target.clone())).unwrap();
+    workspace
+        .apply(
+            id,
+            DocumentEdit::SetSTGNumber {
+                target: number_target,
+                value: 200,
+            },
+        )
+        .unwrap();
+    let saved = request.run().unwrap();
+    workspace.finish_save(saved).unwrap();
+    let committed = fs::read(&target).unwrap();
+
+    assert!(workspace.is_dirty(id).unwrap());
+    assert_eq!(workspace.stg_number(id, number_target).unwrap(), 200);
+    assert!(workspace.undo(id).unwrap());
+    assert!(!workspace.is_dirty(id).unwrap());
+    assert_eq!(
+        stg_snapshot_bytes(&mut workspace, id, directory.path()),
+        committed
+    );
+    assert!(workspace.redo(id).unwrap());
+    assert!(workspace.is_dirty(id).unwrap());
+    assert_eq!(workspace.stg_number(id, number_target).unwrap(), 200);
+    assert!(matches!(
+        workspace.stg_tail_status(id).unwrap(),
+        STGTailStatus::Raw { bytes, .. } if bytes == raw_tail
+    ));
+}
+
+fn stg_snapshot_bytes(
+    workspace: &mut Workspace,
+    id: DocumentID,
+    directory: &std::path::Path,
+) -> Vec<u8> {
+    let path = directory.join("snapshot.stg");
+    let request = workspace.prepare_save(id, Some(path.clone())).unwrap();
+    let token = request.token();
+    request.run().unwrap();
+    workspace.finish_save_failure(id, token).unwrap();
+    fs::read(path).unwrap()
 }
 
 #[test]

@@ -2735,18 +2735,19 @@ mod tests {
         ) -> Task<OpenPromptResult> {
             self.launched.set(true);
             self.request_ready.set(frame.shell.accepts_open(request));
+            let expected_notice = open_prompt_copy();
             self.notice_ready.set(
-                frame.notices.current().map(Notice::summary)
-                    == Some("Choose one or more .sox or .sav files"),
+                frame.notices.current().map(Notice::summary) == Some(expected_notice.as_str()),
             );
             self.options_ready.set(
                 options.files
                     && !options.directories
                     && options.multiple
-                    && options
-                        .prompt
-                        .as_ref()
-                        .is_some_and(|prompt| prompt.contains(".sox") && prompt.contains(".sav")),
+                    && options.prompt.as_ref().is_some_and(|prompt| {
+                        SUPPORTED_OPEN_EXTENSIONS
+                            .iter()
+                            .all(|extension| prompt.contains(&format!(".{extension}")))
+                    }),
             );
             Task::ready(OpenPromptResult::Canceled)
         }
@@ -3019,7 +3020,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn save_view_open_prompt_names_sox_and_save_files(cx: &mut TestAppContext) {
+    fn save_view_open_prompt_names_all_supported_files(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
@@ -3031,7 +3032,10 @@ mod tests {
             .update(cx, |frame, _, cx| {
                 frame.begin_open_prompt(cx);
                 let notice = frame.notices.current().unwrap();
-                assert_eq!(notice.summary(), "Choose one or more .sox or .sav files");
+                assert_eq!(
+                    notice.summary(),
+                    "Choose one or more .sox or .sav or .stg files"
+                );
             })
             .unwrap();
     }
@@ -3328,7 +3332,7 @@ mod tests {
                 frame.notices.begin(
                     NoticeSource::Open,
                     picker_request.get(),
-                    Notice::info("Choose one or more .sox or .sav files"),
+                    Notice::info(open_prompt_copy()),
                 );
                 frame.open_recent_path(recent_path.clone(), cx);
 

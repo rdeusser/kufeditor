@@ -730,14 +730,14 @@ pub enum STGStructuralLocation {
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum STGEncodeError {
-    #[error("direct-sink STG encoding is not available in the generated Rust codec")]
-    DirectSinkUnavailable,
-
     #[error("generated STG encoding failed: {0}")]
     Cleave(#[source] STGCleaveError),
 
     #[error("encoded STG length {length} exceeds the {maximum}-byte limit")]
     LengthOverflow { length: usize, maximum: usize },
+
+    #[error("encoded STG length calculation overflowed")]
+    LengthArithmeticOverflow,
 
     #[error("failed to allocate {requested} bytes for encoded STG")]
     Allocation { requested: usize },

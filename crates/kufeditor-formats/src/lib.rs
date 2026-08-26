@@ -29,14 +29,14 @@ pub use schema::{SOXSchema, SchemaDocument, SpecialNameRef};
 pub use skill::{SkillDocument, SkillField, SkillTextField};
 pub use sox::{SOXDocument, parse_sox};
 pub use stg::{
-    STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice, STGDocument, STGEditor, STGEvent,
-    STGEventBlock, STGEventTarget, STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField,
-    STGHeaderTextField, STGMutation, STGNumberTarget, STGParameter, STGParameterTarget,
-    STGReferenceKind, STGScript, STGScriptKind, STGScriptLabel, STGScriptTarget, STGSkillField,
-    STGSkillOwner, STGStructuralEdit, STGStructuralImage, STGStructuralPreview,
-    STGStructuralRestoreFailure, STGTailStatus, STGText, STGTextImage, STGTextPreview,
-    STGTextRestoreFailure, STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue,
-    STGValueTarget,
+    MAX_STG_SOURCE_BYTES, STGAbilityOwner, STGAreaField, STGAreaFloatField, STGChoice,
+    STGCommittedImage, STGDocument, STGEditor, STGEvent, STGEventBlock, STGEventTarget,
+    STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
+    STGNumberTarget, STGParameter, STGParameterTarget, STGReferenceKind, STGScript, STGScriptKind,
+    STGScriptLabel, STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralEdit,
+    STGStructuralImage, STGStructuralPreview, STGStructuralRestoreFailure, STGTailStatus, STGText,
+    STGTextImage, STGTextPreview, STGTextRestoreFailure, STGTextTarget, STGUnitField,
+    STGUnitFloatField, STGUnitGroup, STGValue, STGValueTarget,
 };
 pub use string_table::{SOXStringTableDocument, SOXStringTableLayout};
 pub use text::{TextSOXDocument, TextSOXField};

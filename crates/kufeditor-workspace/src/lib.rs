@@ -12,6 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use kufeditor_formats::{FormatError, STGRebaseError};
+
 pub use document::{Document, DocumentEdit, DocumentID, DocumentKind, StateID};
 pub use history::DEFAULT_STG_HISTORY_LIMIT;
 pub use kufeditor_formats::{
@@ -81,7 +83,7 @@ pub enum WorkspaceError {
     Format(#[from] kufeditor_formats::FormatError),
 
     #[error(
-        "unsupported file {path}: expected a .sox TroopInfo, SkillInfo, or text SOX file, or a .sav Crusaders save file"
+        "unsupported file {path}: expected a .sox TroopInfo, SkillInfo, or text SOX file, a .sav Crusaders save file, or a .stg Crusaders STG file"
     )]
     UnsupportedFile { path: PathBuf },
 
@@ -120,7 +122,9 @@ pub enum WorkspaceError {
         source: std::io::Error,
     },
 
-    #[error("save reconciliation failed after commit to {path}: {source}")]
+    #[error(
+        "target file was already committed at {path}, but save reconciliation failed: {source}"
+    )]
     CommittedSaveReconciliation {
         path: PathBuf,
         #[source]
@@ -269,25 +273,39 @@ impl Workspace {
     }
 
     pub fn finish_save(&mut self, saved: SavedDocument) -> Result<(), WorkspaceError> {
-        let session = self.session_mut(saved.document_id)?;
-        if session.save_in_flight != Some(saved.token) {
+        let SavedDocument {
+            document_id,
+            token,
+            path,
+            state,
+            committed,
+        } = saved;
+        let session = self.session_mut(document_id)?;
+        if session.save_in_flight != Some(token) {
             return Err(WorkspaceError::StaleSave {
-                document: saved.document_id,
-                token: saved.token,
+                document: document_id,
+                token,
             });
         }
 
-        let mut document = session.document.clone();
-        if let Err(source) = document.rebase_source(&saved.snapshot, saved.bytes) {
+        let reconciliation = match committed {
+            storage::CommittedDocumentImage::Standard { snapshot, bytes } => {
+                let mut document = session.document.clone();
+                document
+                    .rebase_source(&snapshot, bytes)
+                    .map(|()| session.document = document)
+            }
+            storage::CommittedDocumentImage::STG(image) => match &mut session.document {
+                Document::STG(document) => document.rebase_source(image),
+                _ => Err(FormatError::STGRebase(STGRebaseError::InconsistentImage)),
+            },
+        };
+        if let Err(source) = reconciliation {
             session.save_in_flight = None;
-            return Err(WorkspaceError::CommittedSaveReconciliation {
-                path: saved.path,
-                source,
-            });
+            return Err(WorkspaceError::CommittedSaveReconciliation { path, source });
         }
-        session.document = document;
-        session.path = saved.path;
-        session.saved_state = saved.state;
+        session.path = path;
+        session.saved_state = state;
         session.save_in_flight = None;
         Ok(())
     }
@@ -812,7 +830,10 @@ mod tests {
         let before_saved_state = before.saved_state;
         let before_undo_len = before.undo.len();
         let before_redo_len = before.redo.len();
-        saved.bytes.clear();
+        let storage::CommittedDocumentImage::Standard { bytes, .. } = &mut saved.committed else {
+            panic!("TroopInfo save produced an STG committed image");
+        };
+        bytes.clear();
 
         let error = workspace.finish_save(saved).unwrap_err();
 
@@ -843,6 +864,78 @@ mod tests {
             .prepare_save(id, Some(directory.path().join("Retry.sox")))
             .unwrap();
         workspace.finish_save_failure(id, retry.token()).unwrap();
+    }
+
+    #[test]
+    fn committed_stg_image_failure_is_atomic_and_reports_the_committed_target() {
+        let directory = tempdir().unwrap();
+        let original_path = PathBuf::from("original.stg");
+        let committed_path = directory.path().join("committed.stg");
+        let document = STGDocument::parse(empty_stg_fixture()).unwrap();
+        let mut workspace = Workspace::new();
+        let id = workspace.open_loaded(original_path.clone(), Document::STG(document));
+        workspace
+            .apply(
+                id,
+                DocumentEdit::EditSTGStructure {
+                    edit: STGStructuralEdit::InsertEvent {
+                        target: STGEventTarget { block: 0, event: 0 },
+                    },
+                },
+            )
+            .unwrap();
+
+        let request = workspace
+            .prepare_save(id, Some(committed_path.clone()))
+            .unwrap();
+        let mut saved = request.run().unwrap();
+        let committed_bytes = fs::read(&committed_path).unwrap();
+        workspace
+            .apply(
+                id,
+                DocumentEdit::SetSTGNumber {
+                    target: STGNumberTarget::EventID { block: 0, event: 0 },
+                    value: 9,
+                },
+            )
+            .unwrap();
+
+        let foreign = STGDocument::parse(empty_stg_fixture())
+            .unwrap()
+            .prepare_commit()
+            .unwrap();
+        saved.committed = storage::CommittedDocumentImage::STG(foreign);
+        let before = workspace.session(id).unwrap();
+        let before_document = before.document.encode().unwrap();
+        let before_state = before.current_state;
+        let before_saved_state = before.saved_state;
+        let before_undo_len = before.undo.len();
+        let before_redo_len = before.redo.len();
+
+        let error = workspace.finish_save(saved).unwrap_err();
+
+        assert!(matches!(
+            &error,
+            WorkspaceError::CommittedSaveReconciliation {
+                path,
+                source: FormatError::STGRebase(STGRebaseError::ForeignLineage),
+            } if path == &committed_path
+        ));
+        assert!(
+            error
+                .to_string()
+                .contains("target file was already committed")
+        );
+        let after = workspace.session(id).unwrap();
+        assert_eq!(after.path, original_path);
+        assert_eq!(after.document.encode().unwrap(), before_document);
+        assert_eq!(after.current_state, before_state);
+        assert_eq!(after.saved_state, before_saved_state);
+        assert_eq!(after.undo.len(), before_undo_len);
+        assert_eq!(after.redo.len(), before_redo_len);
+        assert!(after.save_in_flight.is_none());
+        assert!(workspace.is_dirty(id).unwrap());
+        assert_eq!(fs::read(committed_path).unwrap(), committed_bytes);
     }
 
     #[test]

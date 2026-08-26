@@ -59,6 +59,100 @@ fn stg_parse_accepts_a_complete_two_phase_document() {
 }
 
 #[test]
+fn stg_encode_returns_exact_bytes_for_unchanged_parsed_and_raw_documents() {
+    let parsed = complete_stg_fixture().bytes;
+    let parsed_document = STGDocument::parse(parsed.clone()).unwrap();
+    let parsed_encoded = parsed_document.encode().unwrap();
+    assert_eq!(parsed_encoded, parsed);
+    assert_eq!(parsed_encoded.capacity(), parsed_encoded.len());
+
+    let mut raw = stg_prefix_fixture(1);
+    raw.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+    let raw_document = STGDocument::parse(raw.clone()).unwrap();
+    assert!(matches!(
+        raw_document.tail_status(),
+        STGTailStatus::Raw { .. }
+    ));
+    let raw_encoded = raw_document.encode().unwrap();
+    assert_eq!(raw_encoded, raw);
+    assert_eq!(raw_encoded.capacity(), raw_encoded.len());
+}
+
+#[test]
+fn stg_encode_preserves_parsed_suffix_after_an_edit() {
+    let fixture = complete_stg_fixture();
+    let suffix = fixture.bytes[fixture.offsets.suffix..].to_vec();
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let target = STGNumberTarget::Footer {
+        entry: 1,
+        field: STGFooterField::SlotData2,
+    };
+    document.set_number(target, 0x1020_3040).unwrap();
+
+    let encoded = document.encode().unwrap();
+    let reparsed = STGDocument::parse(encoded.clone()).unwrap();
+
+    assert_eq!(reparsed.number(target).unwrap(), 0x1020_3040);
+    assert!(encoded.ends_with(&suffix));
+    assert_eq!(
+        reparsed.tail_status(),
+        STGTailStatus::Parsed { suffix: &suffix }
+    );
+}
+
+#[test]
+fn stg_encode_preserves_an_exact_raw_tail_after_a_prefix_edit() {
+    let mut source = stg_prefix_fixture(1);
+    let tail_start = source.len();
+    source.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+    let raw_tail = source[tail_start..].to_vec();
+    let mut document = STGDocument::parse(source).unwrap();
+    let target = STGNumberTarget::Unit {
+        unit: 0,
+        field: STGUnitField::UniqueID,
+    };
+    document.set_number(target, 0x1020_3040).unwrap();
+
+    let encoded = document.encode().unwrap();
+    let reparsed = STGDocument::parse(encoded.clone()).unwrap();
+
+    assert_eq!(reparsed.number(target).unwrap(), 0x1020_3040);
+    assert_eq!(&encoded[tail_start..], raw_tail);
+    assert!(matches!(
+        reparsed.tail_status(),
+        STGTailStatus::Raw { bytes, .. } if bytes == raw_tail
+    ));
+}
+
+#[test]
+fn stg_prepare_commit_returns_the_exact_source_for_an_equal_candidate() {
+    let source = complete_stg_fixture().bytes;
+    let document = STGDocument::parse(source.clone()).unwrap();
+
+    let first = document.prepare_commit().unwrap();
+
+    assert_eq!(first.bytes(), source);
+}
+
+#[test]
+fn stg_rebase_rejects_a_foreign_lineage_without_mutation() {
+    let source = complete_stg_fixture().bytes;
+    let committed = STGDocument::parse(source.clone())
+        .unwrap()
+        .prepare_commit()
+        .unwrap();
+    let mut foreign = STGDocument::parse(source.clone()).unwrap();
+
+    let error = foreign.rebase_source(committed).unwrap_err();
+
+    assert!(matches!(
+        error,
+        FormatError::STGRebase(STGRebaseError::ForeignLineage)
+    ));
+    assert_eq!(foreign.encode().unwrap(), source);
+}
+
+#[test]
 fn stg_parse_rejects_invalid_or_incomplete_prefixes() {
     let bad_magic = 999_u32.to_le_bytes().to_vec();
     assert_eq!(

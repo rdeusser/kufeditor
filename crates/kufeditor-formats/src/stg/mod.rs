@@ -46,6 +46,8 @@ const MAGIC_SIZE: usize = size_of::<u32>();
 const COUNT_SIZE: usize = size_of::<u32>();
 const UNIT_COUNT_OFFSET: usize = MAGIC_SIZE + 620;
 
+pub const MAX_STG_SOURCE_BYTES: usize = SOURCE_LIMIT;
+
 #[derive(Clone, Debug)]
 pub struct STGDocument {
     #[allow(
@@ -57,6 +59,19 @@ pub struct STGDocument {
     state: Arc<()>,
     revision: Arc<()>,
     model: Arc<STGModel>,
+}
+
+#[derive(Debug)]
+pub struct STGCommittedImage {
+    lineage: Arc<()>,
+    source: Arc<Vec<u8>>,
+    opaque_range: wire::OpaqueRange,
+}
+
+impl STGCommittedImage {
+    pub fn bytes(&self) -> &[u8] {
+        self.source.as_slice()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -109,6 +124,79 @@ pub enum STGTailStatus<'a> {
 impl STGDocument {
     pub fn parse(bytes: Vec<u8>) -> Result<Self, FormatError> {
         Self::parse_with_limits(bytes, SOURCE_LIMIT, MODEL_LIMIT)
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, FormatError> {
+        wire::encode(&self.model, SOURCE_LIMIT).map(|image| image.bytes)
+    }
+
+    pub fn prepare_commit(&self) -> Result<STGCommittedImage, FormatError> {
+        let wire::EncodedSTG {
+            bytes,
+            opaque_range,
+        } = wire::encode(&self.model, SOURCE_LIMIT)?;
+        let (source, opaque_range) = if bytes.as_slice() == self.source.as_slice() {
+            drop(bytes);
+            (Arc::clone(&self.source), self.baseline_opaque_range()?)
+        } else {
+            (Arc::new(bytes), opaque_range)
+        };
+        Ok(STGCommittedImage {
+            lineage: Arc::clone(&self.lineage),
+            source,
+            opaque_range,
+        })
+    }
+
+    pub fn rebase_source(&mut self, committed: STGCommittedImage) -> Result<(), FormatError> {
+        if !Arc::ptr_eq(&self.lineage, &committed.lineage) {
+            return Err(FormatError::STGRebase(
+                crate::error::STGRebaseError::ForeignLineage,
+            ));
+        }
+        let committed_opaque =
+            committed
+                .source
+                .get(committed.opaque_range.range())
+                .ok_or(FormatError::STGRebase(
+                    crate::error::STGRebaseError::InvalidLayout,
+                ))?;
+        let live_range = self
+            .baseline_opaque_range()
+            .map_err(|_| FormatError::STGRebase(crate::error::STGRebaseError::InvalidLayout))?;
+        if !live_range.same_kind(&committed.opaque_range) {
+            return Err(FormatError::STGRebase(
+                crate::error::STGRebaseError::InvalidLayout,
+            ));
+        }
+        let live_opaque = self
+            .source
+            .get(live_range.range())
+            .ok_or(FormatError::STGRebase(
+                crate::error::STGRebaseError::InvalidLayout,
+            ))?;
+        if live_opaque != committed_opaque {
+            return Err(FormatError::STGRebase(
+                crate::error::STGRebaseError::InconsistentImage,
+            ));
+        }
+
+        self.source = Arc::clone(&committed.source);
+        match (
+            &mut Arc::make_mut(&mut self.model).tail,
+            committed.opaque_range,
+        ) {
+            (STGTail::Parsed(tail), wire::OpaqueRange::Parsed(range)) => {
+                tail.suffix_source = committed.source;
+                tail.suffix_range = range;
+            }
+            (STGTail::Raw { source, range, .. }, wire::OpaqueRange::Raw(committed_range)) => {
+                *source = committed.source;
+                *range = committed_range;
+            }
+            _ => unreachable!("validated STG opaque kinds changed during rebase"),
+        }
+        Ok(())
     }
 
     fn parse_with_limits(
@@ -244,6 +332,30 @@ impl STGDocument {
             STGTail::Parsed(tail) => Some(tail),
             STGTail::Raw { .. } => None,
         }
+    }
+
+    fn baseline_opaque_range(&self) -> Result<wire::OpaqueRange, FormatError> {
+        let range = match &self.model.tail {
+            STGTail::Parsed(tail) => {
+                if !Arc::ptr_eq(&self.source, &tail.suffix_source)
+                    || tail.suffix_source.get(tail.suffix_range.clone()).is_none()
+                {
+                    return Err(FormatError::STGEncode(
+                        crate::error::STGEncodeError::InvalidTailLayout,
+                    ));
+                }
+                wire::OpaqueRange::Parsed(tail.suffix_range.clone())
+            }
+            STGTail::Raw { source, range, .. } => {
+                if !Arc::ptr_eq(&self.source, source) || source.get(range.clone()).is_none() {
+                    return Err(FormatError::STGEncode(
+                        crate::error::STGEncodeError::InvalidTailLayout,
+                    ));
+                }
+                wire::OpaqueRange::Raw(range.clone())
+            }
+        };
+        Ok(range)
     }
 }
 
@@ -707,6 +819,43 @@ mod tests {
         };
         assert!(matches!(raw.tail_status(), STGTailStatus::Raw { .. }));
         assert_eq!(wire::encoded_len(&raw.model), Some(raw_length));
+    }
+
+    #[test]
+    fn equal_commit_images_share_the_exact_parsed_source_allocation() {
+        let document = STGDocument::parse(empty_document(1, 1)).unwrap();
+
+        let first = document.prepare_commit().unwrap();
+        let second = document.prepare_commit().unwrap();
+
+        assert!(Arc::ptr_eq(&first.source, &document.source));
+        assert!(Arc::ptr_eq(&first.source, &second.source));
+    }
+
+    #[test]
+    fn rebase_reuses_a_unique_live_model_and_installs_one_committed_source() {
+        let target = STGNumberTarget::Unit {
+            unit: 0,
+            field: STGUnitField::UniqueID,
+        };
+        let mut live = STGDocument::parse(empty_document(1, 1)).unwrap();
+        live.set_number(target, 1).unwrap();
+        let snapshot = live.clone();
+        let committed = snapshot.prepare_commit().unwrap();
+        let committed_source = Arc::clone(&committed.source);
+        live.set_number(target, 2).unwrap();
+        drop(snapshot);
+        let model_before = Arc::as_ptr(&live.model);
+
+        live.rebase_source(committed).unwrap();
+
+        assert_eq!(live.number(target).unwrap(), 2);
+        assert_eq!(Arc::as_ptr(&live.model), model_before);
+        assert!(Arc::ptr_eq(&live.source, &committed_source));
+        let STGTail::Parsed(tail) = &live.model.tail else {
+            panic!("parsed STG rebase changed its tail kind");
+        };
+        assert!(Arc::ptr_eq(&tail.suffix_source, &committed_source));
     }
 
     fn empty_document(unit_count: usize, area_count: usize) -> Vec<u8> {
