@@ -1072,8 +1072,8 @@ impl AppFrame {
         });
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.number_edit.is_none() {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.number_edit.is_none() || !self.focus.is_focused(window) {
             return;
         }
         let Some(command) = number_command(event) else {
@@ -1108,10 +1108,12 @@ impl AppFrame {
         &mut self,
         _: &FocusNextSaveControl,
         window: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         if self.save_editor_is_visible() {
+            self.cancel_number_edit_for_save_focus_move(cx);
             window.focus_next();
+            self.reveal_focused_save_list_cursor(window, cx);
         }
     }
 
@@ -1119,10 +1121,19 @@ impl AppFrame {
         &mut self,
         _: &FocusPreviousSaveControl,
         window: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         if self.save_editor_is_visible() {
+            self.cancel_number_edit_for_save_focus_move(cx);
             window.focus_prev();
+            self.reveal_focused_save_list_cursor(window, cx);
+        }
+    }
+
+    fn cancel_number_edit_for_save_focus_move(&mut self, cx: &mut Context<Self>) {
+        if self.number_edit.take().is_some() {
+            clear_editor_notice(&mut self.notices);
+            cx.notify();
         }
     }
 
