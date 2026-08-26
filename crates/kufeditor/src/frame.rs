@@ -29,8 +29,8 @@ use crate::{
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
     state::{
-        Area, ClosePolicy, RecordSelections, RequestID, SaveListCursor, SaveListKind,
-        SavePresentationStates, ShellState, navigation_projection,
+        Area, ClosePolicy, RecordSelections, RequestID, STGPresentationStates, SaveListCursor,
+        SaveListKind, SavePresentationStates, ShellState, navigation_projection,
     },
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
@@ -44,6 +44,7 @@ mod discovery;
 pub(crate) mod discovery_status;
 mod save;
 mod settings;
+mod stg;
 use self::discovery::{BrowsePromptLauncher, PlatformBrowsePromptLauncher};
 use self::settings::protected_settings_notice;
 
@@ -574,6 +575,7 @@ pub struct AppFrame {
     active_document: Option<DocumentID>,
     selections: RecordSelections,
     save_presentations: SavePresentationStates,
+    stg_presentations: STGPresentationStates,
     save_lists: SaveListControls,
     number_edit: Option<ActiveNumberEdit>,
     text_edit: Option<ActiveTextEdit>,
@@ -630,6 +632,7 @@ impl AppFrame {
             active_document: None,
             selections: RecordSelections::default(),
             save_presentations: SavePresentationStates::default(),
+            stg_presentations: STGPresentationStates::default(),
             save_lists: SaveListControls::new(cx),
             number_edit: None,
             text_edit: None,
@@ -672,16 +675,27 @@ impl AppFrame {
 
     fn activate_document(&mut self, document: DocumentID, cx: &mut Context<Self>) {
         self.save_lists.invalidate_all();
-        if self.workspace.document_kind(document).ok() == Some(DocumentKind::CrusadersSave) {
-            self.activate_save_presentation(document, cx);
-        } else {
-            self.cancel_property_edit();
+        match self.workspace.document_kind(document).ok() {
+            Some(DocumentKind::CrusadersSave) => {
+                self.deactivate_stg_presentation(cx);
+                self.activate_save_presentation(document, cx);
+            }
+            Some(DocumentKind::CrusadersSTG) => {
+                self.cancel_property_edit();
+                self.activate_stg_presentation(document, cx);
+            }
+            Some(DocumentKind::TroopInfo | DocumentKind::SkillInfo | DocumentKind::TextSOX)
+            | None => {
+                self.deactivate_stg_presentation(cx);
+                self.cancel_property_edit();
+            }
         }
         self.active_document = Some(document);
         self.reconcile_crusaders_catalog(cx);
     }
 
     fn select_record(&mut self, document: DocumentID, record: usize, cx: &mut Context<Self>) {
+        self.deactivate_stg_presentation(cx);
         self.cancel_property_edit();
         self.active_document = Some(document);
         self.selections.select(document, record);
@@ -1465,6 +1479,17 @@ impl AppFrame {
         let Some(document_id) = self.active_document else {
             return;
         };
+        let stg_change = if redo {
+            self.workspace
+                .pending_redo_stg_change(document_id)
+                .ok()
+                .flatten()
+        } else {
+            self.workspace
+                .pending_undo_stg_change(document_id)
+                .ok()
+                .flatten()
+        };
         let result = if redo {
             self.workspace.redo(document_id)
         } else {
@@ -1472,7 +1497,12 @@ impl AppFrame {
         };
         match result {
             Ok(true) => {
-                self.document_did_mutate(document_id, cx);
+                let transition = if redo {
+                    crate::state::STGDocumentTransition::Redo(stg_change)
+                } else {
+                    crate::state::STGDocumentTransition::Undo(stg_change)
+                };
+                self.document_did_mutate_with_stg_transition(document_id, transition, cx);
                 self.notices.clear(NoticeSource::Workspace);
             }
             Ok(false) => {}
@@ -1607,12 +1637,32 @@ impl AppFrame {
     }
 
     fn document_did_mutate(&mut self, document: DocumentID, cx: &mut Context<Self>) {
+        self.document_did_mutate_with_stg_transition(
+            document,
+            crate::state::STGDocumentTransition::ScalarEdit,
+            cx,
+        );
+    }
+
+    fn document_did_mutate_with_stg_transition(
+        &mut self,
+        document: DocumentID,
+        stg_transition: crate::state::STGDocumentTransition,
+        cx: &mut Context<Self>,
+    ) {
         if self.close_documents == CloseDocuments::Discard {
             self.close_documents = CloseDocuments::Save;
             self.close_pending = false;
             self.close_armed = false;
         }
-        self.reconcile_save_presentation(document, cx);
+        match self.workspace.document_kind(document).ok() {
+            Some(DocumentKind::CrusadersSave) => self.reconcile_save_presentation(document, cx),
+            Some(DocumentKind::CrusadersSTG) => {
+                self.reconcile_stg_presentation(document, stg_transition, cx);
+            }
+            Some(DocumentKind::TroopInfo | DocumentKind::SkillInfo | DocumentKind::TextSOX)
+            | None => {}
+        }
     }
 
     fn top_bar(&self, cx: &mut Context<Self>) -> Div {
@@ -1736,8 +1786,18 @@ impl AppFrame {
         if self.shell.area() == area {
             return;
         }
+        if area != Area::Files {
+            self.deactivate_stg_presentation(cx);
+        }
         self.shell.select_area(area);
         self.cancel_property_edit();
+        if area == Area::Files
+            && let Some(document) = self.active_document.filter(|document| {
+                self.workspace.document_kind(*document).ok() == Some(DocumentKind::CrusadersSTG)
+            })
+        {
+            self.activate_stg_presentation(document, cx);
+        }
         cx.notify();
     }
 
@@ -1894,29 +1954,6 @@ impl AppFrame {
                 .text_color(self.theme.text_dim)
                 .child(format!("Could not open the document editor: {error}")),
         }
-    }
-
-    fn stg_editor(&self, document_id: DocumentID) -> Div {
-        let summary = match (
-            self.workspace.stg_unit_count(document_id),
-            self.workspace.stg_area_count(document_id),
-            self.workspace.stg_event_block_count(document_id),
-        ) {
-            (Ok(units), Ok(Some(areas)), Ok(Some(event_blocks))) => {
-                format!("{units} units · {areas} areas · {event_blocks} event blocks")
-            }
-            (Ok(units), Ok(None), Ok(None)) => {
-                format!("{units} units · opaque tail preserved")
-            }
-            _ => "Document summary is unavailable".to_owned(),
-        };
-        div()
-            .size_full()
-            .p(px(28.0))
-            .text_color(self.theme.text_dim)
-            .child("STG")
-            .child(summary)
-            .child("Structured editing controls are not available yet.")
     }
 
     fn skill_editor(&self, document_id: DocumentID, cx: &mut Context<Self>) -> Div {

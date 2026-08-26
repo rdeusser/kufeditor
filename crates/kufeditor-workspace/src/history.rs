@@ -1,6 +1,6 @@
 use kufeditor_formats::{
-    STGFloatTarget, STGFloatValue, STGNumberTarget, STGStructuralImage, STGTextImage,
-    STGTextTarget, SaveTextField, SaveTextImage,
+    STGFloatTarget, STGFloatValue, STGNumberTarget, STGStructuralChange, STGStructuralImage,
+    STGTextImage, STGTextTarget, SaveTextField, SaveTextImage,
 };
 
 use crate::{DocumentEdit, StateID};
@@ -78,6 +78,23 @@ impl HistoryEntry {
         match self {
             Self::Standard { .. } => 0,
             Self::STG { retained_bytes, .. } => *retained_bytes,
+        }
+    }
+
+    pub(crate) fn stg_structural_change(&self) -> Option<STGStructuralChange> {
+        match self {
+            Self::STG {
+                action: STGHistoryAction::Structure { image, .. },
+                ..
+            } => Some(image.change()),
+            Self::Standard { .. }
+            | Self::STG {
+                action:
+                    STGHistoryAction::Number { .. }
+                    | STGHistoryAction::Float { .. }
+                    | STGHistoryAction::Text { .. },
+                ..
+            } => None,
         }
     }
 }

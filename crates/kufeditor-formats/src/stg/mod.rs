@@ -37,7 +37,8 @@ pub use fields::{
     STGValueTarget,
 };
 pub use structure::{
-    STGStructuralEdit, STGStructuralImage, STGStructuralPreview, STGStructuralRestoreFailure,
+    STGStructuralChange, STGStructuralEdit, STGStructuralImage, STGStructuralPreview,
+    STGStructuralRestoreFailure,
 };
 pub use text::{STGText, STGTextImage, STGTextPreview, STGTextRestoreFailure};
 

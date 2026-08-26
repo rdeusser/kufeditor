@@ -44,7 +44,28 @@ pub enum STGStructuralEdit {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum STGStructuralChange {
+    InsertEvent { target: STGEventTarget },
+    RemoveEvent { target: STGEventTarget },
+    InsertScript { target: STGScriptTarget },
+    RemoveScript { target: STGScriptTarget },
+    ReplaceScript { target: STGScriptTarget },
+    ReplaceValue { target: STGValueTarget },
+}
+
 impl STGStructuralEdit {
+    pub const fn change(self) -> STGStructuralChange {
+        match self {
+            Self::InsertEvent { target } => STGStructuralChange::InsertEvent { target },
+            Self::RemoveEvent { target } => STGStructuralChange::RemoveEvent { target },
+            Self::InsertScript { target, .. } => STGStructuralChange::InsertScript { target },
+            Self::RemoveScript { target } => STGStructuralChange::RemoveScript { target },
+            Self::ChangeScriptType { target, .. } => STGStructuralChange::ReplaceScript { target },
+            Self::ChangeValueType { target, .. } => STGStructuralChange::ReplaceValue { target },
+        }
+    }
+
     pub const fn location(self) -> STGStructuralLocation {
         match self {
             Self::InsertEvent { target } | Self::RemoveEvent { target } => event_location(target),
@@ -246,6 +267,29 @@ impl STGStructuralImage {
             }
             StructuralOperation::ReplaceValue { target, .. } => {
                 STGStructuralLocation::Value(*target)
+            }
+        }
+    }
+
+    pub fn change(&self) -> STGStructuralChange {
+        match &self.operation {
+            StructuralOperation::InsertEvent { target, .. } => {
+                STGStructuralChange::InsertEvent { target: *target }
+            }
+            StructuralOperation::RemoveEvent { target, .. } => {
+                STGStructuralChange::RemoveEvent { target: *target }
+            }
+            StructuralOperation::InsertScript { target, .. } => {
+                STGStructuralChange::InsertScript { target: *target }
+            }
+            StructuralOperation::RemoveScript { target, .. } => {
+                STGStructuralChange::RemoveScript { target: *target }
+            }
+            StructuralOperation::ReplaceScript { target, .. } => {
+                STGStructuralChange::ReplaceScript { target: *target }
+            }
+            StructuralOperation::ReplaceValue { target, .. } => {
+                STGStructuralChange::ReplaceValue { target: *target }
             }
         }
     }
@@ -2946,6 +2990,58 @@ mod tests {
             changed(accepted.restore_structure(inverse).unwrap());
             assert_exact_capacities(&accepted);
         }
+    }
+
+    #[test]
+    fn structural_edits_report_their_presentation_changes() {
+        let event = STGEventTarget { block: 3, event: 5 };
+        let script = STGScriptTarget {
+            block: event.block,
+            event: event.event,
+            kind: STGScriptKind::Action,
+            script: 2,
+        };
+        let value = STGValueTarget::ScriptParameter(STGParameterTarget {
+            script,
+            parameter: 1,
+        });
+
+        assert_eq!(
+            STGStructuralEdit::InsertEvent { target: event }.change(),
+            STGStructuralChange::InsertEvent { target: event }
+        );
+        assert_eq!(
+            STGStructuralEdit::RemoveEvent { target: event }.change(),
+            STGStructuralChange::RemoveEvent { target: event }
+        );
+        assert_eq!(
+            STGStructuralEdit::InsertScript {
+                target: script,
+                type_id: 7,
+            }
+            .change(),
+            STGStructuralChange::InsertScript { target: script }
+        );
+        assert_eq!(
+            STGStructuralEdit::RemoveScript { target: script }.change(),
+            STGStructuralChange::RemoveScript { target: script }
+        );
+        assert_eq!(
+            STGStructuralEdit::ChangeScriptType {
+                target: script,
+                type_id: 15,
+            }
+            .change(),
+            STGStructuralChange::ReplaceScript { target: script }
+        );
+        assert_eq!(
+            STGStructuralEdit::ChangeValueType {
+                target: value,
+                kind: STGValueKind::String,
+            }
+            .change(),
+            STGStructuralChange::ReplaceValue { target: value }
+        );
     }
 
     #[test]

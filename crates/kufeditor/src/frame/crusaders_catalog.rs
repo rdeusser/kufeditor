@@ -22,7 +22,7 @@ impl AppFrame {
             if self.crusaders_catalog.dormant(root.as_deref()) {
                 self.shell.invalidate_crusaders_catalog();
             }
-            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
+            self.reconcile_crusaders_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         }
@@ -30,13 +30,13 @@ impl AppFrame {
         let Some(root) = root else {
             self.shell.invalidate_crusaders_catalog();
             self.crusaders_catalog.not_configured();
-            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
+            self.reconcile_crusaders_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         };
 
         if self.crusaders_catalog.activate(&root) {
-            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
+            self.reconcile_crusaders_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
             return;
         }
@@ -49,7 +49,7 @@ impl AppFrame {
         {
             self.task_launches.crusaders_catalog += 1;
         }
-        self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
+        self.reconcile_crusaders_presentation_if_dictionary_changed(previous_dictionary, cx);
         cx.notify();
 
         let work_key = key.clone();
@@ -88,7 +88,7 @@ impl AppFrame {
             Err(error) => self.crusaders_catalog.finish_failed(key, error),
         };
         if accepted {
-            self.reconcile_save_presentation_if_dictionary_changed(previous_dictionary, cx);
+            self.reconcile_crusaders_presentation_if_dictionary_changed(previous_dictionary, cx);
             cx.notify();
         }
     }
@@ -105,7 +105,7 @@ impl AppFrame {
         }
     }
 
-    fn reconcile_save_presentation_if_dictionary_changed(
+    fn reconcile_crusaders_presentation_if_dictionary_changed(
         &mut self,
         previous: Option<Arc<NameDictionary>>,
         cx: &mut Context<Self>,
@@ -119,12 +119,19 @@ impl AppFrame {
         if unchanged {
             return;
         }
-        let Some(document) = self.active_document.filter(|document| {
-            self.workspace.document_kind(*document).ok() == Some(DocumentKind::CrusadersSave)
-        }) else {
+        let Some(document) = self.active_document else {
             return;
         };
-        self.reconcile_save_presentation(document, cx);
+        match self.workspace.document_kind(document).ok() {
+            Some(DocumentKind::CrusadersSave) => self.reconcile_save_presentation(document, cx),
+            Some(DocumentKind::CrusadersSTG) => self.reconcile_stg_presentation(
+                document,
+                crate::state::STGDocumentTransition::Catalog,
+                cx,
+            ),
+            Some(DocumentKind::TroopInfo | DocumentKind::SkillInfo | DocumentKind::TextSOX)
+            | None => {}
+        }
     }
 }
 
@@ -423,6 +430,9 @@ mod tests {
                     frame.crusaders_catalog.status(),
                     CrusadersCatalogStatus::Loading { key: current } if current == &key
                 ));
+                let presentation = frame.stg_presentations.get(stg).unwrap();
+                let presentation_generation = presentation.binding_generation();
+                let presentation_section = presentation.section();
                 assert_eq!(frame.task_launches.crusaders_catalog, 1);
                 assert_eq!(frame.shell.game(), Game::Heroes);
                 assert!(frame.shell.accepts_catalog(global_request));
@@ -442,6 +452,12 @@ mod tests {
                 };
                 assert_eq!(ready, &key);
                 let dictionary = Arc::clone(dictionary);
+                let presentation = frame.stg_presentations.get(stg).unwrap();
+                assert_eq!(
+                    presentation.binding_generation(),
+                    presentation_generation + 1
+                );
+                assert_eq!(presentation.section(), presentation_section);
 
                 frame.activate_document(save, cx);
                 assert!(matches!(

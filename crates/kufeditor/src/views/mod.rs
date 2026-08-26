@@ -5,5 +5,6 @@ pub mod patches;
 pub mod save;
 pub mod settings;
 pub mod skill;
+pub mod stg;
 pub mod text;
 pub mod troop;

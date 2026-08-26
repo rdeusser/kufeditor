@@ -2,6 +2,7 @@ mod actions;
 mod catalog_status;
 mod components;
 mod crusaders_catalog_status;
+mod float_edit;
 mod frame;
 mod notices;
 mod number_edit;

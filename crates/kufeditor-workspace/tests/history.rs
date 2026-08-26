@@ -12,11 +12,11 @@ use kufeditor_formats::{DiagnosticField, FormatError};
 use kufeditor_workspace::{
     ApplyOutcome, DiagnosticLocation, Document, DocumentEdit, DocumentID, DocumentKind,
     STGDocument, STGEventTarget, STGFloatTarget, STGFloatValue, STGHeaderTextField,
-    STGNumberTarget, STGParameterTarget, STGScriptKind, STGScriptTarget, STGStructuralEdit,
-    STGTailStatus, STGText, STGTextTarget, STGUnitField, STGUnitFloatField, STGValue, STGValueKind,
-    STGValueTarget, SaveDocument, SaveEditor, SaveNumberTarget, SaveTextField, SaveUnitField,
-    SkillDocument, SkillTextField, StateID, TextSOXDocument, TextSOXField, TroopDocument,
-    TroopField, Workspace, WorkspaceError,
+    STGNumberTarget, STGParameterTarget, STGScriptKind, STGScriptTarget, STGStructuralChange,
+    STGStructuralEdit, STGTailStatus, STGText, STGTextTarget, STGUnitField, STGUnitFloatField,
+    STGValue, STGValueKind, STGValueTarget, SaveDocument, SaveEditor, SaveNumberTarget,
+    SaveTextField, SaveUnitField, SkillDocument, SkillTextField, StateID, TextSOXDocument,
+    TextSOXField, TroopDocument, TroopField, Workspace, WorkspaceError,
 };
 
 #[path = "../../kufeditor-formats/tests/support/stg.rs"]
@@ -1277,6 +1277,13 @@ fn stg_structural_edits_are_single_exact_history_entries() {
         ApplyOutcome::Changed
     );
     assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 3);
+    assert_eq!(
+        workspace.pending_undo_stg_change(id).unwrap(),
+        Some(STGStructuralChange::RemoveEvent {
+            target: STGEventTarget { block: 0, event: 1 },
+        })
+    );
+    assert_eq!(workspace.pending_redo_stg_change(id).unwrap(), None);
     let after_insert = workspace.state_id(id).unwrap();
     assert_ne!(after_insert, saved_state);
 
@@ -1299,6 +1306,12 @@ fn stg_structural_edits_are_single_exact_history_entries() {
         workspace.stg_value(id, value_target).unwrap(),
         STGValue::Float(STGFloatValue::from_bits(0))
     );
+    assert_eq!(
+        workspace.pending_undo_stg_change(id).unwrap(),
+        Some(STGStructuralChange::ReplaceValue {
+            target: value_target,
+        })
+    );
     let retained = workspace.history_retained_bytes(id).unwrap();
 
     assert!(workspace.undo(id).unwrap());
@@ -1306,14 +1319,38 @@ fn stg_structural_edits_are_single_exact_history_entries() {
         workspace.stg_value(id, value_target).unwrap(),
         STGValue::String(STGText::Decoded("action".into()))
     );
+    assert_eq!(
+        workspace.pending_redo_stg_change(id).unwrap(),
+        Some(STGStructuralChange::ReplaceValue {
+            target: value_target,
+        })
+    );
+    assert_eq!(
+        workspace.pending_undo_stg_change(id).unwrap(),
+        Some(STGStructuralChange::RemoveEvent {
+            target: STGEventTarget { block: 0, event: 1 },
+        })
+    );
     assert!(workspace.undo(id).unwrap());
     assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 2);
+    assert_eq!(
+        workspace.pending_redo_stg_change(id).unwrap(),
+        Some(STGStructuralChange::InsertEvent {
+            target: STGEventTarget { block: 0, event: 1 },
+        })
+    );
     assert_eq!(workspace.state_id(id).unwrap(), saved_state);
     assert!(!workspace.is_dirty(id).unwrap());
     assert_eq!(workspace.history_retained_bytes(id).unwrap(), retained);
 
     assert!(workspace.redo(id).unwrap());
     assert_eq!(workspace.stg_event_block(id, 0).unwrap().event_count, 3);
+    assert_eq!(
+        workspace.pending_undo_stg_change(id).unwrap(),
+        Some(STGStructuralChange::RemoveEvent {
+            target: STGEventTarget { block: 0, event: 1 },
+        })
+    );
     assert!(workspace.redo(id).unwrap());
     assert_eq!(
         workspace.stg_value(id, value_target).unwrap(),

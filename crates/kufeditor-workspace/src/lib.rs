@@ -21,12 +21,12 @@ pub use kufeditor_formats::{
     STGDocument, STGEditor, STGEvent, STGEventBlock, STGEventTarget, STGFieldAccess,
     STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGNumberTarget,
     STGParameter, STGParameterTarget, STGReferenceKind, STGScript, STGScriptKind, STGScriptLabel,
-    STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralEdit, STGTailStatus, STGText,
-    STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue, STGValueKind,
-    STGValueTarget, SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField, SaveEquipmentGroup,
-    SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField, SaveTextField,
-    SaveUnitField, SaveUnitGroup, Severity, SkillDocument, SkillTextField, TextSOXDocument,
-    TextSOXField, TroopDocument, TroopField, TroopGroup,
+    STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralChange, STGStructuralEdit,
+    STGTailStatus, STGText, STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValue,
+    STGValueKind, STGValueTarget, SaveChoice, SaveDocument, SaveEditor, SaveEquipmentField,
+    SaveEquipmentGroup, SaveEquipmentSlot, SaveMainField, SaveNumberTarget, SaveRosterField,
+    SaveTextField, SaveUnitField, SaveUnitGroup, Severity, SkillDocument, SkillTextField,
+    TextSOXDocument, TextSOXField, TroopDocument, TroopField, TroopGroup,
 };
 pub use recent::{
     DEFAULT_RECENT_FILE_LIMIT, RECENT_FILE_LIMITS, RecentFiles, normalize_recent_limit,
@@ -576,8 +576,32 @@ impl Workspace {
         self.session(id).map(|session| !session.undo.is_empty())
     }
 
+    pub fn pending_undo_stg_change(
+        &self,
+        id: DocumentID,
+    ) -> Result<Option<STGStructuralChange>, WorkspaceError> {
+        self.session(id).map(|session| {
+            session
+                .undo
+                .back()
+                .and_then(HistoryEntry::stg_structural_change)
+        })
+    }
+
     pub fn can_redo(&self, id: DocumentID) -> Result<bool, WorkspaceError> {
         self.session(id).map(|session| !session.redo.is_empty())
+    }
+
+    pub fn pending_redo_stg_change(
+        &self,
+        id: DocumentID,
+    ) -> Result<Option<STGStructuralChange>, WorkspaceError> {
+        self.session(id).map(|session| {
+            session
+                .redo
+                .back()
+                .and_then(HistoryEntry::stg_structural_change)
+        })
     }
 
     pub fn is_dirty(&self, id: DocumentID) -> Result<bool, WorkspaceError> {
