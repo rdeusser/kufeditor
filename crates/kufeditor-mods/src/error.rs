@@ -3,7 +3,7 @@ use std::{io, path::PathBuf};
 use kufeditor_game::Game;
 use thiserror::Error;
 
-use crate::{ChangedInstalledFiles, InstallationID, RecoveryReport, RelativeGamePath};
+use crate::{BackupID, ChangedInstalledFiles, InstallationID, RecoveryReport, RelativeGamePath};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RelativeGamePathErrorKind {
@@ -238,6 +238,47 @@ pub enum UninstallErrorKind {
     UnsupportedOperationVersion,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackupErrorKind {
+    InvalidLabel,
+    TooManyFiles,
+    TooLarge,
+    SymbolicLink,
+    NotDirectory,
+    UnsupportedObject,
+    UnsafePath,
+    SourceChanged,
+    Missing,
+    InvalidMetadata,
+    UnsupportedVersion,
+    WrongRoot,
+    IDMismatch,
+    PayloadMismatch,
+    DestinationCollision,
+}
+
+impl std::fmt::Display for BackupErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidLabel => "the backup label is invalid",
+            Self::TooManyFiles => "the backup exceeds its file-count limit",
+            Self::TooLarge => "the backup exceeds its byte limit",
+            Self::SymbolicLink => "the backup path contains a symbolic link",
+            Self::NotDirectory => "the backup path is not a directory",
+            Self::UnsupportedObject => "the backup source contains an unsupported object",
+            Self::UnsafePath => "the backup contains an unsafe relative path",
+            Self::SourceChanged => "the backup source changed while it was copied",
+            Self::Missing => "the backup does not exist",
+            Self::InvalidMetadata => "the backup metadata is invalid",
+            Self::UnsupportedVersion => "the backup metadata version is unsupported",
+            Self::WrongRoot => "the backup belongs to another game root",
+            Self::IDMismatch => "the backup ID does not match its content",
+            Self::PayloadMismatch => "the backup payload does not match its metadata",
+            Self::DestinationCollision => "the backup ID collides with another directory",
+        })
+    }
+}
+
 impl std::fmt::Display for UninstallErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
@@ -357,6 +398,12 @@ pub enum ModError {
     ChangedInstalledFiles {
         installation: InstallationID,
         changes: Box<ChangedInstalledFiles>,
+    },
+    #[error("invalid backup at {path:?}: {kind}")]
+    InvalidBackup {
+        path: PathBuf,
+        backup: Option<BackupID>,
+        kind: BackupErrorKind,
     },
     #[error("could not read ZIP package {path:?}: {source}")]
     ZIP {
@@ -479,6 +526,18 @@ impl ModError {
         Self::InvalidUninstall {
             installation,
             path,
+            kind,
+        }
+    }
+
+    pub(crate) fn backup(
+        path: impl Into<PathBuf>,
+        backup: Option<BackupID>,
+        kind: BackupErrorKind,
+    ) -> Self {
+        Self::InvalidBackup {
+            path: path.into(),
+            backup,
             kind,
         }
     }

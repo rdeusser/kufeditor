@@ -1,5 +1,6 @@
 //! Mod packages, backups, installation, and restoration.
 
+mod backup;
 mod error;
 mod install;
 mod library;
@@ -10,10 +11,14 @@ mod progress;
 mod registry;
 mod transaction;
 
+pub use backup::{
+    BackupFileInfo, BackupInfo, BackupIssue, BackupScan, CreateBackupRequest, RestoreBackupReport,
+    RestoreBackupRequest,
+};
 pub use error::{
-    GameRootErrorKind, InstallationConflictKind, InstalledFileErrorKind, ManifestErrorKind,
-    ModError, PackageErrorKind, RegistryErrorKind, RelativeGamePathErrorKind, SourceFileErrorKind,
-    TargetPathErrorKind, UninstallErrorKind,
+    BackupErrorKind, GameRootErrorKind, InstallationConflictKind, InstalledFileErrorKind,
+    ManifestErrorKind, ModError, PackageErrorKind, RegistryErrorKind, RelativeGamePathErrorKind,
+    SourceFileErrorKind, TargetPathErrorKind, UninstallErrorKind,
 };
 pub use install::{
     ApplyModReport, ApplyModRequest, ChangedInstalledFile, ChangedInstalledFiles,

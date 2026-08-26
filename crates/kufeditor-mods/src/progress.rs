@@ -17,6 +17,12 @@ pub enum ModProgressPhase {
     StagingUninstall,
     RestoringFiles,
     PublishingUninstall,
+    ScanningBackup,
+    CopyingBackup,
+    PublishingBackup,
+    StagingBackupRestore,
+    CreatingRestoreRecovery,
+    RestoringBackup,
     RollingBack,
 }
 

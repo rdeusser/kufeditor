@@ -14,11 +14,11 @@ use tempfile::{Builder as TempBuilder, NamedTempFile};
 use zip::ZipArchive;
 
 use crate::{
-    ChangedInstalledFile, ChangedInstalledFiles, FileSHA256, GameRoot, GameRootErrorKind,
-    GameRootKey, InstallationID, InstalledFile, InstalledFileChangeKind, ModError, ModLimits,
-    ModPackageID, ModPackageInfo, ModProgress, ModProgressPhase, ModProgressReporter,
-    ModStorePaths, ModTimestamp, OperationID, PackageErrorKind, RelativeGamePath,
-    TargetPathErrorKind, UninstallErrorKind,
+    BackupErrorKind, BackupFileInfo, BackupID, ChangedInstalledFile, ChangedInstalledFiles,
+    FileSHA256, GameRoot, GameRootErrorKind, GameRootKey, InstallationID, InstalledFile,
+    InstalledFileChangeKind, ModError, ModLimits, ModPackageID, ModPackageInfo, ModProgress,
+    ModProgressPhase, ModProgressReporter, ModStorePaths, ModTimestamp, OperationID,
+    PackageErrorKind, RelativeGamePath, TargetPathErrorKind, UninstallErrorKind,
     library::prepare_mod_store_root,
     manifest::{game_name, parse_game},
     package::inspect_package,
@@ -173,7 +173,8 @@ impl FileTransaction {
         files: &[RelativeGamePath],
     ) -> Result<Self, ModError> {
         let operations = prepare_operations_directory(stores)?;
-        let (operation_id, directory) = create_operation_directory(&operations, root, package_id)?;
+        let (operation_id, directory) =
+            create_operation_directory(&operations, root.key(), package_id.as_bytes())?;
         let installation_id =
             InstallationID::for_installation(root.key(), package_id, operation_id);
         let transaction_files = files
@@ -693,6 +694,484 @@ impl FileTransaction {
         publish_control_file(
             &self.directory,
             &self.directory.join("operation-v1.json"),
+            &bytes,
+        )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct OverlayTransaction {
+    root: GameRoot,
+    directory: PathBuf,
+    operation_id: OperationID,
+    backup_id: BackupID,
+    files: Vec<OverlayFile>,
+    created_directories: Vec<RelativeGamePath>,
+    committed_indices: Vec<usize>,
+    state: OperationState,
+}
+
+#[derive(Debug)]
+struct OverlayFile {
+    path: RelativeGamePath,
+    staged_sha256: FileSHA256,
+    original_existed: Option<bool>,
+    original_sha256: Option<FileSHA256>,
+    committed: bool,
+}
+
+impl OverlayTransaction {
+    pub(crate) fn begin_backup_restore(
+        stores: &ModStorePaths,
+        root: &GameRoot,
+        backup_id: BackupID,
+        files: &[BackupFileInfo],
+    ) -> Result<Self, ModError> {
+        let operations = prepare_operations_directory(stores)?;
+        let (operation_id, directory) =
+            create_operation_directory(&operations, root.key(), backup_id.as_bytes())?;
+        let transaction = Self {
+            root: root.clone(),
+            directory,
+            operation_id,
+            backup_id,
+            files: files
+                .iter()
+                .map(|file| OverlayFile {
+                    path: file.path().clone(),
+                    staged_sha256: file.sha256(),
+                    original_existed: None,
+                    original_sha256: None,
+                    committed: false,
+                })
+                .collect(),
+            created_directories: Vec::new(),
+            committed_indices: Vec::new(),
+            state: OperationState::Planned,
+        };
+        if let Err(error) = transaction.write_image() {
+            let _ = fs::remove_dir_all(&transaction.directory);
+            return Err(error);
+        }
+        Ok(transaction)
+    }
+
+    pub(crate) fn stage_backup(
+        &mut self,
+        backup_directory: &Path,
+        limits: &ModLimits,
+        progress: &mut impl ModProgressReporter,
+        failpoint: &TransactionFailpoint,
+    ) -> Result<(), ModError> {
+        failpoint.check_state(OperationState::Planned, &self.directory)?;
+        let staged_root = self.directory.join("staged");
+        create_owned_directory(&staged_root, "create backup-restore staging")?;
+        let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
+        for (index, file) in self.files.iter().enumerate() {
+            let source = backup_directory.join("files").join(file.path.as_ref());
+            let destination = staged_root.join(file.path.as_ref());
+            let digest = copy_stable_file(
+                &source,
+                &destination,
+                limits.max_file_bytes,
+                "stage backup file for restore",
+            )?;
+            if digest != file.staged_sha256 {
+                return Err(ModError::backup(
+                    source,
+                    Some(self.backup_id),
+                    BackupErrorKind::SourceChanged,
+                ));
+            }
+            let completed = u64::try_from(index.saturating_add(1)).unwrap_or(u64::MAX);
+            if progress
+                .report(&ModProgress {
+                    phase: ModProgressPhase::StagingBackupRestore,
+                    completed,
+                    total,
+                    path: Some(file.path.clone()),
+                })
+                .is_break()
+            {
+                return Err(ModError::Canceled {
+                    operation: "backup restore",
+                });
+            }
+        }
+        self.state = OperationState::Staged;
+        self.write_image()?;
+        failpoint.check_state(OperationState::Staged, &self.directory)
+    }
+
+    pub(crate) fn create_recovery(
+        &mut self,
+        limits: &ModLimits,
+        progress: &mut impl ModProgressReporter,
+        failpoint: &TransactionFailpoint,
+    ) -> Result<(), ModError> {
+        validate_game_root(&self.root)?;
+        let before_root = self.directory.join("before");
+        create_owned_directory(&before_root, "create backup-restore recovery")?;
+        let mut missing_directories = HashSet::new();
+        let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
+        for index in 0..self.files.len() {
+            let path = self
+                .files
+                .get(index)
+                .map(|file| file.path.clone())
+                .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+            let inspection = inspect_target(&self.root, &path, limits)?;
+            for directory in inspection.missing_directories {
+                missing_directories.insert(directory);
+            }
+            let (original_existed, original_sha256) = if inspection.exists {
+                let digest = copy_stable_file(
+                    &inspection.target,
+                    &self.before_path(&path),
+                    limits.max_file_bytes,
+                    "copy game file into restore recovery",
+                )?;
+                (true, Some(digest))
+            } else {
+                (false, None)
+            };
+            let Some(file) = self.files.get_mut(index) else {
+                return Err(invalid_transaction_index(&self.directory));
+            };
+            file.original_existed = Some(original_existed);
+            file.original_sha256 = original_sha256;
+            let completed = u64::try_from(index.saturating_add(1)).unwrap_or(u64::MAX);
+            if progress
+                .report(&ModProgress {
+                    phase: ModProgressPhase::CreatingRestoreRecovery,
+                    completed,
+                    total,
+                    path: Some(path),
+                })
+                .is_break()
+            {
+                return Err(ModError::Canceled {
+                    operation: "backup restore",
+                });
+            }
+        }
+        self.created_directories = missing_directories.into_iter().collect();
+        self.created_directories.sort_by(|left, right| {
+            left.component_count()
+                .cmp(&right.component_count())
+                .then_with(|| left.portable_key().cmp(right.portable_key()))
+        });
+        self.state = OperationState::Recoverable;
+        self.write_image()?;
+        failpoint.check_state(OperationState::Recoverable, &self.directory)
+    }
+
+    pub(crate) fn commit(
+        &mut self,
+        limits: &ModLimits,
+        progress: &mut impl ModProgressReporter,
+        failpoint: &TransactionFailpoint,
+    ) -> Result<(), ModError> {
+        let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
+        if progress
+            .report(&ModProgress {
+                phase: ModProgressPhase::RestoringBackup,
+                completed: 0,
+                total,
+                path: None,
+            })
+            .is_break()
+        {
+            return Err(ModError::Canceled {
+                operation: "backup restore",
+            });
+        }
+        self.state = OperationState::Committing;
+        self.write_image()?;
+        for index in 0..self.files.len() {
+            let path = self
+                .files
+                .get(index)
+                .map(|file| file.path.clone())
+                .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+            self.verify_original(index, limits)?;
+            self.prepare_target_parent(&path)?;
+            let target = self.root.canonical_path().join(path.as_ref());
+            let expected = self
+                .files
+                .get(index)
+                .map(|file| file.staged_sha256)
+                .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+            publish_file(
+                &self.staged_path(&path),
+                &target,
+                expected,
+                limits.max_file_bytes,
+            )?;
+            self.committed_indices.push(index);
+            let Some(file) = self.files.get_mut(index) else {
+                return Err(invalid_transaction_index(&self.directory));
+            };
+            file.committed = true;
+            self.write_image()?;
+            failpoint.check_committed_paths(self.committed_indices.len(), &target)?;
+            let completed = u64::try_from(index.saturating_add(1)).unwrap_or(u64::MAX);
+            if progress
+                .report(&ModProgress {
+                    phase: ModProgressPhase::RestoringBackup,
+                    completed,
+                    total,
+                    path: Some(path),
+                })
+                .is_break()
+            {
+                return Err(ModError::Canceled {
+                    operation: "backup restore",
+                });
+            }
+        }
+        self.state = OperationState::Committed;
+        self.write_image()
+    }
+
+    pub(crate) fn recover_error(
+        &mut self,
+        error: ModError,
+        progress: &mut impl ModProgressReporter,
+        failpoint: &TransactionFailpoint,
+    ) -> ModError {
+        if self.committed_indices.is_empty() {
+            self.remove_created_directories();
+            return match fs::remove_dir_all(&self.directory) {
+                Ok(()) => error,
+                Err(cleanup_error) => ModError::io(
+                    "remove incomplete backup restore",
+                    &self.directory,
+                    cleanup_error,
+                ),
+            };
+        }
+        let committed = self.committed_paths();
+        let committed_set = self
+            .committed_indices
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        let unchanged = self
+            .files
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !committed_set.contains(index))
+            .map(|(_, file)| file.path.clone())
+            .collect::<Vec<_>>();
+        let rollback_indices = self
+            .committed_indices
+            .iter()
+            .rev()
+            .copied()
+            .collect::<Vec<_>>();
+        let total = u64::try_from(rollback_indices.len()).unwrap_or(u64::MAX);
+        let mut rolled_back = Vec::new();
+        let mut rollback_failed = Vec::new();
+        for (attempt_index, index) in rollback_indices.into_iter().enumerate() {
+            let path = match self.files.get(index) {
+                Some(file) => file.path.clone(),
+                None => continue,
+            };
+            let result = if failpoint.fails_rollback_attempt(attempt_index.saturating_add(1)) {
+                Err(injected_error(
+                    "roll back backup restore",
+                    &self.root.canonical_path().join(path.as_ref()),
+                ))
+            } else {
+                self.restore_original(index)
+            };
+            match result {
+                Ok(()) => rolled_back.push(path.clone()),
+                Err(_) => rollback_failed.push(path.clone()),
+            }
+            let completed = u64::try_from(attempt_index.saturating_add(1)).unwrap_or(u64::MAX);
+            let _ = progress.report(&ModProgress {
+                phase: ModProgressPhase::RollingBack,
+                completed,
+                total,
+                path: Some(path),
+            });
+        }
+        self.remove_created_directories();
+        self.state = OperationState::Recoverable;
+        let _ = self.write_image();
+        ModError::transaction(
+            "backup restore",
+            error,
+            RecoveryReport {
+                committed,
+                rolled_back,
+                rollback_failed,
+                unchanged,
+            },
+        )
+    }
+
+    pub(crate) fn committed_paths(&self) -> Vec<RelativeGamePath> {
+        self.committed_indices
+            .iter()
+            .filter_map(|index| self.files.get(*index))
+            .map(|file| file.path.clone())
+            .collect()
+    }
+
+    pub(crate) fn finish_success(self) -> Result<(), ModError> {
+        let operations = self.directory.parent().map(Path::to_path_buf);
+        fs::remove_dir_all(&self.directory).map_err(|error| {
+            ModError::io("remove completed backup restore", &self.directory, error)
+        })?;
+        if let Some(operations) = operations {
+            sync_directory(&operations)?;
+        }
+        Ok(())
+    }
+
+    fn verify_original(&self, index: usize, limits: &ModLimits) -> Result<(), ModError> {
+        let file = self
+            .files
+            .get(index)
+            .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+        let inspection = inspect_target(&self.root, &file.path, limits)?;
+        match (file.original_existed, inspection.exists) {
+            (Some(false), false) => Ok(()),
+            (Some(true), true) => {
+                let expected = file
+                    .original_sha256
+                    .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+                let actual = hash_stable_file(&inspection.target, limits.max_file_bytes)?;
+                if actual == expected {
+                    Ok(())
+                } else {
+                    Err(ModError::target(
+                        inspection.target,
+                        TargetPathErrorKind::Changed,
+                    ))
+                }
+            }
+            _ => Err(ModError::target(
+                inspection.target,
+                TargetPathErrorKind::Changed,
+            )),
+        }
+    }
+
+    fn prepare_target_parent(&self, path: &RelativeGamePath) -> Result<(), ModError> {
+        let parent = path.as_ref().parent().unwrap_or_else(|| Path::new(""));
+        let mut current = self.root.canonical_path().to_path_buf();
+        let mut relative = PathBuf::new();
+        for component in parent.components() {
+            current.push(component.as_os_str());
+            relative.push(component.as_os_str());
+            match fs::symlink_metadata(&current) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink() {
+                        return Err(ModError::target(current, TargetPathErrorKind::SymbolicLink));
+                    }
+                    if !metadata.is_dir() {
+                        return Err(ModError::target(
+                            current,
+                            TargetPathErrorKind::ParentNotDirectory,
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    let relative_text = relative.to_string_lossy().replace('\\', "/");
+                    if !self
+                        .created_directories
+                        .iter()
+                        .any(|directory| directory.as_str() == relative_text)
+                    {
+                        return Err(ModError::target(current, TargetPathErrorKind::Changed));
+                    }
+                    fs::create_dir(&current).map_err(|error| {
+                        ModError::io("create backup-restore target directory", &current, error)
+                    })?;
+                }
+                Err(error) => {
+                    return Err(ModError::io(
+                        "inspect backup-restore target directory",
+                        current,
+                        error,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn restore_original(&self, index: usize) -> Result<(), ModError> {
+        let file = self
+            .files
+            .get(index)
+            .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+        let target = self.root.canonical_path().join(file.path.as_ref());
+        validate_rollback_target(&target)?;
+        if file.original_existed == Some(true) {
+            let expected = file
+                .original_sha256
+                .ok_or_else(|| invalid_transaction_index(&self.directory))?;
+            publish_file(&self.before_path(&file.path), &target, expected, u64::MAX)
+        } else {
+            match fs::remove_file(&target) {
+                Ok(()) => sync_parent_directory(&target),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(ModError::io("remove restored backup file", target, error)),
+            }
+        }
+    }
+
+    fn remove_created_directories(&self) {
+        for path in self.created_directories.iter().rev() {
+            let _ = fs::remove_dir(self.root.canonical_path().join(path.as_ref()));
+        }
+    }
+
+    fn staged_path(&self, path: &RelativeGamePath) -> PathBuf {
+        self.directory.join("staged").join(path.as_ref())
+    }
+
+    fn before_path(&self, path: &RelativeGamePath) -> PathBuf {
+        self.directory.join("before").join(path.as_ref())
+    }
+
+    fn write_image(&self) -> Result<(), ModError> {
+        let mut bytes = serde_json::to_vec_pretty(&serde_json::json!({
+            "formatVersion": OPERATION_VERSION,
+            "operationID": self.operation_id.to_string(),
+            "kind": "restoreBackup",
+            "state": self.state,
+            "backupID": self.backup_id.to_string(),
+            "game": game_name(self.root.game()),
+            "configuredRoot": self.root.configured_path().to_string_lossy(),
+            "canonicalRoot": self.root.canonical_path().to_string_lossy(),
+            "rootKey": self.root.key().to_string(),
+            "files": self.files.iter().map(|file| serde_json::json!({
+                "path": file.path.as_str(),
+                "stagedSHA256": file.staged_sha256.to_string(),
+                "originalExisted": file.original_existed,
+                "originalSHA256": file.original_sha256.map(|digest| digest.to_string()),
+                "committed": file.committed,
+            })).collect::<Vec<_>>(),
+            "createdDirectories": self.created_directories.iter()
+                .map(RelativeGamePath::as_str).collect::<Vec<_>>(),
+        }))
+        .map_err(|error| {
+            ModError::io(
+                "serialize backup-restore operation",
+                &self.directory,
+                io::Error::new(io::ErrorKind::InvalidData, error),
+            )
+        })?;
+        bytes.push(b'\n');
+        publish_control_file(
+            &self.directory,
+            &self.directory.join("restore-v1.json"),
             &bytes,
         )
     }
@@ -1486,17 +1965,17 @@ fn prepare_operations_directory(stores: &ModStorePaths) -> Result<PathBuf, ModEr
 
 fn create_operation_directory(
     operations: &Path,
-    root: &GameRoot,
-    package_id: ModPackageID,
+    root_key: GameRootKey,
+    seed: &[u8],
 ) -> Result<(OperationID, PathBuf), ModError> {
     for _ in 0..128 {
-        let operation_id = next_operation_id(root.key(), package_id);
+        let operation_id = next_operation_id(root_key, seed);
         let directory = operations.join(operation_id.to_string());
         match fs::create_dir(&directory) {
             Ok(()) => return Ok((operation_id, directory)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => {
-                return Err(ModError::io("create apply operation", directory, error));
+                return Err(ModError::io("create operation directory", directory, error));
             }
         }
     }
@@ -1510,7 +1989,7 @@ fn create_operation_directory(
     ))
 }
 
-fn next_operation_id(root_key: GameRootKey, package_id: ModPackageID) -> OperationID {
+fn next_operation_id(root_key: GameRootKey, seed: &[u8]) -> OperationID {
     let sequence = NEXT_OPERATION.fetch_add(1, Ordering::Relaxed);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1518,7 +1997,7 @@ fn next_operation_id(root_key: GameRootKey, package_id: ModPackageID) -> Operati
     let mut hasher = Sha256::new();
     hasher.update(b"kufeditor-operation-v1\0");
     hasher.update(root_key.as_bytes());
-    hasher.update(package_id.as_bytes());
+    hasher.update(seed);
     hasher.update(std::process::id().to_le_bytes());
     hasher.update(sequence.to_le_bytes());
     hasher.update(now.to_le_bytes());
