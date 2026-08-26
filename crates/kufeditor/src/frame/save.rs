@@ -1615,6 +1615,7 @@ impl AppFrame {
         if cursor != stored_cursor {
             self.set_save_list_cursor(document, cursor, cx);
         }
+        self.reveal_save_list_cursor(kind, cx);
 
         if let SaveListCursor::Unit { source_index } = cursor {
             self.inspect_save_unit(document, source_index, cx);
@@ -3080,6 +3081,64 @@ mod tests {
     }
 
     #[gpui::test]
+    fn save_virtual_unit_native_activation_reveals_an_evicted_cursor(cx: &mut TestAppContext) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(
+            &frame,
+            cx,
+            SaveFixture::new(96, 0, 0)
+                .with_unit_roles(std::iter::repeat_n(3, 96))
+                .build(),
+        );
+
+        select_and_draw(&frame, cx, document, SaveSection::Units);
+        focus_frame(&frame, cx);
+        press_tabs(cx, 7);
+        cx.simulate_keystrokes("end");
+        draw_frame(cx, &frame);
+        let binding_before_scroll =
+            frame.update(cx, |frame, _| frame.save_lists.units.binding.get());
+
+        scroll_save_list_away_from_cursor(&frame, cx, SaveListKind::Units, 0);
+        assert_eq!(
+            frame.update(cx, |frame, _| frame.save_lists.units.binding.get()),
+            binding_before_scroll,
+        );
+        assert!(has_debug_bounds(cx, "save-unit-master-row-0"));
+        let generation_before_activation =
+            assert_save_list_cursor_is_evicted(&frame, cx, SaveListKind::Units);
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.save_lists.units.focus.is_focused(window));
+        });
+
+        key_cycle(cx, "enter");
+        draw_frame(cx, &frame);
+
+        assert!(has_debug_bounds(cx, "save-unit-master-row-95"));
+        assert!(rendered_unit_count(cx, 96) < 96);
+        let (cursor, position, row_count, generation_after_activation, offset) =
+            save_list_control_state(&frame, cx, SaveListKind::Units);
+        assert_eq!(cursor, SaveListCursor::Unit { source_index: 95 });
+        assert_eq!(position, 95);
+        assert_eq!(row_count, 96);
+        assert!(generation_after_activation > generation_before_activation);
+        assert!(offset < px(0.0));
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.save_lists.units.focus.is_focused(window));
+            assert_eq!(
+                frame
+                    .save_presentations
+                    .get(document)
+                    .unwrap()
+                    .inspected_unit(),
+                95,
+            );
+            assert!(!frame.workspace.can_undo(document).unwrap());
+        });
+    }
+
+    #[gpui::test]
     fn save_virtual_roster_keyboard_navigation_reaches_an_offscreen_nonfirst_field(
         cx: &mut TestAppContext,
     ) {
@@ -3221,6 +3280,83 @@ mod tests {
     }
 
     #[gpui::test]
+    fn save_virtual_roster_native_enter_reveals_an_evicted_nonfirst_field_before_editing(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 96, 0).build());
+        let target = SaveNumberTarget::Roster {
+            record: 95,
+            field: SaveRosterField::Value64,
+        };
+
+        select_and_draw(&frame, cx, document, SaveSection::Roster);
+        focus_frame(&frame, cx);
+        press_tabs(cx, 6);
+        cx.simulate_keystrokes("end right right right right");
+        draw_frame(cx, &frame);
+        let binding_before_scroll =
+            frame.update(cx, |frame, _| frame.save_lists.roster.binding.get());
+
+        scroll_save_list_away_from_cursor(&frame, cx, SaveListKind::Roster, 0);
+        assert_eq!(
+            frame.update(cx, |frame, _| frame.save_lists.roster.binding.get()),
+            binding_before_scroll,
+        );
+        assert!(has_debug_bounds(cx, "save-roster-field-value-64"));
+        let generation_before_activation =
+            assert_save_list_cursor_is_evicted(&frame, cx, SaveListKind::Roster);
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.save_lists.roster.focus.is_focused(window));
+        });
+
+        key_down(cx, "enter");
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_none()));
+        key_up(cx, "enter");
+        draw_frame(cx, &frame);
+
+        assert!(has_debug_bounds(cx, "save-roster-95-field-value-64"));
+        assert!(rendered_roster_count(cx, 96) < 96);
+        let (cursor, position, row_count, generation_after_activation, offset) =
+            save_list_control_state(&frame, cx, SaveListKind::Roster);
+        assert_eq!(
+            cursor,
+            SaveListCursor::Roster {
+                record: 95,
+                field: SaveRosterField::Value64,
+            },
+        );
+        assert_eq!(position, 95);
+        assert_eq!(row_count, 96);
+        assert!(generation_after_activation > generation_before_activation);
+        assert!(offset < px(0.0));
+        assert_save_number_draft(&frame, cx, document, target);
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.focus.is_focused(window));
+            assert!(!frame.workspace.can_undo(document).unwrap());
+        });
+
+        cx.simulate_keystrokes("9 enter");
+        assert_single_save_number_edit(&frame, cx, document, target, 0, 9);
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(
+                        document,
+                        SaveNumberTarget::Roster {
+                            record: 0,
+                            field: SaveRosterField::Value64,
+                        },
+                    )
+                    .unwrap(),
+                0,
+            );
+        });
+    }
+
+    #[gpui::test]
     fn save_virtual_second_array_keyboard_navigation_reaches_an_offscreen_typed_target(
         cx: &mut TestAppContext,
     ) {
@@ -3322,6 +3458,110 @@ mod tests {
                 edit.target
                     .is_save(document, SaveNumberTarget::SecondArray { record: 95 })
             }));
+        });
+    }
+
+    #[gpui::test]
+    fn save_virtual_second_array_native_space_reveals_an_evicted_cursor_before_editing(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::actions::bind);
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 0, 96).build());
+        let target = SaveNumberTarget::SecondArray { record: 95 };
+
+        select_and_draw(&frame, cx, document, SaveSection::Missions);
+        focus_frame(&frame, cx);
+        press_tabs(cx, 27);
+        cx.simulate_keystrokes("end");
+        draw_frame(cx, &frame);
+        let binding_before_scroll =
+            frame.update(cx, |frame, _| frame.save_lists.second_array.binding.get());
+
+        scroll_save_list_away_from_cursor(&frame, cx, SaveListKind::SecondArray, 0);
+        assert_eq!(
+            frame.update(cx, |frame, _| {
+                frame.save_lists.second_array.binding.get()
+            }),
+            binding_before_scroll,
+        );
+        assert!(has_debug_bounds(cx, "save-number-second-array-0"));
+        let generation_before_activation =
+            assert_save_list_cursor_is_evicted(&frame, cx, SaveListKind::SecondArray);
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.save_lists.second_array.focus.is_focused(window));
+        });
+
+        platform_space_key_down(cx);
+        frame.update(cx, |frame, _| assert!(frame.number_edit.is_none()));
+        key_up(cx, "space");
+        draw_frame(cx, &frame);
+
+        assert!(has_debug_bounds(cx, "save-number-second-array-95"));
+        assert!(rendered_second_array_count(cx, 96) < 96);
+        let (cursor, position, row_count, generation_after_activation, offset) =
+            save_list_control_state(&frame, cx, SaveListKind::SecondArray);
+        assert_eq!(cursor, SaveListCursor::SecondArray { record: 95 });
+        assert_eq!(position, 95);
+        assert_eq!(row_count, 96);
+        assert!(generation_after_activation > generation_before_activation);
+        assert!(offset < px(0.0));
+        assert_save_number_draft(&frame, cx, document, target);
+        frame.update_in(cx, |frame, window, _| {
+            assert!(frame.focus.is_focused(window));
+            assert!(!frame.workspace.can_undo(document).unwrap());
+        });
+
+        cx.simulate_keystrokes("7 enter");
+        assert_single_save_number_edit(&frame, cx, document, target, 95, 7);
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame
+                    .workspace
+                    .save_number(document, SaveNumberTarget::SecondArray { record: 0 })
+                    .unwrap(),
+                0,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn save_virtual_focus_guard_rejects_stale_generation_and_source_binding(
+        cx: &mut TestAppContext,
+    ) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let document = activate_save(&frame, cx, SaveFixture::new(0, 4, 0).build());
+
+        select_and_draw(&frame, cx, document, SaveSection::Roster);
+        frame.update_in(cx, |frame, window, cx| {
+            frame.move_save_list_cursor(
+                document,
+                SaveListKind::Roster,
+                SaveListMovement::End,
+                window,
+                cx,
+            );
+            let control = &frame.save_lists.roster;
+            let binding = control.binding.get().unwrap();
+            let generation = control.generation.get();
+            control.next_generation();
+            assert!(!frame.save_list_focus_request_is_current(
+                SaveListKind::Roster,
+                binding,
+                generation,
+            ));
+
+            let stale_source = super::super::SaveListBinding {
+                position: 0,
+                ..binding
+            };
+            let generation = control.generation.get();
+            control.binding.set(Some(stale_source));
+            assert!(!frame.save_list_focus_request_is_current(
+                SaveListKind::Roster,
+                stale_source,
+                generation,
+            ));
         });
     }
 
@@ -4637,6 +4877,66 @@ mod tests {
                 control.scroll.0.borrow().base_handle.offset().y,
             )
         })
+    }
+
+    #[track_caller]
+    fn assert_save_list_cursor_is_evicted(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        kind: SaveListKind,
+    ) -> u64 {
+        frame.update(cx, |frame, _| {
+            let control = frame.save_lists.get(kind);
+            let binding = control.binding.get().unwrap();
+            assert_eq!(control.scroll.logical_scroll_top_index(), 0);
+            assert_eq!(control.scroll.0.borrow().base_handle.offset().y, px(0.0));
+            assert!(
+                binding.position >= frame.save_list_page_size(kind, binding.row_count),
+                "typed cursor must be outside the direct-scroll viewport",
+            );
+            control.generation.get()
+        })
+    }
+
+    #[track_caller]
+    fn assert_save_number_draft(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        document: DocumentID,
+        target: SaveNumberTarget,
+    ) {
+        frame.update(cx, |frame, _| {
+            assert!(
+                frame
+                    .number_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.target.is_save(document, target)),
+                "expected save number draft for {target:?}",
+            );
+        });
+    }
+
+    #[track_caller]
+    fn assert_single_save_number_edit(
+        frame: &Entity<AppFrame>,
+        cx: &mut VisualTestContext,
+        document: DocumentID,
+        target: SaveNumberTarget,
+        original: i64,
+        edited: i64,
+    ) {
+        frame.update(cx, |frame, _| {
+            assert_eq!(
+                frame.workspace.save_number(document, target).unwrap(),
+                edited,
+            );
+            assert!(frame.workspace.undo(document).unwrap());
+            assert_eq!(
+                frame.workspace.save_number(document, target).unwrap(),
+                original,
+            );
+            assert!(!frame.workspace.undo(document).unwrap());
+        });
     }
 
     fn has_debug_bounds(cx: &mut VisualTestContext, selector: &str) -> bool {
