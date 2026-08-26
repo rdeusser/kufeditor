@@ -1,0 +1,5 @@
+# kufeditor STG corpus manifest v1
+path_fnv64	file_fnv64	bytes	tail	raw_region	raw_offset	units	areas	variables	blocks	events	conditions	actions	footer_entries	suffix_bytes
+117fa9f4c47429a7	5523ba4d5007d51c	1826	parsed	-	-	1	1	4	2	2	1	1	2	4
+a7432ba77832d043	3af08abe5f642fdd	648	parsed	-	-	0	0	0	0	0	0	0	0	4
+ecd74ef3a458686d	f10485bfa92ab535	1175	raw	areas	1172	1	-	-	-	-	-	-	-	-

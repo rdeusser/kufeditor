@@ -8,6 +8,10 @@ use std::collections::HashSet;
 use encoding_rs::EUC_KR;
 
 #[path = "support/stg.rs"]
+#[allow(
+    dead_code,
+    reason = "the shared STG fixture exposes corpus helpers used by another integration test"
+)]
 mod stg_support;
 
 use kufeditor_formats::{

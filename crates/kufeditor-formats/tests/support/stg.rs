@@ -1,7 +1,13 @@
+use std::{fs, io, path::Path};
+
 const MAGIC: u32 = 1_001;
 const HEADER_SIZE: usize = 620;
 const UNIT_SIZE: usize = 544;
 const AREA_SIZE: usize = 84;
+
+pub const SYNTHETIC_PARSED_STG_PATH: &str = "nested/Alpha.STG";
+pub const SYNTHETIC_EMPTY_STG_PATH: &str = "nested/deeper/beta.stg";
+pub const SYNTHETIC_RAW_STG_PATH: &str = "raw/Gamma.StG";
 
 #[derive(Clone, Debug)]
 pub struct STGFixture {
@@ -165,6 +171,32 @@ pub fn stg_prefix_fixture(unit_count: usize) -> Vec<u8> {
     };
     bytes.resize(bytes.len() + unit_bytes, 0);
     bytes
+}
+
+pub fn synthetic_raw_stg_fixture() -> Vec<u8> {
+    let mut bytes = stg_prefix_fixture(1);
+    bytes.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+    bytes
+}
+
+pub fn synthetic_stg_corpus_files() -> [(&'static str, Vec<u8>); 3] {
+    [
+        (SYNTHETIC_PARSED_STG_PATH, complete_stg_fixture().bytes),
+        (SYNTHETIC_EMPTY_STG_PATH, empty_stg_fixture()),
+        (SYNTHETIC_RAW_STG_PATH, synthetic_raw_stg_fixture()),
+    ]
+}
+
+pub fn write_synthetic_stg_corpus(root: &Path) -> io::Result<()> {
+    for (relative_path, bytes) in synthetic_stg_corpus_files() {
+        let path = root.join(relative_path);
+        let Some(parent) = path.parent() else {
+            return Err(io::Error::other("synthetic STG path has no parent"));
+        };
+        fs::create_dir_all(parent)?;
+        fs::write(path, bytes)?;
+    }
+    fs::write(root.join("ignored.txt"), b"not an STG file")
 }
 
 #[derive(Clone, Copy, Debug)]
