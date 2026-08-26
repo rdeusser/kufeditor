@@ -286,6 +286,13 @@ impl STGNumberTarget {
 
         match self {
             Self::Unit { field, .. } => field.editor(),
+            Self::Skill {
+                field: STGSkillField::ID,
+                ..
+            } => Some(STGEditor::Number {
+                minimum: 0,
+                maximum: 254,
+            }),
             _ => Some(STGEditor::number(self.storage_bounds())),
         }
     }
@@ -361,24 +368,15 @@ pub struct STGChoice {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum STGEditor {
-    Number {
-        minimum: i64,
-        maximum: i64,
-    },
-    Choice {
-        choices: &'static [STGChoice],
-        minimum: i64,
-        maximum: i64,
-    },
+    Number { minimum: i64, maximum: i64 },
+    Choice { choices: &'static [STGChoice] },
 }
 
 impl STGEditor {
-    pub const fn storage_bounds(self) -> (i64, i64) {
+    pub const fn number_bounds(self) -> Option<(i64, i64)> {
         match self {
-            Self::Number { minimum, maximum }
-            | Self::Choice {
-                minimum, maximum, ..
-            } => (minimum, maximum),
+            Self::Number { minimum, maximum } => Some((minimum, maximum)),
+            Self::Choice { .. } => None,
         }
     }
 
@@ -498,23 +496,29 @@ impl STGUnitField {
         match self {
             Self::UCD => Some(STGEditor::Choice {
                 choices: &UCD_CHOICES,
-                minimum: U8_BOUNDS.0,
-                maximum: U8_BOUNDS.1,
             }),
             Self::HeroFlag => Some(STGEditor::Choice {
                 choices: &BOOLEAN_CHOICES,
-                minimum: U8_BOUNDS.0,
-                maximum: U8_BOUNDS.1,
             }),
             Self::EnabledFlag => Some(STGEditor::Choice {
                 choices: &ENABLED_CHOICES,
-                minimum: U8_BOUNDS.0,
-                maximum: U8_BOUNDS.1,
             }),
             Self::FacingDirection => Some(STGEditor::Choice {
                 choices: &FACING_CHOICES,
-                minimum: U8_BOUNDS.0,
-                maximum: U8_BOUNDS.1,
+            }),
+            Self::LeaderLevel | Self::Officer1Level | Self::Officer2Level => {
+                Some(STGEditor::Number {
+                    minimum: 1,
+                    maximum: 99,
+                })
+            }
+            Self::OfficerCount => Some(STGEditor::Number {
+                minimum: 0,
+                maximum: 2,
+            }),
+            Self::GridX | Self::GridY => Some(STGEditor::Number {
+                minimum: 1,
+                maximum: U32_BOUNDS.1,
             }),
             _ => Some(STGEditor::number(self.storage_bounds())),
         }

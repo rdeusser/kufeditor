@@ -11,13 +11,14 @@ use encoding_rs::EUC_KR;
 mod stg_support;
 
 use kufeditor_formats::{
-    DiagnosticLocation, FormatError, STGAbilityOwner, STGAreaField, STGAreaFloatField,
+    Diagnostic, DiagnosticLocation, FormatError, STGAbilityOwner, STGAreaField, STGAreaFloatField,
     STGCleaveError, STGCleaveErrorKind, STGCollection, STGDocument, STGEditor, STGEncodeError,
     STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
     STGNumberTarget, STGParameterTarget, STGParseError, STGPreflightError, STGRebaseError,
     STGRegion, STGScriptKind, STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralLocation,
     STGTailFailure, STGTailStatus, STGTarget, STGText, STGTextEncoding, STGTextError, STGTextImage,
     STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValueKind, STGValueTarget,
+    Severity,
 };
 use stg_support::{complete_stg_fixture, empty_stg_fixture, stg_prefix_fixture};
 
@@ -418,6 +419,617 @@ fn field_metadata_has_unique_members_and_stable_acronym_labels() {
 }
 
 #[test]
+fn stg_fields_cover_every_numeric_target_without_cross_talk() {
+    let targets = editable_number_targets();
+    assert_eq!(targets.len(), 129);
+    assert_eq!(targets.iter().copied().collect::<HashSet<_>>().len(), 129);
+
+    for (changed_index, target) in targets.iter().copied().enumerate() {
+        let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+        let before = number_snapshot(&document, &targets);
+        let previous = before[changed_index];
+        let replacement = replacement_number(target, previous);
+
+        assert_eq!(
+            document.set_number(target, replacement).unwrap(),
+            STGMutation::Changed { previous },
+            "failed to change {target:?}",
+        );
+        let after = number_snapshot(&document, &targets);
+        for (index, (before, after)) in before.iter().zip(&after).enumerate() {
+            if index == changed_index {
+                assert_eq!(*after, replacement, "wrong value for {target:?}");
+            } else {
+                assert_eq!(before, after, "{target:?} changed target {index}");
+            }
+        }
+
+        assert_eq!(
+            document.set_number(target, previous).unwrap(),
+            STGMutation::Changed {
+                previous: replacement,
+            },
+            "failed to restore {target:?}",
+        );
+        assert_eq!(number_snapshot(&document, &targets), before);
+        assert_eq!(
+            document.set_number(target, previous).unwrap(),
+            STGMutation::Unchanged,
+        );
+    }
+}
+
+#[test]
+fn stg_fields_cover_every_float_target_without_cross_talk() {
+    let targets = editable_float_targets();
+    assert_eq!(targets.len(), 32);
+    assert_eq!(targets.iter().copied().collect::<HashSet<_>>().len(), 32);
+
+    for (changed_index, target) in targets.iter().copied().enumerate() {
+        let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+        let before = float_snapshot(&document, &targets);
+        let previous = before[changed_index];
+        let replacement = STGFloatValue::from_bits(previous.to_bits() ^ 0x55aa_33cc);
+
+        assert_eq!(
+            document.set_float(target, replacement).unwrap(),
+            STGMutation::Changed { previous },
+            "failed to change {target:?}",
+        );
+        let after = float_snapshot(&document, &targets);
+        for (index, (before, after)) in before.iter().zip(&after).enumerate() {
+            if index == changed_index {
+                assert_eq!(*after, replacement, "wrong value for {target:?}");
+            } else {
+                assert_eq!(before, after, "{target:?} changed target {index}");
+            }
+        }
+    }
+}
+
+#[test]
+fn stg_fields_keep_wire_bounds_separate_from_semantic_editors() {
+    let ucd = STGNumberTarget::Unit {
+        unit: 0,
+        field: STGUnitField::UCD,
+    };
+    assert_eq!(ucd.storage_bounds(), (0, i64::from(u8::MAX)));
+    let Some(STGEditor::Choice { choices }) = ucd.editor() else {
+        panic!("UCD must use a choice editor");
+    };
+    assert_eq!(
+        choices
+            .iter()
+            .map(|choice| choice.value)
+            .collect::<Vec<_>>(),
+        [0, 1, 2, 3],
+    );
+
+    let skill_id = STGNumberTarget::Skill {
+        unit: 0,
+        owner: STGSkillOwner::Leader,
+        slot: 0,
+        field: STGSkillField::ID,
+    };
+    assert_eq!(skill_id.storage_bounds(), (0, i64::from(u8::MAX)));
+    assert_eq!(
+        skill_id.editor(),
+        Some(STGEditor::Number {
+            minimum: 0,
+            maximum: 254,
+        })
+    );
+
+    for (field, expected) in [
+        (STGUnitField::LeaderLevel, (1, 99)),
+        (STGUnitField::Officer1Level, (1, 99)),
+        (STGUnitField::Officer2Level, (1, 99)),
+        (STGUnitField::OfficerCount, (0, 2)),
+        (STGUnitField::GridX, (1, i64::from(u32::MAX))),
+        (STGUnitField::GridY, (1, i64::from(u32::MAX))),
+    ] {
+        let target = STGNumberTarget::Unit { unit: 0, field };
+        assert_eq!(
+            target.editor(),
+            Some(STGEditor::Number {
+                minimum: expected.0,
+                maximum: expected.1,
+            })
+        );
+        assert_ne!(target.storage_bounds(), expected, "{field:?}");
+    }
+}
+
+#[test]
+fn stg_fields_preserve_and_restore_unknown_choice_values() {
+    let mut fixture = complete_stg_fixture();
+    let unit = fixture.offsets.unit_name;
+    for (relative, value) in [(36, 201), (37, 202), (38, 203), (76, 204), (86, 205)] {
+        fixture.bytes[unit + relative] = value;
+    }
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let targets = [
+        (STGUnitField::UCD, 201),
+        (STGUnitField::HeroFlag, 202),
+        (STGUnitField::EnabledFlag, 203),
+        (STGUnitField::FacingDirection, 204),
+        (STGUnitField::LeaderWorldmapID, 205),
+    ];
+
+    document
+        .set_number(
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::UniqueID,
+            },
+            77,
+        )
+        .unwrap();
+    for (field, raw) in targets {
+        let target = STGNumberTarget::Unit { unit: 0, field };
+        assert_eq!(document.number(target).unwrap(), raw);
+        assert_eq!(
+            document.set_number(target, 0).unwrap(),
+            STGMutation::Changed { previous: raw },
+        );
+        assert_eq!(
+            document.set_number(target, raw).unwrap(),
+            STGMutation::Changed { previous: 0 },
+        );
+        assert_eq!(document.number(target).unwrap(), raw);
+    }
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one atomicity matrix keeps every STG collection, slot, and wire bound together"
+)]
+fn stg_fields_reject_invalid_targets_and_ranges_atomically() {
+    let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let observed_targets = editable_number_targets();
+    let before_numbers = number_snapshot(&document, &observed_targets);
+    let observed_floats = editable_float_targets();
+    let before_floats = float_snapshot(&document, &observed_floats);
+
+    let invalid_targets = [
+        (
+            STGNumberTarget::Unit {
+                unit: 1,
+                field: STGUnitField::UniqueID,
+            },
+            STGCollection::Unit,
+            1,
+            1,
+        ),
+        (
+            STGNumberTarget::Skill {
+                unit: 0,
+                owner: STGSkillOwner::Leader,
+                slot: 4,
+                field: STGSkillField::ID,
+            },
+            STGCollection::Skill,
+            4,
+            4,
+        ),
+        (
+            STGNumberTarget::Skill {
+                unit: 0,
+                owner: STGSkillOwner::Officer1,
+                slot: 4,
+                field: STGSkillField::Level,
+            },
+            STGCollection::Skill,
+            4,
+            4,
+        ),
+        (
+            STGNumberTarget::Skill {
+                unit: 0,
+                owner: STGSkillOwner::Officer2,
+                slot: 4,
+                field: STGSkillField::ID,
+            },
+            STGCollection::Skill,
+            4,
+            4,
+        ),
+        (
+            STGNumberTarget::Ability {
+                unit: 0,
+                owner: STGAbilityOwner::Leader,
+                slot: 23,
+            },
+            STGCollection::Ability,
+            23,
+            23,
+        ),
+        (
+            STGNumberTarget::Ability {
+                unit: 0,
+                owner: STGAbilityOwner::Officer1,
+                slot: 23,
+            },
+            STGCollection::Ability,
+            23,
+            23,
+        ),
+        (
+            STGNumberTarget::Ability {
+                unit: 0,
+                owner: STGAbilityOwner::Officer2,
+                slot: 19,
+            },
+            STGCollection::Ability,
+            19,
+            19,
+        ),
+        (
+            STGNumberTarget::Area {
+                area: 1,
+                field: STGAreaField::AreaID,
+            },
+            STGCollection::Area,
+            1,
+            1,
+        ),
+        (
+            STGNumberTarget::VariableID { variable: 4 },
+            STGCollection::Variable,
+            4,
+            4,
+        ),
+        (
+            STGNumberTarget::EventBlockHeader { block: 2 },
+            STGCollection::EventBlock,
+            2,
+            2,
+        ),
+        (
+            STGNumberTarget::EventID { block: 0, event: 2 },
+            STGCollection::Event,
+            2,
+            2,
+        ),
+        (
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::VariableInitial { variable: 4 },
+            },
+            STGCollection::Variable,
+            4,
+            4,
+        ),
+        (
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Condition,
+                        script: 1,
+                    },
+                    parameter: 0,
+                }),
+            },
+            STGCollection::Condition,
+            1,
+            1,
+        ),
+        (
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 1,
+                    },
+                    parameter: 0,
+                }),
+            },
+            STGCollection::Action,
+            1,
+            1,
+        ),
+        (
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                    script: STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 0,
+                    },
+                    parameter: 2,
+                }),
+            },
+            STGCollection::Parameter,
+            2,
+            2,
+        ),
+        (
+            STGNumberTarget::Footer {
+                entry: 2,
+                field: STGFooterField::SlotData1,
+            },
+            STGCollection::FooterEntry,
+            2,
+            2,
+        ),
+    ];
+    for (target, collection, index, count) in invalid_targets {
+        assert_target_out_of_range(
+            document.set_number(target, 1),
+            STGTarget::Number(target),
+            collection,
+            index,
+            count,
+        );
+        assert_stg_observed_state(
+            &document,
+            &observed_targets,
+            &before_numbers,
+            &observed_floats,
+            &before_floats,
+        );
+    }
+
+    let invalid_float_targets = [
+        (
+            STGFloatTarget::Unit {
+                unit: 1,
+                field: STGUnitFloatField::PositionX,
+            },
+            STGCollection::Unit,
+            1,
+            1,
+        ),
+        (
+            STGFloatTarget::StatOverride { unit: 0, slot: 22 },
+            STGCollection::StatOverride,
+            22,
+            22,
+        ),
+        (
+            STGFloatTarget::Area {
+                area: 1,
+                field: STGAreaFloatField::BoundX1,
+            },
+            STGCollection::Area,
+            1,
+            1,
+        ),
+        (
+            STGFloatTarget::Parameter {
+                value: STGValueTarget::VariableInitial { variable: 4 },
+            },
+            STGCollection::Variable,
+            4,
+            4,
+        ),
+    ];
+    for (target, collection, index, count) in invalid_float_targets {
+        assert_target_out_of_range(
+            document.set_float(target, STGFloatValue::from_bits(1)),
+            STGTarget::Float(target),
+            collection,
+            index,
+            count,
+        );
+        assert_stg_observed_state(
+            &document,
+            &observed_targets,
+            &before_numbers,
+            &observed_floats,
+            &before_floats,
+        );
+    }
+
+    let wrong_kind_value = STGValueTarget::VariableInitial { variable: 1 };
+    assert_value_kind_mismatch(
+        document.set_number(
+            STGNumberTarget::ParameterInteger {
+                value: wrong_kind_value,
+            },
+            1,
+        ),
+        wrong_kind_value,
+        STGValueKind::Integer,
+        STGValueKind::Float,
+    );
+    assert_stg_observed_state(
+        &document,
+        &observed_targets,
+        &before_numbers,
+        &observed_floats,
+        &before_floats,
+    );
+
+    let range_failures = [
+        (
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::UCD,
+            },
+            -1,
+        ),
+        (
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::UCD,
+            },
+            256,
+        ),
+        (
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::UniqueID,
+            },
+            -1,
+        ),
+        (
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::UniqueID,
+            },
+            i64::from(u32::MAX) + 1,
+        ),
+        (
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::TroopInfoIndex,
+            },
+            i64::from(i32::MIN) - 1,
+        ),
+        (
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::TroopInfoIndex,
+            },
+            i64::from(i32::MAX) + 1,
+        ),
+    ];
+    for (target, value) in range_failures {
+        assert_number_out_of_range(document.set_number(target, value), target, value);
+        assert_stg_observed_state(
+            &document,
+            &observed_targets,
+            &before_numbers,
+            &observed_floats,
+            &before_floats,
+        );
+    }
+
+    for target in [
+        STGNumberTarget::Unit {
+            unit: 0,
+            field: STGUnitField::Reserved27,
+        },
+        STGNumberTarget::Area {
+            area: 0,
+            field: STGAreaField::Unknown20,
+        },
+    ] {
+        assert_eq!(document.number(target).unwrap(), 0);
+        assert!(matches!(
+            document.set_number(target, 1),
+            Err(FormatError::STGReadOnlyTarget { target: STGTarget::Number(actual) }) if actual == target
+        ));
+        assert_stg_observed_state(
+            &document,
+            &observed_targets,
+            &before_numbers,
+            &observed_floats,
+            &before_floats,
+        );
+    }
+}
+
+#[test]
+fn stg_validation_matches_legacy_unit_rules_and_typed_locations() {
+    let mut bytes = stg_prefix_fixture(2);
+    let first = 4 + 620 + 4;
+    let second = first + 544;
+    bytes[first] = b'A';
+    write_u32_at(&mut bytes, first + 32, 42);
+    bytes[first + 36] = 4;
+    bytes[first + 86] = 21;
+    write_u32_at(&mut bytes, first + 188, 3);
+    write_u32_at(&mut bytes, second + 32, 42);
+    bytes[second + 87] = 100;
+
+    let document = STGDocument::parse(bytes).unwrap();
+    assert_eq!(
+        document.diagnostics(),
+        [
+            stg_diagnostic(
+                Severity::Error,
+                DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::UCD
+                }),
+                "Invalid UCD value"
+            ),
+            stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::LeaderLevel
+                }),
+                "Level outside typical range (1-99)"
+            ),
+            stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::LeaderWorldmapID
+                }),
+                "Worldmap ID may cause post-mission issues"
+            ),
+            stg_diagnostic(
+                Severity::Error,
+                DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::UniqueID
+                }),
+                "Duplicate unique ID"
+            ),
+            stg_diagnostic(
+                Severity::Error,
+                DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::OfficerCount
+                }),
+                "Officer count exceeds maximum of 2"
+            ),
+            stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGText(STGTextTarget::UnitName { unit: 1 }),
+                "Unit has no name"
+            ),
+            stg_diagnostic(
+                Severity::Warning,
+                DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                    unit: 1,
+                    field: STGUnitField::LeaderLevel
+                }),
+                "Level outside typical range (1-99)"
+            ),
+        ],
+    );
+}
+
+#[test]
+fn stg_validation_worldmap_boundary_exempts_20_and_0xff() {
+    let mut bytes = stg_prefix_fixture(3);
+    let first = 4 + 620 + 4;
+    for (unit, worldmap_id) in [20_u8, 21, u8::MAX].into_iter().enumerate() {
+        let start = first + unit * 544;
+        let Ok(unit_id) = u32::try_from(unit) else {
+            panic!("test STG unit index does not fit u32");
+        };
+        bytes[start] = b'A';
+        write_u32_at(&mut bytes, start + 32, unit_id);
+        bytes[start + 86] = worldmap_id;
+        bytes[start + 87] = 1;
+    }
+
+    let document = STGDocument::parse(bytes).unwrap();
+    assert_eq!(
+        document.diagnostics(),
+        [stg_diagnostic(
+            Severity::Warning,
+            DiagnosticLocation::STGNumber(STGNumberTarget::Unit {
+                unit: 1,
+                field: STGUnitField::LeaderWorldmapID,
+            }),
+            "Worldmap ID may cause post-mission issues",
+        )],
+    );
+}
+
+#[test]
 fn undocumented_scalar_fields_are_projected_but_never_receive_editors() {
     for field in STGUnitField::ALL {
         let expected = if matches!(
@@ -480,7 +1092,7 @@ fn stable_editor_text_mutation_and_diagnostic_types_do_not_expose_generated_valu
         minimum: 0,
         maximum: u8::MAX.into(),
     };
-    assert_eq!(editor.storage_bounds(), (0, i64::from(u8::MAX)));
+    assert_eq!(editor.number_bounds(), Some((0, i64::from(u8::MAX))));
 
     assert_eq!(
         STGText::Decoded(std::borrow::Cow::Borrowed("hello")).decoded(),
@@ -1068,6 +1680,14 @@ fn stg_prefix_mutations_preserve_raw_tails_and_reject_tail_targets() {
             .unwrap(),
         STGMutation::Changed { .. }
     ));
+    let unit_number = STGNumberTarget::Unit {
+        unit: 0,
+        field: STGUnitField::UniqueID,
+    };
+    assert!(matches!(
+        document.set_number(unit_number, 42).unwrap(),
+        STGMutation::Changed { .. }
+    ));
     assert_raw_tail(&document, &expected_tail);
 
     let area_text = STGTextTarget::AreaDescription { area: 0 };
@@ -1089,8 +1709,20 @@ fn stg_prefix_mutations_preserve_raw_tails_and_reject_tail_targets() {
         0,
         0,
     );
+    let area_number = STGNumberTarget::Area {
+        area: 0,
+        field: STGAreaField::AreaID,
+    };
+    assert_target_out_of_range(
+        document.set_number(area_number, 1),
+        STGTarget::Number(area_number),
+        STGCollection::Area,
+        0,
+        0,
+    );
     assert_eq!(document.text(header).unwrap().decoded(), Some("map"));
     assert_eq!(document.float(unit_float).unwrap().to_bits(), 0x3f80_0000);
+    assert_eq!(document.number(unit_number).unwrap(), 42);
     assert_raw_tail(&document, &expected_tail);
 }
 
@@ -1194,6 +1826,199 @@ fn assert_value_kind_mismatch<T>(
         Err(other) => panic!("unexpected STG value-kind error: {other}"),
         Ok(_) => panic!("expected STG value-kind failure"),
     }
+}
+
+fn editable_number_targets() -> Vec<STGNumberTarget> {
+    let mut targets = Vec::new();
+    for field in STGUnitField::ALL {
+        let target = STGNumberTarget::Unit { unit: 0, field };
+        if target.access() == STGFieldAccess::Editable {
+            targets.push(target);
+        }
+    }
+    for owner in STGSkillOwner::ALL {
+        for slot in 0..4 {
+            for field in STGSkillField::ALL {
+                targets.push(STGNumberTarget::Skill {
+                    unit: 0,
+                    owner,
+                    slot,
+                    field,
+                });
+            }
+        }
+    }
+    for owner in STGAbilityOwner::ALL {
+        let count = match owner {
+            STGAbilityOwner::Leader | STGAbilityOwner::Officer1 => 23,
+            STGAbilityOwner::Officer2 => 19,
+        };
+        for slot in 0..count {
+            targets.push(STGNumberTarget::Ability {
+                unit: 0,
+                owner,
+                slot,
+            });
+        }
+    }
+    targets.push(STGNumberTarget::Area {
+        area: 0,
+        field: STGAreaField::AreaID,
+    });
+    for variable in 0..4 {
+        targets.push(STGNumberTarget::VariableID { variable });
+    }
+    for variable in [0, 3] {
+        targets.push(STGNumberTarget::ParameterInteger {
+            value: STGValueTarget::VariableInitial { variable },
+        });
+    }
+    for block in 0..2 {
+        targets.push(STGNumberTarget::EventBlockHeader { block });
+    }
+    for event in 0..2 {
+        targets.push(STGNumberTarget::EventID { block: 0, event });
+    }
+    targets.push(STGNumberTarget::ParameterInteger {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Condition,
+                script: 0,
+            },
+            parameter: 0,
+        }),
+    });
+    targets.push(STGNumberTarget::ParameterInteger {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Action,
+                script: 0,
+            },
+            parameter: 1,
+        }),
+    });
+    for entry in 0..2 {
+        for field in STGFooterField::ALL {
+            targets.push(STGNumberTarget::Footer { entry, field });
+        }
+    }
+    targets
+}
+
+fn editable_float_targets() -> Vec<STGFloatTarget> {
+    let mut targets = Vec::new();
+    for field in STGUnitFloatField::ALL {
+        let target = STGFloatTarget::Unit { unit: 0, field };
+        if target.access() == STGFieldAccess::Editable {
+            targets.push(target);
+        }
+    }
+    for slot in 0..22 {
+        targets.push(STGFloatTarget::StatOverride { unit: 0, slot });
+    }
+    for field in STGAreaFloatField::ALL {
+        targets.push(STGFloatTarget::Area { area: 0, field });
+    }
+    targets.push(STGFloatTarget::Parameter {
+        value: STGValueTarget::VariableInitial { variable: 1 },
+    });
+    targets.push(STGFloatTarget::Parameter {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Condition,
+                script: 0,
+            },
+            parameter: 1,
+        }),
+    });
+    targets
+}
+
+fn number_snapshot(document: &STGDocument, targets: &[STGNumberTarget]) -> Vec<i64> {
+    targets
+        .iter()
+        .map(|target| {
+            document
+                .number(*target)
+                .unwrap_or_else(|error| panic!("failed to read {target:?}: {error}"))
+        })
+        .collect()
+}
+
+fn float_snapshot(document: &STGDocument, targets: &[STGFloatTarget]) -> Vec<STGFloatValue> {
+    targets
+        .iter()
+        .map(|target| {
+            document
+                .float(*target)
+                .unwrap_or_else(|error| panic!("failed to read {target:?}: {error}"))
+        })
+        .collect()
+}
+
+fn replacement_number(target: STGNumberTarget, previous: i64) -> i64 {
+    let (minimum, maximum) = target.storage_bounds();
+    if previous == maximum {
+        minimum
+    } else {
+        maximum
+    }
+}
+
+fn assert_stg_observed_state(
+    document: &STGDocument,
+    number_targets: &[STGNumberTarget],
+    expected_numbers: &[i64],
+    float_targets: &[STGFloatTarget],
+    expected_floats: &[STGFloatValue],
+) {
+    assert_eq!(number_snapshot(document, number_targets), expected_numbers);
+    assert_eq!(float_snapshot(document, float_targets), expected_floats);
+}
+
+fn assert_number_out_of_range(
+    result: Result<STGMutation<i64>, FormatError>,
+    expected_target: STGNumberTarget,
+    expected_value: i64,
+) {
+    let (expected_minimum, expected_maximum) = expected_target.storage_bounds();
+    match result {
+        Err(FormatError::STGNumberOutOfRange {
+            target,
+            value,
+            minimum,
+            maximum,
+        }) => {
+            assert_eq!(target, expected_target);
+            assert_eq!(value, expected_value);
+            assert_eq!(minimum, expected_minimum);
+            assert_eq!(maximum, expected_maximum);
+        }
+        Err(other) => panic!("unexpected STG number error: {other}"),
+        Ok(_) => panic!("expected STG number range failure"),
+    }
+}
+
+const fn stg_diagnostic(
+    severity: Severity,
+    location: DiagnosticLocation,
+    message: &'static str,
+) -> Diagnostic {
+    Diagnostic {
+        severity,
+        location,
+        message,
+    }
+}
+
+fn write_u32_at(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
 fn assert_raw_tail(document: &STGDocument, expected: &[u8]) {

@@ -1,25 +1,131 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    diagnostic::{Diagnostic, DiagnosticLocation, Severity},
     error::{
         FormatError, STGCollection, STGEncodeError, STGTarget, STGTextEncoding, STGTextError,
         STGValueKind,
     },
     generated::kuf_stg::{
-        AreaEntry, EventBlock, StgHeader, StgParamValue, StgParamValueValue, StgStringParam,
-        StgVariable, UnitBlock,
+        AreaEntry, EventBlock, FooterEntry, StgHeader, StgParamValue, StgParamValueValue,
+        StgStringParam, StgVariable, UnitBlock,
     },
 };
 
 use super::{
-    STGAreaFloatField, STGDocument, STGFloatTarget, STGFloatValue, STGHeaderTextField, STGModel,
-    STGMutation, STGScriptKind, STGTail, STGText, STGTextImage, STGTextTarget, STGUnitFloatField,
-    STGValueTarget, retained_model_bytes,
+    STGAbilityOwner, STGAreaField, STGAreaFloatField, STGDocument, STGFloatTarget, STGFloatValue,
+    STGFooterField, STGHeaderTextField, STGModel, STGMutation, STGNumberTarget, STGScriptKind,
+    STGSkillField, STGSkillOwner, STGTail, STGText, STGTextImage, STGTextTarget, STGUnitField,
+    STGUnitFloatField, STGValueTarget, retained_model_bytes,
     text::{self, STGTextImageKind},
     wire,
 };
 
+#[cfg(test)]
+#[allow(
+    dead_code,
+    reason = "the shared integration fixture exposes offsets used by other STG test modules"
+)]
+#[path = "../../tests/support/stg.rs"]
+mod stg_test_support;
+
 impl STGDocument {
+    pub fn number(&self, target: STGNumberTarget) -> Result<i64, FormatError> {
+        number_value(&self.model, target)
+    }
+
+    pub fn set_number(
+        &mut self,
+        target: STGNumberTarget,
+        value: i64,
+    ) -> Result<STGMutation<i64>, FormatError> {
+        if target.access() == super::STGFieldAccess::ReadOnly {
+            return Err(FormatError::STGReadOnlyTarget {
+                target: STGTarget::Number(target),
+            });
+        }
+
+        let previous = self.number(target)?;
+        validate_number(target, value)?;
+        if previous == value {
+            return Ok(STGMutation::Unchanged);
+        }
+
+        let projected = projected_model_bytes(&self.model, super::preflight::MODEL_LIMIT)?;
+        let mut prospective = Arc::clone(&self.model);
+        assign_number(Arc::make_mut(&mut prospective), target, value)?;
+        validate_actual_model(&prospective, projected, super::preflight::MODEL_LIMIT)?;
+        self.model = prospective;
+        Ok(STGMutation::Changed { previous })
+    }
+
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        let mut remaining_unit_ids = HashMap::new();
+        for unit in &self.model.units {
+            *remaining_unit_ids.entry(unit.unique_id).or_insert(0_usize) += 1;
+        }
+
+        for (unit_index, unit) in self.model.units.iter().enumerate() {
+            let has_later_duplicate = match remaining_unit_ids.get_mut(&unit.unique_id) {
+                Some(remaining) => {
+                    *remaining -= 1;
+                    *remaining > 0
+                }
+                None => unreachable!("every STG unit ID was counted before validation"),
+            };
+            if unit.name.first().copied() == Some(0) {
+                diagnostics.push(stg_diagnostic(
+                    Severity::Warning,
+                    DiagnosticLocation::STGText(STGTextTarget::UnitName { unit: unit_index }),
+                    "Unit has no name",
+                ));
+            }
+            if unit.ucd > 3 {
+                diagnostics.push(unit_number_diagnostic(
+                    Severity::Error,
+                    unit_index,
+                    STGUnitField::UCD,
+                    "Invalid UCD value",
+                ));
+            }
+            if unit.leader_level == 0 || unit.leader_level > 99 {
+                diagnostics.push(unit_number_diagnostic(
+                    Severity::Warning,
+                    unit_index,
+                    STGUnitField::LeaderLevel,
+                    "Level outside typical range (1-99)",
+                ));
+            }
+            if unit.leader_worldmap_id != u8::MAX && unit.leader_worldmap_id > 20 {
+                diagnostics.push(unit_number_diagnostic(
+                    Severity::Warning,
+                    unit_index,
+                    STGUnitField::LeaderWorldmapID,
+                    "Worldmap ID may cause post-mission issues",
+                ));
+            }
+            if has_later_duplicate {
+                diagnostics.push(unit_number_diagnostic(
+                    Severity::Error,
+                    unit_index,
+                    STGUnitField::UniqueID,
+                    "Duplicate unique ID",
+                ));
+            }
+            if unit.officer_count > 2 {
+                diagnostics.push(unit_number_diagnostic(
+                    Severity::Error,
+                    unit_index,
+                    STGUnitField::OfficerCount,
+                    "Officer count exceeds maximum of 2",
+                ));
+            }
+        }
+
+        diagnostics
+    }
+
     pub fn text(&self, target: STGTextTarget) -> Result<STGText<'_>, FormatError> {
         text_slot(&self.model, target).map(TextSlot::text)
     }
@@ -391,6 +497,504 @@ fn text_slot_mut(
             let value = value_mut(model, target_value, STGTarget::Text(target))?;
             parameter_string_mut(value, target).map(TextSlotMut::Dynamic)
         }
+    }
+}
+
+fn number_value(model: &STGModel, target: STGNumberTarget) -> Result<i64, FormatError> {
+    let public_target = STGTarget::Number(target);
+    match target {
+        STGNumberTarget::Unit { unit, field } => {
+            item(&model.units, STGCollection::Unit, unit, public_target)
+                .map(|unit| unit_number(unit, field))
+        }
+        STGNumberTarget::Skill {
+            unit,
+            owner,
+            slot,
+            field,
+        } => {
+            let unit = item(&model.units, STGCollection::Unit, unit, public_target)?;
+            skill_number(unit, owner, slot, field, public_target)
+        }
+        STGNumberTarget::Ability { unit, owner, slot } => {
+            let unit = item(&model.units, STGCollection::Unit, unit, public_target)?;
+            ability_number(unit, owner, slot, public_target)
+        }
+        STGNumberTarget::Area { area, field } => {
+            let area = item(areas(model), STGCollection::Area, area, public_target)?;
+            Ok(area_number(area, field))
+        }
+        STGNumberTarget::VariableID { variable } => item(
+            variables(model),
+            STGCollection::Variable,
+            variable,
+            public_target,
+        )
+        .map(|variable| i64::from(variable.variable_id)),
+        STGNumberTarget::EventBlockHeader { block } => item(
+            event_blocks(model),
+            STGCollection::EventBlock,
+            block,
+            public_target,
+        )
+        .map(|block| i64::from(block.block_header)),
+        STGNumberTarget::EventID { block, event } => {
+            event_ref(model, block, event, public_target).map(|event| i64::from(event.event_id))
+        }
+        STGNumberTarget::ParameterInteger { value } => {
+            parameter_integer(value_ref(model, value, public_target)?, value)
+        }
+        STGNumberTarget::Footer { entry, field } => {
+            let footer = item(
+                footer_entries(model),
+                STGCollection::FooterEntry,
+                entry,
+                public_target,
+            )?;
+            Ok(footer_number(footer, field))
+        }
+    }
+}
+
+fn assign_number(
+    model: &mut STGModel,
+    target: STGNumberTarget,
+    value: i64,
+) -> Result<(), FormatError> {
+    let public_target = STGTarget::Number(target);
+    match target {
+        STGNumberTarget::Unit { unit, field } => {
+            let unit = item_mut(&mut model.units, STGCollection::Unit, unit, public_target)?;
+            assign_unit_number(unit, field, target, value)
+        }
+        STGNumberTarget::Skill {
+            unit,
+            owner,
+            slot,
+            field,
+        } => {
+            let unit = item_mut(&mut model.units, STGCollection::Unit, unit, public_target)?;
+            assign_skill_number(unit, owner, slot, field, public_target, target, value)
+        }
+        STGNumberTarget::Ability { unit, owner, slot } => {
+            let unit = item_mut(&mut model.units, STGCollection::Unit, unit, public_target)?;
+            assign_ability_number(unit, owner, slot, public_target, target, value)
+        }
+        STGNumberTarget::Area { area, field } => {
+            let area = item_mut(areas_mut(model), STGCollection::Area, area, public_target)?;
+            assign_area_number(area, field, target, value)
+        }
+        STGNumberTarget::VariableID { variable } => {
+            let variable = item_mut(
+                variables_mut(model),
+                STGCollection::Variable,
+                variable,
+                public_target,
+            )?;
+            variable.variable_id = number_u32(target, value)?;
+            Ok(())
+        }
+        STGNumberTarget::EventBlockHeader { block } => {
+            let block = item_mut(
+                event_blocks_mut(model),
+                STGCollection::EventBlock,
+                block,
+                public_target,
+            )?;
+            block.block_header = number_u32(target, value)?;
+            Ok(())
+        }
+        STGNumberTarget::EventID { block, event } => {
+            event_mut(model, block, event, public_target)?.event_id = number_u32(target, value)?;
+            Ok(())
+        }
+        STGNumberTarget::ParameterInteger {
+            value: value_target,
+        } => {
+            *parameter_integer_mut(value_mut(model, value_target, public_target)?, value_target)? =
+                number_i32(target, value)?;
+            Ok(())
+        }
+        STGNumberTarget::Footer { entry, field } => {
+            let footer = item_mut(
+                footer_entries_mut(model),
+                STGCollection::FooterEntry,
+                entry,
+                public_target,
+            )?;
+            assign_footer_number(footer, field, target, value)
+        }
+    }
+}
+
+fn validate_number(target: STGNumberTarget, value: i64) -> Result<(), FormatError> {
+    let (minimum, maximum) = target.storage_bounds();
+    if value < minimum || value > maximum {
+        return Err(FormatError::STGNumberOutOfRange {
+            target,
+            value,
+            minimum,
+            maximum,
+        });
+    }
+    Ok(())
+}
+
+fn unit_number(unit: &UnitBlock, field: STGUnitField) -> i64 {
+    match field {
+        STGUnitField::UniqueID => i64::from(unit.unique_id),
+        STGUnitField::UCD => i64::from(unit.ucd),
+        STGUnitField::HeroFlag => i64::from(unit.is_hero),
+        STGUnitField::EnabledFlag => i64::from(unit.is_enabled),
+        STGUnitField::Reserved27 => i64::from(unit.reserved_27),
+        STGUnitField::FacingDirection => i64::from(unit.facing_direction),
+        STGUnitField::ExtraFlags1 => i64::from(unit.extra_flags_1),
+        STGUnitField::ExtraFlags2 => i64::from(unit.extra_flags_2),
+        STGUnitField::Category => i64::from(unit.category),
+        STGUnitField::Reserved50 => i64::from(unit.reserved_50),
+        STGUnitField::LeaderJobType => i64::from(unit.leader_job_type),
+        STGUnitField::LeaderModelID => i64::from(unit.leader_model_id),
+        STGUnitField::LeaderWorldmapID => i64::from(unit.leader_worldmap_id),
+        STGUnitField::LeaderLevel => i64::from(unit.leader_level),
+        STGUnitField::OfficerCount => i64::from(unit.officer_count),
+        STGUnitField::Officer1JobType => i64::from(unit.officer1_job_type),
+        STGUnitField::Officer1ModelID => i64::from(unit.officer1_model_id),
+        STGUnitField::Officer1WorldmapID => i64::from(unit.officer1_worldmap_id),
+        STGUnitField::Officer1Level => i64::from(unit.officer1_level),
+        STGUnitField::Officer2JobType => i64::from(unit.officer2_job_type),
+        STGUnitField::Officer2ModelID => i64::from(unit.officer2_model_id),
+        STGUnitField::Officer2WorldmapID => i64::from(unit.officer2_worldmap_id),
+        STGUnitField::Officer2Level => i64::from(unit.officer2_level),
+        STGUnitField::AnimationConfig => i64::from(unit.animation_config),
+        STGUnitField::GridX => i64::from(unit.grid_x),
+        STGUnitField::GridY => i64::from(unit.grid_y),
+        STGUnitField::TroopInfoIndex => i64::from(unit.troop_info_index),
+        STGUnitField::FormationType => i64::from(unit.formation_type),
+    }
+}
+
+fn assign_unit_number(
+    unit: &mut UnitBlock,
+    field: STGUnitField,
+    target: STGNumberTarget,
+    value: i64,
+) -> Result<(), FormatError> {
+    match field {
+        STGUnitField::UniqueID => unit.unique_id = number_u32(target, value)?,
+        STGUnitField::UCD => unit.ucd = number_u8(target, value)?,
+        STGUnitField::HeroFlag => unit.is_hero = number_u8(target, value)?,
+        STGUnitField::EnabledFlag => unit.is_enabled = number_u8(target, value)?,
+        STGUnitField::FacingDirection => unit.facing_direction = number_u8(target, value)?,
+        STGUnitField::LeaderJobType => unit.leader_job_type = number_u8(target, value)?,
+        STGUnitField::LeaderModelID => unit.leader_model_id = number_u8(target, value)?,
+        STGUnitField::LeaderWorldmapID => unit.leader_worldmap_id = number_u8(target, value)?,
+        STGUnitField::LeaderLevel => unit.leader_level = number_u8(target, value)?,
+        STGUnitField::OfficerCount => unit.officer_count = number_u32(target, value)?,
+        STGUnitField::Officer1JobType => unit.officer1_job_type = number_u8(target, value)?,
+        STGUnitField::Officer1ModelID => unit.officer1_model_id = number_u8(target, value)?,
+        STGUnitField::Officer1WorldmapID => unit.officer1_worldmap_id = number_u8(target, value)?,
+        STGUnitField::Officer1Level => unit.officer1_level = number_u8(target, value)?,
+        STGUnitField::Officer2JobType => unit.officer2_job_type = number_u8(target, value)?,
+        STGUnitField::Officer2ModelID => unit.officer2_model_id = number_u8(target, value)?,
+        STGUnitField::Officer2WorldmapID => unit.officer2_worldmap_id = number_u8(target, value)?,
+        STGUnitField::Officer2Level => unit.officer2_level = number_u8(target, value)?,
+        STGUnitField::AnimationConfig => unit.animation_config = number_u32(target, value)?,
+        STGUnitField::GridX => unit.grid_x = number_u32(target, value)?,
+        STGUnitField::GridY => unit.grid_y = number_u32(target, value)?,
+        STGUnitField::TroopInfoIndex => unit.troop_info_index = number_i32(target, value)?,
+        STGUnitField::FormationType => unit.formation_type = number_u32(target, value)?,
+        STGUnitField::Reserved27
+        | STGUnitField::ExtraFlags1
+        | STGUnitField::ExtraFlags2
+        | STGUnitField::Category
+        | STGUnitField::Reserved50 => {
+            return Err(FormatError::STGReadOnlyTarget {
+                target: STGTarget::Number(target),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn skill_number(
+    unit: &UnitBlock,
+    owner: STGSkillOwner,
+    slot: usize,
+    field: STGSkillField,
+    target: STGTarget,
+) -> Result<i64, FormatError> {
+    validate_collection_index(slot, 4, STGCollection::Skill, target)?;
+    let offset = slot * 2
+        + match field {
+            STGSkillField::ID => 0,
+            STGSkillField::Level => 1,
+        };
+    let data = skill_data(unit, owner);
+    let Some(value) = data.get(offset) else {
+        unreachable!("validated STG skill offset is outside its fixed wire field");
+    };
+    Ok(i64::from(*value))
+}
+
+fn assign_skill_number(
+    unit: &mut UnitBlock,
+    owner: STGSkillOwner,
+    slot: usize,
+    field: STGSkillField,
+    public_target: STGTarget,
+    target: STGNumberTarget,
+    value: i64,
+) -> Result<(), FormatError> {
+    validate_collection_index(slot, 4, STGCollection::Skill, public_target)?;
+    let offset = slot * 2
+        + match field {
+            STGSkillField::ID => 0,
+            STGSkillField::Level => 1,
+        };
+    let data = skill_data_mut(unit, owner);
+    let Some(slot) = data.get_mut(offset) else {
+        unreachable!("validated STG skill offset is outside its fixed wire field");
+    };
+    *slot = number_u8(target, value)?;
+    Ok(())
+}
+
+fn skill_data(unit: &UnitBlock, owner: STGSkillOwner) -> &[u8] {
+    match owner {
+        STGSkillOwner::Leader => &unit.leader_skills,
+        STGSkillOwner::Officer1 => &unit.officer1_data,
+        STGSkillOwner::Officer2 => &unit.officer2_data,
+    }
+}
+
+fn skill_data_mut(unit: &mut UnitBlock, owner: STGSkillOwner) -> &mut [u8] {
+    match owner {
+        STGSkillOwner::Leader => &mut unit.leader_skills,
+        STGSkillOwner::Officer1 => &mut unit.officer1_data,
+        STGSkillOwner::Officer2 => &mut unit.officer2_data,
+    }
+}
+
+fn ability_number(
+    unit: &UnitBlock,
+    owner: STGAbilityOwner,
+    slot: usize,
+    target: STGTarget,
+) -> Result<i64, FormatError> {
+    match owner {
+        STGAbilityOwner::Leader => {
+            item(&unit.leader_abilities, STGCollection::Ability, slot, target)
+                .map(|value| i64::from(*value))
+        }
+        STGAbilityOwner::Officer1 => officer_ability(&unit.officer1_data, slot, 23, target),
+        STGAbilityOwner::Officer2 => officer_ability(&unit.officer2_data, slot, 19, target),
+    }
+}
+
+fn assign_ability_number(
+    unit: &mut UnitBlock,
+    owner: STGAbilityOwner,
+    slot: usize,
+    public_target: STGTarget,
+    target: STGNumberTarget,
+    value: i64,
+) -> Result<(), FormatError> {
+    let value = number_i32(target, value)?;
+    match owner {
+        STGAbilityOwner::Leader => {
+            *item_mut(
+                &mut unit.leader_abilities,
+                STGCollection::Ability,
+                slot,
+                public_target,
+            )? = value;
+            Ok(())
+        }
+        STGAbilityOwner::Officer1 => {
+            assign_officer_ability(&mut unit.officer1_data, slot, 23, public_target, value)
+        }
+        STGAbilityOwner::Officer2 => {
+            assign_officer_ability(&mut unit.officer2_data, slot, 19, public_target, value)
+        }
+    }
+}
+
+fn officer_ability(
+    data: &[u8],
+    slot: usize,
+    count: usize,
+    target: STGTarget,
+) -> Result<i64, FormatError> {
+    validate_collection_index(slot, count, STGCollection::Ability, target)?;
+    let start = 8 + slot * 4;
+    let Some(bytes) = data.get(start..start + 4) else {
+        unreachable!("validated STG officer ability is outside its fixed wire field");
+    };
+    let Ok(bytes) = <[u8; 4]>::try_from(bytes) else {
+        unreachable!("validated STG officer ability does not contain four bytes");
+    };
+    Ok(i64::from(i32::from_le_bytes(bytes)))
+}
+
+fn assign_officer_ability(
+    data: &mut [u8],
+    slot: usize,
+    count: usize,
+    target: STGTarget,
+    value: i32,
+) -> Result<(), FormatError> {
+    validate_collection_index(slot, count, STGCollection::Ability, target)?;
+    let start = 8 + slot * 4;
+    let Some(bytes) = data.get_mut(start..start + 4) else {
+        unreachable!("validated STG officer ability is outside its fixed wire field");
+    };
+    bytes.copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn area_number(area: &AreaEntry, field: STGAreaField) -> i64 {
+    match field {
+        STGAreaField::Unknown20 => i64::from(area.unknown_20),
+        STGAreaField::Unknown24 => i64::from(area.unknown_24),
+        STGAreaField::AreaID => i64::from(area.area_id),
+    }
+}
+
+fn assign_area_number(
+    area: &mut AreaEntry,
+    field: STGAreaField,
+    target: STGNumberTarget,
+    value: i64,
+) -> Result<(), FormatError> {
+    match field {
+        STGAreaField::AreaID => area.area_id = number_u32(target, value)?,
+        STGAreaField::Unknown20 | STGAreaField::Unknown24 => {
+            return Err(FormatError::STGReadOnlyTarget {
+                target: STGTarget::Number(target),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn footer_number(footer: &FooterEntry, field: STGFooterField) -> i64 {
+    match field {
+        STGFooterField::SlotData1 => i64::from(footer.slot_data_1),
+        STGFooterField::SlotData2 => i64::from(footer.slot_data_2),
+    }
+}
+
+fn assign_footer_number(
+    footer: &mut FooterEntry,
+    field: STGFooterField,
+    target: STGNumberTarget,
+    value: i64,
+) -> Result<(), FormatError> {
+    match field {
+        STGFooterField::SlotData1 => footer.slot_data_1 = number_u32(target, value)?,
+        STGFooterField::SlotData2 => footer.slot_data_2 = number_u32(target, value)?,
+    }
+    Ok(())
+}
+
+fn parameter_integer(value: &StgParamValue, target: STGValueTarget) -> Result<i64, FormatError> {
+    let actual = value_kind(value);
+    if !matches!(actual, STGValueKind::Integer | STGValueKind::Enum) {
+        return Err(FormatError::STGValueKindMismatch {
+            target,
+            expected: STGValueKind::Integer,
+            actual,
+        });
+    }
+    match &value.value {
+        StgParamValueValue::I32(value) => Ok(i64::from(*value)),
+        StgParamValueValue::F32(_) | StgParamValueValue::StgStringParam(_) => {
+            unreachable!("STG integer or enum tag has a non-integer generated payload");
+        }
+    }
+}
+
+fn parameter_integer_mut(
+    value: &mut StgParamValue,
+    target: STGValueTarget,
+) -> Result<&mut i32, FormatError> {
+    let actual = value_kind(value);
+    if !matches!(actual, STGValueKind::Integer | STGValueKind::Enum) {
+        return Err(FormatError::STGValueKindMismatch {
+            target,
+            expected: STGValueKind::Integer,
+            actual,
+        });
+    }
+    match &mut value.value {
+        StgParamValueValue::I32(value) => Ok(value),
+        StgParamValueValue::F32(_) | StgParamValueValue::StgStringParam(_) => {
+            unreachable!("STG integer or enum tag has a non-integer generated payload");
+        }
+    }
+}
+
+fn number_u8(target: STGNumberTarget, value: i64) -> Result<u8, FormatError> {
+    u8::try_from(value).map_err(|_| number_out_of_range(target, value))
+}
+
+fn number_u32(target: STGNumberTarget, value: i64) -> Result<u32, FormatError> {
+    u32::try_from(value).map_err(|_| number_out_of_range(target, value))
+}
+
+fn number_i32(target: STGNumberTarget, value: i64) -> Result<i32, FormatError> {
+    i32::try_from(value).map_err(|_| number_out_of_range(target, value))
+}
+
+fn number_out_of_range(target: STGNumberTarget, value: i64) -> FormatError {
+    let (minimum, maximum) = target.storage_bounds();
+    FormatError::STGNumberOutOfRange {
+        target,
+        value,
+        minimum,
+        maximum,
+    }
+}
+
+fn validate_collection_index(
+    index: usize,
+    count: usize,
+    collection: STGCollection,
+    target: STGTarget,
+) -> Result<(), FormatError> {
+    if index >= count {
+        return Err(FormatError::STGTargetOutOfRange {
+            target,
+            collection,
+            index,
+            count,
+        });
+    }
+    Ok(())
+}
+
+const fn unit_number_diagnostic(
+    severity: Severity,
+    unit: usize,
+    field: STGUnitField,
+    message: &'static str,
+) -> Diagnostic {
+    stg_diagnostic(
+        severity,
+        DiagnosticLocation::STGNumber(STGNumberTarget::Unit { unit, field }),
+        message,
+    )
+}
+
+const fn stg_diagnostic(
+    severity: Severity,
+    location: DiagnosticLocation,
+    message: &'static str,
+) -> Diagnostic {
+    Diagnostic {
+        severity,
+        location,
+        message,
     }
 }
 
@@ -892,6 +1496,20 @@ fn event_blocks_mut(model: &mut STGModel) -> &mut Vec<EventBlock> {
     }
 }
 
+fn footer_entries(model: &STGModel) -> &[FooterEntry] {
+    match &model.tail {
+        STGTail::Parsed(tail) => &tail.footer_entries,
+        STGTail::Raw { .. } => &[],
+    }
+}
+
+fn footer_entries_mut(model: &mut STGModel) -> &mut Vec<FooterEntry> {
+    match &mut model.tail {
+        STGTail::Parsed(tail) => &mut tail.footer_entries,
+        STGTail::Raw { .. } => unreachable!("validated raw STG tail became mutable"),
+    }
+}
+
 fn item<T>(
     values: &[T],
     collection: STGCollection,
@@ -925,6 +1543,9 @@ fn item_mut<T>(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
+    use super::stg_test_support::{STGFixtureOffsets, complete_stg_fixture, stg_prefix_fixture};
     use super::*;
 
     #[test]
@@ -1056,6 +1677,668 @@ mod tests {
         };
         assert_eq!(prefix, b"map");
         assert!(padding.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn every_numeric_mutation_changes_only_its_wire_field() {
+        let fixture = complete_stg_fixture();
+        let cases = number_wire_cases(fixture.offsets);
+        assert_eq!(cases.len(), 129);
+
+        for (target, range) in cases {
+            let mut document = parse_test_document(fixture.bytes.clone());
+            let before = test_wire_image(&document);
+            assert_eq!(before, fixture.bytes);
+            let previous = test_number(&document, target);
+            let (minimum, maximum) = target.storage_bounds();
+            let replacement = if previous == maximum {
+                minimum
+            } else {
+                maximum
+            };
+            if let Err(error) = document.set_number(target, replacement) {
+                panic!("failed to mutate {target:?}: {error}");
+            }
+
+            let mut expected = before;
+            replace_wire_range(
+                &mut expected,
+                range,
+                &number_wire_bytes(target, replacement),
+            );
+            assert_eq!(test_wire_image(&document), expected, "{target:?}");
+        }
+    }
+
+    #[test]
+    fn every_float_mutation_changes_only_its_wire_field() {
+        let fixture = complete_stg_fixture();
+        let cases = float_wire_cases(fixture.offsets);
+        assert_eq!(cases.len(), 32);
+
+        for (target, range) in cases {
+            let mut document = parse_test_document(fixture.bytes.clone());
+            let before = test_wire_image(&document);
+            assert_eq!(before, fixture.bytes);
+            let previous = match document.float(target) {
+                Ok(value) => value,
+                Err(error) => panic!("failed to read {target:?}: {error}"),
+            };
+            let replacement = STGFloatValue::from_bits(previous.to_bits() ^ 0x55aa_33cc);
+            if let Err(error) = document.set_float(target, replacement) {
+                panic!("failed to mutate {target:?}: {error}");
+            }
+
+            let mut expected = before;
+            replace_wire_range(&mut expected, range, &replacement.to_bits().to_le_bytes());
+            assert_eq!(test_wire_image(&document), expected, "{target:?}");
+        }
+    }
+
+    #[test]
+    fn numeric_prefix_mutation_keeps_the_exact_raw_tail_wire_image() {
+        let mut source = stg_prefix_fixture(1);
+        let unit_start = source.len() - 544;
+        source.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        let mut document = parse_test_document(source.clone());
+        assert_eq!(test_wire_image(&document), source);
+
+        let target = STGNumberTarget::Unit {
+            unit: 0,
+            field: STGUnitField::UniqueID,
+        };
+        if let Err(error) = document.set_number(target, 0xfedc_ba98) {
+            panic!("failed to mutate a raw-tail STG prefix: {error}");
+        }
+        replace_wire_range(
+            &mut source,
+            unit_start + 32..unit_start + 36,
+            &0xfedc_ba98_u32.to_le_bytes(),
+        );
+        assert_eq!(test_wire_image(&document), source);
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one exact-wire failure matrix audits every STG target boundary together"
+    )]
+    fn failed_field_mutations_keep_the_complete_wire_image() {
+        let source = complete_stg_fixture().bytes;
+        let invalid_numbers = [
+            STGNumberTarget::Unit {
+                unit: 1,
+                field: STGUnitField::UniqueID,
+            },
+            STGNumberTarget::Skill {
+                unit: 0,
+                owner: STGSkillOwner::Leader,
+                slot: 4,
+                field: STGSkillField::ID,
+            },
+            STGNumberTarget::Skill {
+                unit: 0,
+                owner: STGSkillOwner::Officer1,
+                slot: 4,
+                field: STGSkillField::ID,
+            },
+            STGNumberTarget::Skill {
+                unit: 0,
+                owner: STGSkillOwner::Officer2,
+                slot: 4,
+                field: STGSkillField::ID,
+            },
+            STGNumberTarget::Ability {
+                unit: 0,
+                owner: STGAbilityOwner::Leader,
+                slot: 23,
+            },
+            STGNumberTarget::Ability {
+                unit: 0,
+                owner: STGAbilityOwner::Officer1,
+                slot: 23,
+            },
+            STGNumberTarget::Ability {
+                unit: 0,
+                owner: STGAbilityOwner::Officer2,
+                slot: 19,
+            },
+            STGNumberTarget::Area {
+                area: 1,
+                field: STGAreaField::AreaID,
+            },
+            STGNumberTarget::VariableID { variable: 4 },
+            STGNumberTarget::EventBlockHeader { block: 2 },
+            STGNumberTarget::EventID { block: 0, event: 2 },
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::VariableInitial { variable: 4 },
+            },
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(super::super::STGParameterTarget {
+                    script: super::super::STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Condition,
+                        script: 1,
+                    },
+                    parameter: 0,
+                }),
+            },
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(super::super::STGParameterTarget {
+                    script: super::super::STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 1,
+                    },
+                    parameter: 0,
+                }),
+            },
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(super::super::STGParameterTarget {
+                    script: super::super::STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 0,
+                    },
+                    parameter: 2,
+                }),
+            },
+            STGNumberTarget::Footer {
+                entry: 2,
+                field: STGFooterField::SlotData1,
+            },
+        ];
+        for target in invalid_numbers {
+            assert_failed_wire_unchanged(&source, |document| document.set_number(target, 1));
+        }
+
+        let invalid_floats = [
+            STGFloatTarget::Unit {
+                unit: 1,
+                field: STGUnitFloatField::PositionX,
+            },
+            STGFloatTarget::StatOverride { unit: 0, slot: 22 },
+            STGFloatTarget::Area {
+                area: 1,
+                field: super::super::STGAreaFloatField::BoundX1,
+            },
+            STGFloatTarget::Parameter {
+                value: STGValueTarget::VariableInitial { variable: 4 },
+            },
+        ];
+        for target in invalid_floats {
+            assert_failed_wire_unchanged(&source, |document| {
+                document.set_float(target, STGFloatValue::from_bits(1))
+            });
+        }
+
+        for (target, value) in [
+            (
+                STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::UCD,
+                },
+                -1,
+            ),
+            (
+                STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::UCD,
+                },
+                256,
+            ),
+            (
+                STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::UniqueID,
+                },
+                -1,
+            ),
+            (
+                STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::UniqueID,
+                },
+                i64::from(u32::MAX) + 1,
+            ),
+            (
+                STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::TroopInfoIndex,
+                },
+                i64::from(i32::MIN) - 1,
+            ),
+            (
+                STGNumberTarget::Unit {
+                    unit: 0,
+                    field: STGUnitField::TroopInfoIndex,
+                },
+                i64::from(i32::MAX) + 1,
+            ),
+        ] {
+            assert_failed_wire_unchanged(&source, |document| document.set_number(target, value));
+        }
+
+        for target in [
+            STGNumberTarget::Unit {
+                unit: 0,
+                field: STGUnitField::Reserved27,
+            },
+            STGNumberTarget::Area {
+                area: 0,
+                field: STGAreaField::Unknown20,
+            },
+        ] {
+            assert_failed_wire_unchanged(&source, |document| document.set_number(target, 1));
+        }
+        assert_failed_wire_unchanged(&source, |document| {
+            document.set_float(
+                STGFloatTarget::Unit {
+                    unit: 0,
+                    field: STGUnitFloatField::Unknown30,
+                },
+                STGFloatValue::from_bits(1),
+            )
+        });
+        assert_failed_wire_unchanged(&source, |document| {
+            document.set_number(
+                STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::VariableInitial { variable: 1 },
+                },
+                1,
+            )
+        });
+        assert_failed_wire_unchanged(&source, |document| {
+            document.set_float(
+                STGFloatTarget::Parameter {
+                    value: STGValueTarget::VariableInitial { variable: 0 },
+                },
+                STGFloatValue::from_bits(1),
+            )
+        });
+
+        let mut raw_source = stg_prefix_fixture(1);
+        raw_source.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        assert_failed_wire_unchanged(&raw_source, |document| {
+            document.set_number(
+                STGNumberTarget::Area {
+                    area: 0,
+                    field: STGAreaField::AreaID,
+                },
+                1,
+            )
+        });
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the exhaustive wire map is easier to audit against the STG schema in one table"
+    )]
+    fn number_wire_cases(offsets: STGFixtureOffsets) -> Vec<(STGNumberTarget, Range<usize>)> {
+        let mut cases = Vec::new();
+        let unit = offsets.unit_name;
+        for field in STGUnitField::ALL {
+            let target = STGNumberTarget::Unit { unit: 0, field };
+            if target.access() == super::super::STGFieldAccess::Editable {
+                let (relative, width) = unit_number_wire(field);
+                cases.push((target, unit + relative..unit + relative + width));
+            }
+        }
+
+        for owner in STGSkillOwner::ALL {
+            let owner_start = unit
+                + match owner {
+                    STGSkillOwner::Leader => 88,
+                    STGSkillOwner::Officer1 => 196,
+                    STGSkillOwner::Officer2 => 300,
+                };
+            for slot in 0..4 {
+                for field in STGSkillField::ALL {
+                    let relative = slot * 2
+                        + match field {
+                            STGSkillField::ID => 0,
+                            STGSkillField::Level => 1,
+                        };
+                    cases.push((
+                        STGNumberTarget::Skill {
+                            unit: 0,
+                            owner,
+                            slot,
+                            field,
+                        },
+                        owner_start + relative..owner_start + relative + 1,
+                    ));
+                }
+            }
+        }
+
+        for owner in STGAbilityOwner::ALL {
+            let (owner_start, count) = match owner {
+                STGAbilityOwner::Leader => (unit + 96, 23),
+                STGAbilityOwner::Officer1 => (unit + 204, 23),
+                STGAbilityOwner::Officer2 => (unit + 308, 19),
+            };
+            for slot in 0..count {
+                let start = owner_start + slot * 4;
+                cases.push((
+                    STGNumberTarget::Ability {
+                        unit: 0,
+                        owner,
+                        slot,
+                    },
+                    start..start + 4,
+                ));
+            }
+        }
+
+        cases.push((
+            STGNumberTarget::Area {
+                area: 0,
+                field: STGAreaField::AreaID,
+            },
+            offsets.area_description + 64..offsets.area_description + 68,
+        ));
+        for (variable, type_offset) in [
+            offsets.variable_integer_type,
+            offsets.variable_float_type,
+            offsets.variable_string_type,
+            offsets.variable_enum_type,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            cases.push((
+                STGNumberTarget::VariableID { variable },
+                type_offset - 4..type_offset,
+            ));
+        }
+        for (variable, type_offset) in [
+            (0, offsets.variable_integer_type),
+            (3, offsets.variable_enum_type),
+        ] {
+            cases.push((
+                STGNumberTarget::ParameterInteger {
+                    value: STGValueTarget::VariableInitial { variable },
+                },
+                type_offset + 4..type_offset + 8,
+            ));
+        }
+        cases.push((
+            STGNumberTarget::EventBlockHeader { block: 0 },
+            offsets.event_block_count + 4..offsets.event_block_count + 8,
+        ));
+        cases.push((
+            STGNumberTarget::EventBlockHeader { block: 1 },
+            offsets.footer_count - 8..offsets.footer_count - 4,
+        ));
+        cases.push((
+            STGNumberTarget::EventID { block: 0, event: 0 },
+            offsets.event_description + 64..offsets.event_description + 68,
+        ));
+        let second_event = offsets.action_enum_type + 8;
+        cases.push((
+            STGNumberTarget::EventID { block: 0, event: 1 },
+            second_event + 64..second_event + 68,
+        ));
+        cases.push((
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(super::super::STGParameterTarget {
+                    script: super::super::STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Condition,
+                        script: 0,
+                    },
+                    parameter: 0,
+                }),
+            },
+            offsets.condition_integer_type + 4..offsets.condition_integer_type + 8,
+        ));
+        cases.push((
+            STGNumberTarget::ParameterInteger {
+                value: STGValueTarget::ScriptParameter(super::super::STGParameterTarget {
+                    script: super::super::STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Action,
+                        script: 0,
+                    },
+                    parameter: 1,
+                }),
+            },
+            offsets.action_enum_type + 4..offsets.action_enum_type + 8,
+        ));
+        for entry in 0..2 {
+            for field in STGFooterField::ALL {
+                let field_offset = match field {
+                    STGFooterField::SlotData1 => 0,
+                    STGFooterField::SlotData2 => 4,
+                };
+                let start = offsets.footer_count + 4 + entry * 8 + field_offset;
+                cases.push((STGNumberTarget::Footer { entry, field }, start..start + 4));
+            }
+        }
+        cases
+    }
+
+    const fn unit_number_wire(field: STGUnitField) -> (usize, usize) {
+        match field {
+            STGUnitField::UniqueID => (32, 4),
+            STGUnitField::UCD => (36, 1),
+            STGUnitField::HeroFlag => (37, 1),
+            STGUnitField::EnabledFlag => (38, 1),
+            STGUnitField::Reserved27 => (39, 1),
+            STGUnitField::FacingDirection => (76, 1),
+            STGUnitField::ExtraFlags1 => (77, 1),
+            STGUnitField::ExtraFlags2 => (78, 1),
+            STGUnitField::Category => (79, 1),
+            STGUnitField::Reserved50 => (80, 4),
+            STGUnitField::LeaderJobType => (84, 1),
+            STGUnitField::LeaderModelID => (85, 1),
+            STGUnitField::LeaderWorldmapID => (86, 1),
+            STGUnitField::LeaderLevel => (87, 1),
+            STGUnitField::OfficerCount => (188, 4),
+            STGUnitField::Officer1JobType => (192, 1),
+            STGUnitField::Officer1ModelID => (193, 1),
+            STGUnitField::Officer1WorldmapID => (194, 1),
+            STGUnitField::Officer1Level => (195, 1),
+            STGUnitField::Officer2JobType => (296, 1),
+            STGUnitField::Officer2ModelID => (297, 1),
+            STGUnitField::Officer2WorldmapID => (298, 1),
+            STGUnitField::Officer2Level => (299, 1),
+            STGUnitField::AnimationConfig => (396, 4),
+            STGUnitField::GridX => (400, 4),
+            STGUnitField::GridY => (404, 4),
+            STGUnitField::TroopInfoIndex => (448, 4),
+            STGUnitField::FormationType => (452, 4),
+        }
+    }
+
+    fn float_wire_cases(offsets: STGFixtureOffsets) -> Vec<(STGFloatTarget, Range<usize>)> {
+        let mut cases = Vec::new();
+        let unit = offsets.unit_name;
+        for field in STGUnitFloatField::ALL {
+            let target = STGFloatTarget::Unit { unit: 0, field };
+            if target.access() == super::super::STGFieldAccess::Editable {
+                let relative = match field {
+                    STGUnitFloatField::LeaderHPOverride => 40,
+                    STGUnitFloatField::UnitHPOverride => 44,
+                    STGUnitFloatField::Unknown30 => 48,
+                    STGUnitFloatField::PositionX => 68,
+                    STGUnitFloatField::PositionY => 72,
+                };
+                cases.push((target, unit + relative..unit + relative + 4));
+            }
+        }
+        for slot in 0..22 {
+            let start = unit + 456 + slot * 4;
+            cases.push((
+                STGFloatTarget::StatOverride { unit: 0, slot },
+                start..start + 4,
+            ));
+        }
+        for field in super::super::STGAreaFloatField::ALL {
+            let relative = match field {
+                super::super::STGAreaFloatField::BoundX1 => 68,
+                super::super::STGAreaFloatField::BoundY1 => 72,
+                super::super::STGAreaFloatField::BoundX2 => 76,
+                super::super::STGAreaFloatField::BoundY2 => 80,
+            };
+            let start = offsets.area_description + relative;
+            cases.push((STGFloatTarget::Area { area: 0, field }, start..start + 4));
+        }
+        cases.push((
+            STGFloatTarget::Parameter {
+                value: STGValueTarget::VariableInitial { variable: 1 },
+            },
+            offsets.variable_float_type + 4..offsets.variable_float_type + 8,
+        ));
+        cases.push((
+            STGFloatTarget::Parameter {
+                value: STGValueTarget::ScriptParameter(super::super::STGParameterTarget {
+                    script: super::super::STGScriptTarget {
+                        block: 0,
+                        event: 0,
+                        kind: STGScriptKind::Condition,
+                        script: 0,
+                    },
+                    parameter: 1,
+                }),
+            },
+            offsets.condition_float_type + 4..offsets.condition_float_type + 8,
+        ));
+        cases
+    }
+
+    fn number_wire_bytes(target: STGNumberTarget, value: i64) -> Vec<u8> {
+        match target.storage_bounds() {
+            (0, 255) => match u8::try_from(value) {
+                Ok(value) => vec![value],
+                Err(error) => {
+                    panic!("test value does not fit the target's u8 wire field: {error}")
+                }
+            },
+            (minimum, maximum)
+                if minimum == i64::from(i32::MIN) && maximum == i64::from(i32::MAX) =>
+            {
+                match i32::try_from(value) {
+                    Ok(value) => value.to_le_bytes().to_vec(),
+                    Err(error) => {
+                        panic!("test value does not fit the target's i32 wire field: {error}")
+                    }
+                }
+            }
+            (0, maximum) if maximum == i64::from(u32::MAX) => match u32::try_from(value) {
+                Ok(value) => value.to_le_bytes().to_vec(),
+                Err(error) => {
+                    panic!("test value does not fit the target's u32 wire field: {error}")
+                }
+            },
+            bounds => panic!("unexpected STG numeric wire bounds: {bounds:?}"),
+        }
+    }
+
+    fn test_number(document: &STGDocument, target: STGNumberTarget) -> i64 {
+        match document.number(target) {
+            Ok(value) => value,
+            Err(error) => panic!("failed to read {target:?}: {error}"),
+        }
+    }
+
+    fn parse_test_document(bytes: Vec<u8>) -> STGDocument {
+        match STGDocument::parse(bytes) {
+            Ok(document) => document,
+            Err(error) => panic!("test STG document failed to parse: {error}"),
+        }
+    }
+
+    fn assert_failed_wire_unchanged<T>(
+        source: &[u8],
+        operation: impl FnOnce(&mut STGDocument) -> Result<T, FormatError>,
+    ) {
+        let mut document = parse_test_document(source.to_vec());
+        let before = test_wire_image(&document);
+        match operation(&mut document) {
+            Err(_error) => {}
+            Ok(_) => panic!("expected STG field mutation to fail"),
+        }
+        assert_eq!(test_wire_image(&document), before);
+    }
+
+    fn test_wire_image(document: &STGDocument) -> Vec<u8> {
+        let model = &document.model;
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, model.magic);
+        append_generated(&mut bytes, model.header.to_bytes(), "header");
+        push_count(&mut bytes, model.units.len(), "units");
+        for unit in &model.units {
+            append_generated(&mut bytes, unit.to_bytes(), "unit");
+        }
+
+        match &model.tail {
+            STGTail::Parsed(tail) => {
+                push_count(&mut bytes, tail.areas.len(), "areas");
+                for area in &tail.areas {
+                    append_generated(&mut bytes, area.to_bytes(), "area");
+                }
+                push_count(&mut bytes, tail.variables.len(), "variables");
+                for variable in &tail.variables {
+                    append_generated(&mut bytes, variable.to_bytes(), "variable");
+                }
+                push_count(&mut bytes, tail.event_blocks.len(), "event blocks");
+                for block in &tail.event_blocks {
+                    append_generated(&mut bytes, block.to_bytes(), "event block");
+                }
+                push_count(&mut bytes, tail.footer_entries.len(), "footer entries");
+                for footer in &tail.footer_entries {
+                    append_generated(&mut bytes, footer.to_bytes(), "footer entry");
+                }
+                bytes.extend_from_slice(test_source_range(
+                    tail.suffix_source.as_slice(),
+                    &tail.suffix_range,
+                ));
+            }
+            STGTail::Raw { source, range, .. } => {
+                bytes.extend_from_slice(test_source_range(source.as_slice(), range));
+            }
+        }
+        bytes
+    }
+
+    fn append_generated(
+        bytes: &mut Vec<u8>,
+        generated: Result<Vec<u8>, crate::generated::kuf_stg::Error>,
+        region: &str,
+    ) {
+        match generated {
+            Ok(generated) => bytes.extend_from_slice(&generated),
+            Err(error) => panic!("failed to encode test STG {region}: {error}"),
+        }
+    }
+
+    fn push_count(bytes: &mut Vec<u8>, count: usize, region: &str) {
+        match u32::try_from(count) {
+            Ok(count) => push_u32(bytes, count),
+            Err(error) => panic!("test STG {region} count does not fit u32: {error}"),
+        }
+    }
+
+    fn test_source_range<'a>(source: &'a [u8], range: &Range<usize>) -> &'a [u8] {
+        match source.get(range.clone()) {
+            Some(bytes) => bytes,
+            None => panic!("test STG source range is invalid"),
+        }
+    }
+
+    fn replace_wire_range(bytes: &mut [u8], range: Range<usize>, replacement: &[u8]) {
+        let Some(target) = bytes.get_mut(range) else {
+            panic!("test STG wire range is invalid");
+        };
+        assert_eq!(target.len(), replacement.len());
+        target.copy_from_slice(replacement);
     }
 
     fn dynamic_document() -> STGDocument {
