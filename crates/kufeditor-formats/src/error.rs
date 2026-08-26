@@ -740,8 +740,14 @@ pub enum STGEncodeError {
     #[error("encoded STG cursor ended at {actual}, expected {expected}")]
     CursorMismatch { expected: usize, actual: usize },
 
+    #[error("actual encoded STG length {actual} exceeds the projected length {projected}")]
+    LengthProjectionMismatch { projected: usize, actual: usize },
+
     #[error("STG model retains {retained} bytes, exceeding the {maximum}-byte budget")]
     ModelBudgetExceeded { retained: usize, maximum: usize },
+
+    #[error("actual STG model size {actual} exceeds the projected size {projected}")]
+    ModelProjectionMismatch { projected: usize, actual: usize },
 
     #[error("STG tail layout is inconsistent with the source image")]
     InvalidTailLayout,

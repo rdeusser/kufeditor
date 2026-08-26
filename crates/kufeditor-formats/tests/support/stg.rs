@@ -11,9 +11,16 @@ pub struct STGFixture {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct STGFixtureOffsets {
+    pub header_map: usize,
+    pub unit_name: usize,
+    pub unit_leader_hp: usize,
+    pub unit_stat_override: usize,
     pub tail_start: usize,
     pub area_count: usize,
+    pub area_description: usize,
+    pub area_bound_x1: usize,
     pub variable_count: usize,
+    pub variable_name: usize,
     pub variable_integer_type: usize,
     pub variable_float_type: usize,
     pub variable_string_type: usize,
@@ -21,6 +28,7 @@ pub struct STGFixtureOffsets {
     pub variable_enum_type: usize,
     pub event_block_count: usize,
     pub event_count: usize,
+    pub event_description: usize,
     pub condition_count: usize,
     pub condition_parameter_count: usize,
     pub condition_integer_type: usize,
@@ -36,14 +44,21 @@ pub struct STGFixtureOffsets {
 
 pub fn complete_stg_fixture() -> STGFixture {
     let mut bytes = stg_prefix_fixture(1);
+    let header_map = 4 + 68;
+    let unit_name = 4 + HEADER_SIZE + size_of::<u32>();
+    let unit_leader_hp = unit_name + 40;
+    let unit_stat_override = unit_name + UNIT_SIZE - 22 * size_of::<f32>();
     let tail_start = bytes.len();
 
     let area_count = bytes.len();
     push_u32(&mut bytes, 1);
+    let area_description = bytes.len();
+    let area_bound_x1 = area_description + 68;
     bytes.resize(bytes.len() + AREA_SIZE, 0);
 
     let variable_count = bytes.len();
     push_u32(&mut bytes, 4);
+    let variable_name = bytes.len();
     let variable_integer_type = append_variable(&mut bytes, 100, Parameter::Integer(-12));
     let variable_float_type = append_variable(&mut bytes, 101, Parameter::Float(17.25));
     let variable_string_type = append_variable(&mut bytes, 102, Parameter::String(b"variable"));
@@ -56,6 +71,7 @@ pub fn complete_stg_fixture() -> STGFixture {
     let event_count = bytes.len();
     push_u32(&mut bytes, 2);
 
+    let event_description = bytes.len();
     append_fixed_text::<64>(&mut bytes, b"Primary Event");
     push_u32(&mut bytes, 500);
     let condition_count = bytes.len();
@@ -95,9 +111,16 @@ pub fn complete_stg_fixture() -> STGFixture {
     STGFixture {
         bytes,
         offsets: STGFixtureOffsets {
+            header_map,
+            unit_name,
+            unit_leader_hp,
+            unit_stat_override,
             tail_start,
             area_count,
+            area_description,
+            area_bound_x1,
             variable_count,
+            variable_name,
             variable_integer_type,
             variable_float_type,
             variable_string_type,
@@ -105,6 +128,7 @@ pub fn complete_stg_fixture() -> STGFixture {
             variable_enum_type,
             event_block_count,
             event_count,
+            event_description,
             condition_count,
             condition_parameter_count,
             condition_integer_type,

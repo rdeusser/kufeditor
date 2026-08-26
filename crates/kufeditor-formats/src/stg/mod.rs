@@ -1,8 +1,10 @@
 pub mod catalog;
 
 mod fields;
+mod mutation;
 mod preflight;
 mod text;
+mod wire;
 
 use std::{mem::size_of, ops::Range, sync::Arc};
 
@@ -23,7 +25,7 @@ pub use fields::{
     STGNumberTarget, STGParameterTarget, STGScriptKind, STGScriptTarget, STGSkillField,
     STGSkillOwner, STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValueTarget,
 };
-pub use text::STGText;
+pub use text::{STGText, STGTextImage};
 
 const MAGIC: u32 = 1_001;
 const MAGIC_SIZE: usize = size_of::<u32>();
@@ -168,14 +170,16 @@ impl STGDocument {
             &mut budget,
         );
 
+        let model = STGModel {
+            magic: plan.magic,
+            header,
+            units,
+            tail,
+        };
+        debug_assert_eq!(wire::encoded_len(&model), Some(source.len()));
         Ok(Self {
             source,
-            model: Arc::new(STGModel {
-                magic: plan.magic,
-                header,
-                units,
-                tail,
-            }),
+            model: Arc::new(model),
         })
     }
 
@@ -493,6 +497,15 @@ fn retained_tail_bytes(tail: &STGParsedTail) -> Option<usize> {
     Some(retained)
 }
 
+fn retained_model_bytes(model: &STGModel) -> Option<usize> {
+    let mut retained = size_of::<STGModel>();
+    charge_capacity::<UnitBlock>(&mut retained, &model.units)?;
+    if let STGTail::Parsed(tail) = &model.tail {
+        retained = retained.checked_add(retained_tail_bytes(tail)?)?;
+    }
+    Some(retained)
+}
+
 fn retained_prefix_bytes(
     units: &Vec<UnitBlock>,
     maximum: usize,
@@ -653,6 +666,27 @@ mod tests {
                 }),
             }
         );
+    }
+
+    #[test]
+    fn wire_length_matches_parsed_and_raw_source_layouts() {
+        let parsed_bytes = empty_document(1, 1);
+        let parsed_length = parsed_bytes.len();
+        let parsed = match STGDocument::parse(parsed_bytes) {
+            Ok(document) => document,
+            Err(error) => panic!("parsed-tail length fixture failed: {error}"),
+        };
+        assert_eq!(wire::encoded_len(&parsed.model), Some(parsed_length));
+
+        let mut raw_bytes = empty_document(1, 0);
+        raw_bytes.pop();
+        let raw_length = raw_bytes.len();
+        let raw = match STGDocument::parse(raw_bytes) {
+            Ok(document) => document,
+            Err(error) => panic!("raw-tail length fixture failed: {error}"),
+        };
+        assert!(matches!(raw.tail_status(), STGTailStatus::Raw { .. }));
+        assert_eq!(wire::encoded_len(&raw.model), Some(raw_length));
     }
 
     fn empty_document(unit_count: usize, area_count: usize) -> Vec<u8> {

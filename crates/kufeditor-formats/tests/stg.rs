@@ -5,6 +5,8 @@
 
 use std::collections::HashSet;
 
+use encoding_rs::EUC_KR;
+
 #[path = "support/stg.rs"]
 mod stg_support;
 
@@ -14,7 +16,7 @@ use kufeditor_formats::{
     STGFieldAccess, STGFloatTarget, STGFloatValue, STGFooterField, STGHeaderTextField, STGMutation,
     STGNumberTarget, STGParameterTarget, STGParseError, STGPreflightError, STGRebaseError,
     STGRegion, STGScriptKind, STGScriptTarget, STGSkillField, STGSkillOwner, STGStructuralLocation,
-    STGTailFailure, STGTailStatus, STGTarget, STGText, STGTextEncoding, STGTextError,
+    STGTailFailure, STGTailStatus, STGTarget, STGText, STGTextEncoding, STGTextError, STGTextImage,
     STGTextTarget, STGUnitField, STGUnitFloatField, STGUnitGroup, STGValueKind, STGValueTarget,
 };
 use stg_support::{complete_stg_fixture, empty_stg_fixture, stg_prefix_fixture};
@@ -480,7 +482,10 @@ fn stable_editor_text_mutation_and_diagnostic_types_do_not_expose_generated_valu
     };
     assert_eq!(editor.storage_bounds(), (0, i64::from(u8::MAX)));
 
-    assert_eq!(STGText::Decoded("hello").decoded(), Some("hello"));
+    assert_eq!(
+        STGText::Decoded(std::borrow::Cow::Borrowed("hello")).decoded(),
+        Some("hello")
+    );
     assert_eq!(STGText::Raw(&[0x81]).decoded(), None);
 
     let changed = STGMutation::Changed { previous: 7_i64 };
@@ -575,4 +580,641 @@ fn stg_failures_keep_regions_targets_and_value_kinds_typed() {
 
     let rebase = FormatError::STGRebase(STGRebaseError::ForeignLineage);
     assert!(rebase.to_string().contains("lineage"));
+}
+
+#[test]
+fn stg_text_decodes_utf8_and_cp949_without_replacement() {
+    let mut fixture = complete_stg_fixture();
+    write_fixed_text(
+        &mut fixture.bytes,
+        fixture.offsets.header_map,
+        64,
+        "map-é".as_bytes(),
+    );
+    let korean = cp949("기사");
+    write_fixed_text(&mut fixture.bytes, fixture.offsets.unit_name, 32, &korean);
+    write_fixed_text(
+        &mut fixture.bytes,
+        fixture.offsets.area_description,
+        32,
+        &korean,
+    );
+    write_fixed_text(
+        &mut fixture.bytes,
+        fixture.offsets.variable_name,
+        64,
+        &korean,
+    );
+    write_fixed_text(
+        &mut fixture.bytes,
+        fixture.offsets.event_description,
+        64,
+        &korean,
+    );
+    let document = STGDocument::parse(fixture.bytes).unwrap();
+
+    let cases = [
+        (
+            STGTextTarget::Header(STGHeaderTextField::MapFilename),
+            "map-é",
+        ),
+        (STGTextTarget::UnitName { unit: 0 }, "기사"),
+        (STGTextTarget::AreaDescription { area: 0 }, "기사"),
+        (STGTextTarget::VariableName { variable: 0 }, "기사"),
+        (
+            STGTextTarget::EventDescription { block: 0, event: 0 },
+            "기사",
+        ),
+    ];
+    for (target, expected) in cases {
+        let text = document.text(target).unwrap();
+        assert_eq!(text.decoded(), Some(expected), "wrong text for {target:?}");
+        assert_eq!(text.raw(), None, "unexpected raw text for {target:?}");
+    }
+}
+
+#[test]
+fn stg_text_mutation_reaches_every_storage_shape_and_preserves_snapshots() {
+    let mut fixture = complete_stg_fixture();
+    fixture.bytes
+        [fixture.offsets.condition_integer_type..fixture.offsets.condition_integer_type + 4]
+        .copy_from_slice(&2_u32.to_le_bytes());
+    fixture.bytes
+        [fixture.offsets.condition_integer_type + 4..fixture.offsets.condition_integer_type + 8]
+        .copy_from_slice(&0_u32.to_le_bytes());
+    write_fixed_text(
+        &mut fixture.bytes,
+        fixture.offsets.header_map,
+        64,
+        b"source-map",
+    );
+    write_fixed_text(
+        &mut fixture.bytes,
+        fixture.offsets.unit_name,
+        32,
+        b"source-unit",
+    );
+    write_fixed_text(
+        &mut fixture.bytes,
+        fixture.offsets.area_description,
+        32,
+        b"source-area",
+    );
+    let original = STGDocument::parse(fixture.bytes).unwrap();
+    let action_string = STGTextTarget::ParameterString {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Action,
+                script: 0,
+            },
+            parameter: 0,
+        }),
+    };
+    let condition_string = STGTextTarget::ParameterString {
+        value: STGValueTarget::ScriptParameter(STGParameterTarget {
+            script: STGScriptTarget {
+                block: 0,
+                event: 0,
+                kind: STGScriptKind::Condition,
+                script: 0,
+            },
+            parameter: 0,
+        }),
+    };
+    let cases = [
+        (
+            STGTextTarget::Header(STGHeaderTextField::MapFilename),
+            "source-map",
+        ),
+        (STGTextTarget::UnitName { unit: 0 }, "source-unit"),
+        (STGTextTarget::AreaDescription { area: 0 }, "source-area"),
+        (STGTextTarget::VariableName { variable: 0 }, "Variable 100"),
+        (
+            STGTextTarget::EventDescription { block: 0, event: 0 },
+            "Primary Event",
+        ),
+        (condition_string, ""),
+        (action_string, "action"),
+    ];
+
+    for (target, source) in cases {
+        let mut edited = original.clone();
+        let source_image =
+            changed_text_image(edited.set_text(target, "edited".to_owned()).unwrap());
+        assert_eq!(edited.text(target).unwrap().decoded(), Some("edited"));
+        assert_eq!(original.text(target).unwrap().decoded(), Some(source));
+
+        let edited_image = changed_text_image(edited.restore_text(target, source_image).unwrap());
+        assert_eq!(edited.text(target).unwrap().decoded(), Some(source));
+        assert!(matches!(
+            edited.restore_text(target, edited_image).unwrap(),
+            STGMutation::Changed { .. }
+        ));
+        assert_eq!(edited.text(target).unwrap().decoded(), Some("edited"));
+        assert_eq!(original.text(target).unwrap().decoded(), Some(source));
+    }
+}
+
+#[test]
+fn stg_text_keeps_invalid_fixed_images_and_restores_them_exactly() {
+    let mut fixture = complete_stg_fixture();
+    write_fixed_bytes(&mut fixture.bytes, fixture.offsets.unit_name, 32, &[0x81]);
+    fixture.bytes[fixture.offsets.unit_name + 2] = 0x7a;
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let target = STGTextTarget::UnitName { unit: 0 };
+    assert_eq!(document.text(target).unwrap().raw(), Some(&[0x81][..]));
+
+    let original = changed_text_image(document.set_text(target, "Knight".to_owned()).unwrap());
+    assert_eq!(document.text(target).unwrap().decoded(), Some("Knight"));
+
+    let edited = changed_text_image(document.restore_text(target, original.clone()).unwrap());
+    assert_eq!(document.text(target).unwrap().raw(), Some(&[0x81][..]));
+    assert_eq!(
+        changed_text_image(document.restore_text(target, edited.clone()).unwrap()),
+        original
+    );
+    assert_eq!(document.text(target).unwrap().decoded(), Some("Knight"));
+
+    let header = STGTextTarget::Header(STGHeaderTextField::MapFilename);
+    assert_stg_text_error(
+        document.restore_text(header, edited),
+        header,
+        &STGTextError::ImageKindMismatch,
+    );
+    assert_eq!(document.text(target).unwrap().decoded(), Some("Knight"));
+}
+
+#[test]
+fn stg_text_keeps_invalid_utf8_header_images_and_restores_them_exactly() {
+    let mut fixture = complete_stg_fixture();
+    write_fixed_bytes(&mut fixture.bytes, fixture.offsets.header_map, 64, &[0xff]);
+    fixture.bytes[fixture.offsets.header_map + 2] = 0xaa;
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let target = STGTextTarget::Header(STGHeaderTextField::MapFilename);
+    assert_eq!(document.text(target).unwrap().raw(), Some(&[0xff][..]));
+
+    let original = changed_text_image(document.set_text(target, "map".to_owned()).unwrap());
+    let edited = changed_text_image(document.restore_text(target, original.clone()).unwrap());
+    assert_eq!(document.text(target).unwrap().raw(), Some(&[0xff][..]));
+    assert_eq!(
+        changed_text_image(document.restore_text(target, edited).unwrap()),
+        original
+    );
+    assert_eq!(document.text(target).unwrap().decoded(), Some("map"));
+}
+
+#[test]
+fn stg_text_equal_visible_values_are_neutral_and_replacements_are_checked() {
+    let mut fixture = complete_stg_fixture();
+    write_fixed_bytes(&mut fixture.bytes, fixture.offsets.header_map, 64, b"same");
+    fixture.bytes[fixture.offsets.header_map + 8] = 0xaa;
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let header = STGTextTarget::Header(STGHeaderTextField::MapFilename);
+    assert_eq!(
+        document.set_text(header, "same".to_owned()).unwrap(),
+        STGMutation::Unchanged
+    );
+
+    let unit = STGTextTarget::UnitName { unit: 0 };
+    for (value, source) in [
+        (
+            "x".repeat(32),
+            STGTextError::TooLong {
+                length: 32,
+                maximum: 31,
+            },
+        ),
+        ("a\0b".to_owned(), STGTextError::ContainsZero { index: 1 }),
+        (
+            "🙂".to_owned(),
+            STGTextError::Unencodable {
+                encoding: STGTextEncoding::CP949,
+            },
+        ),
+    ] {
+        assert_stg_text_error(document.set_text(unit, value), unit, &source);
+        assert_eq!(document.text(unit).unwrap().decoded(), Some(""));
+    }
+
+    let maximum_unit = "x".repeat(31);
+    assert!(matches!(
+        document.set_text(unit, maximum_unit.clone()).unwrap(),
+        STGMutation::Changed { .. }
+    ));
+    assert_eq!(
+        document.text(unit).unwrap().decoded(),
+        Some(maximum_unit.as_str())
+    );
+
+    let maximum_header = "y".repeat(63);
+    assert!(matches!(
+        document.set_text(header, maximum_header.clone()).unwrap(),
+        STGMutation::Changed { .. }
+    ));
+    assert_eq!(
+        document.text(header).unwrap().decoded(),
+        Some(maximum_header.as_str())
+    );
+    assert_stg_text_error(
+        document.set_text(header, "y".repeat(64)),
+        header,
+        &STGTextError::TooLong {
+            length: 64,
+            maximum: 63,
+        },
+    );
+}
+
+#[test]
+fn stg_text_full_width_source_is_readable_and_equal_value_is_neutral() {
+    let mut fixture = complete_stg_fixture();
+    let full_width = "z".repeat(64);
+    write_fixed_bytes(
+        &mut fixture.bytes,
+        fixture.offsets.header_map,
+        64,
+        full_width.as_bytes(),
+    );
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let target = STGTextTarget::Header(STGHeaderTextField::MapFilename);
+    assert_eq!(
+        document.text(target).unwrap().decoded(),
+        Some(full_width.as_str())
+    );
+    assert_eq!(
+        document.set_text(target, full_width).unwrap(),
+        STGMutation::Unchanged
+    );
+}
+
+#[test]
+fn stg_text_keeps_invalid_dynamic_bytes_and_restores_exact_capacity_images() {
+    let mut fixture = complete_stg_fixture();
+    let payload = fixture.offsets.variable_string_length + 4;
+    fixture.bytes[payload..payload + 8]
+        .copy_from_slice(&[0x81, 0xff, 0x81, 0xff, 0x81, 0xff, 0x81, 0xff]);
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let target = STGTextTarget::ParameterString {
+        value: STGValueTarget::VariableInitial { variable: 2 },
+    };
+    assert_eq!(
+        document.text(target).unwrap().raw(),
+        Some(&[0x81, 0xff, 0x81, 0xff, 0x81, 0xff, 0x81, 0xff][..])
+    );
+
+    let original = changed_text_image(document.set_text(target, "동적".to_owned()).unwrap());
+    assert_eq!(document.text(target).unwrap().decoded(), Some("동적"));
+    for (value, source) in [
+        ("a\0b".to_owned(), STGTextError::ContainsZero { index: 1 }),
+        (
+            "🙂".to_owned(),
+            STGTextError::Unencodable {
+                encoding: STGTextEncoding::CP949,
+            },
+        ),
+    ] {
+        assert_stg_text_error(document.set_text(target, value), target, &source);
+        assert_eq!(document.text(target).unwrap().decoded(), Some("동적"));
+    }
+
+    let edited = changed_text_image(document.restore_text(target, original).unwrap());
+    assert_eq!(
+        document.text(target).unwrap().raw(),
+        Some(&[0x81, 0xff, 0x81, 0xff, 0x81, 0xff, 0x81, 0xff][..])
+    );
+    assert!(matches!(
+        document.restore_text(target, edited).unwrap(),
+        STGMutation::Changed { .. }
+    ));
+    assert_eq!(document.text(target).unwrap().decoded(), Some("동적"));
+}
+
+#[test]
+fn stg_float_access_and_mutation_preserve_every_wire_bit() {
+    let targets = [
+        STGFloatTarget::Unit {
+            unit: 0,
+            field: STGUnitFloatField::LeaderHPOverride,
+        },
+        STGFloatTarget::StatOverride { unit: 0, slot: 0 },
+        STGFloatTarget::Area {
+            area: 0,
+            field: STGAreaFloatField::BoundX1,
+        },
+        STGFloatTarget::Parameter {
+            value: STGValueTarget::VariableInitial { variable: 1 },
+        },
+        STGFloatTarget::Parameter {
+            value: STGValueTarget::ScriptParameter(STGParameterTarget {
+                script: STGScriptTarget {
+                    block: 0,
+                    event: 0,
+                    kind: STGScriptKind::Condition,
+                    script: 0,
+                },
+                parameter: 1,
+            }),
+        },
+    ];
+    for bits in [
+        0x0000_0000_u32,
+        0x8000_0000,
+        0x7f80_0000,
+        0xff80_0000,
+        0x7fc0_0001,
+        0x7fc0_0002,
+    ] {
+        let mut fixture = complete_stg_fixture();
+        for offset in [
+            fixture.offsets.unit_leader_hp,
+            fixture.offsets.unit_stat_override,
+            fixture.offsets.area_bound_x1,
+            fixture.offsets.variable_float_type + 4,
+            fixture.offsets.condition_float_type + 4,
+        ] {
+            fixture.bytes[offset..offset + 4].copy_from_slice(&bits.to_le_bytes());
+        }
+        let mut document = STGDocument::parse(fixture.bytes).unwrap();
+        for target in targets {
+            assert_eq!(document.float(target).unwrap().to_bits(), bits);
+        }
+        document
+            .set_text(
+                STGTextTarget::Header(STGHeaderTextField::MapFilename),
+                "unrelated".to_owned(),
+            )
+            .unwrap();
+        for target in targets {
+            assert_eq!(document.float(target).unwrap().to_bits(), bits);
+        }
+        assert_float_mutation_round_trip(&mut document, &targets, bits);
+    }
+
+    let mut fixture = complete_stg_fixture();
+    fixture.bytes[fixture.offsets.variable_float_type + 4..fixture.offsets.variable_float_type + 8]
+        .copy_from_slice(&0x7fc0_0001_u32.to_le_bytes());
+    let mut document = STGDocument::parse(fixture.bytes).unwrap();
+    let original = document.clone();
+    let target = targets[3];
+    assert_eq!(
+        document
+            .set_float(target, STGFloatValue::from_bits(0x7fc0_0002))
+            .unwrap(),
+        STGMutation::Changed {
+            previous: STGFloatValue::from_bits(0x7fc0_0001),
+        }
+    );
+    assert_eq!(
+        document
+            .set_float(target, STGFloatValue::from_bits(0x7fc0_0002))
+            .unwrap(),
+        STGMutation::Unchanged
+    );
+    assert_eq!(
+        document
+            .set_float(target, STGFloatValue::from_bits(0x7fc0_0001))
+            .unwrap(),
+        STGMutation::Changed {
+            previous: STGFloatValue::from_bits(0x7fc0_0002),
+        }
+    );
+    assert_eq!(original.float(target).unwrap().to_bits(), 0x7fc0_0001);
+}
+
+#[test]
+fn stg_text_and_float_mutation_failures_are_typed_and_atomic() {
+    let mut document = STGDocument::parse(complete_stg_fixture().bytes).unwrap();
+    let map = STGTextTarget::Header(STGHeaderTextField::MapFilename);
+    let bitmap = STGTextTarget::Header(STGHeaderTextField::BitmapFilename);
+    let map_image = changed_text_image(document.set_text(map, "map".to_owned()).unwrap());
+
+    assert_stg_text_error(
+        document.restore_text(bitmap, map_image),
+        bitmap,
+        &STGTextError::ImageKindMismatch,
+    );
+    assert_eq!(document.text(map).unwrap().decoded(), Some("map"));
+    assert_eq!(document.text(bitmap).unwrap().decoded(), Some(""));
+
+    let missing_unit = STGTextTarget::UnitName { unit: 1 };
+    assert_target_out_of_range(
+        document.set_text(missing_unit, "missing".to_owned()),
+        STGTarget::Text(missing_unit),
+        STGCollection::Unit,
+        1,
+        1,
+    );
+    assert_eq!(document.text(map).unwrap().decoded(), Some("map"));
+
+    let integer_value = STGValueTarget::VariableInitial { variable: 0 };
+    let text_value = STGTextTarget::ParameterString {
+        value: integer_value,
+    };
+    assert_value_kind_mismatch(
+        document.set_text(text_value, "wrong kind".to_owned()),
+        integer_value,
+        STGValueKind::String,
+        STGValueKind::Integer,
+    );
+
+    let float_value = STGFloatTarget::Parameter {
+        value: integer_value,
+    };
+    assert_value_kind_mismatch(
+        document.set_float(float_value, STGFloatValue::from_bits(1)),
+        integer_value,
+        STGValueKind::Float,
+        STGValueKind::Integer,
+    );
+
+    let read_only = STGFloatTarget::Unit {
+        unit: 0,
+        field: STGUnitFloatField::Unknown30,
+    };
+    let original = document.float(read_only).unwrap();
+    match document.set_float(read_only, STGFloatValue::from_bits(0x7fc0_0001)) {
+        Err(FormatError::STGReadOnlyTarget { target }) => {
+            assert_eq!(target, STGTarget::Float(read_only));
+        }
+        Err(other) => panic!("unexpected read-only STG error: {other}"),
+        Ok(_) => panic!("expected read-only STG failure"),
+    }
+    assert_eq!(document.float(read_only).unwrap(), original);
+}
+
+#[test]
+fn stg_prefix_mutations_preserve_raw_tails_and_reject_tail_targets() {
+    let mut bytes = stg_prefix_fixture(1);
+    let tail_start = bytes.len();
+    bytes.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+    let expected_tail = bytes[tail_start..].to_vec();
+    let mut document = STGDocument::parse(bytes).unwrap();
+    assert_raw_tail(&document, &expected_tail);
+
+    let header = STGTextTarget::Header(STGHeaderTextField::MapFilename);
+    assert!(matches!(
+        document.set_text(header, "map".to_owned()).unwrap(),
+        STGMutation::Changed { .. }
+    ));
+    let unit_float = STGFloatTarget::Unit {
+        unit: 0,
+        field: STGUnitFloatField::PositionX,
+    };
+    assert!(matches!(
+        document
+            .set_float(unit_float, STGFloatValue::from_bits(0x3f80_0000))
+            .unwrap(),
+        STGMutation::Changed { .. }
+    ));
+    assert_raw_tail(&document, &expected_tail);
+
+    let area_text = STGTextTarget::AreaDescription { area: 0 };
+    assert_target_out_of_range(
+        document.set_text(area_text, "area".to_owned()),
+        STGTarget::Text(area_text),
+        STGCollection::Area,
+        0,
+        0,
+    );
+    let area_float = STGFloatTarget::Area {
+        area: 0,
+        field: STGAreaFloatField::BoundX1,
+    };
+    assert_target_out_of_range(
+        document.set_float(area_float, STGFloatValue::from_bits(0)),
+        STGTarget::Float(area_float),
+        STGCollection::Area,
+        0,
+        0,
+    );
+    assert_eq!(document.text(header).unwrap().decoded(), Some("map"));
+    assert_eq!(document.float(unit_float).unwrap().to_bits(), 0x3f80_0000);
+    assert_raw_tail(&document, &expected_tail);
+}
+
+fn changed_text_image(mutation: STGMutation<STGTextImage>) -> STGTextImage {
+    match mutation {
+        STGMutation::Changed { previous } => previous,
+        STGMutation::Unchanged => panic!("expected an STG text change"),
+    }
+}
+
+fn assert_float_mutation_round_trip(
+    document: &mut STGDocument,
+    targets: &[STGFloatTarget],
+    bits: u32,
+) {
+    let replacement = STGFloatValue::from_bits(bits ^ 1);
+    for target in targets {
+        let changed = document
+            .set_float(*target, replacement)
+            .unwrap_or_else(|error| panic!("STG float replacement failed: {error}"));
+        assert_eq!(
+            changed,
+            STGMutation::Changed {
+                previous: STGFloatValue::from_bits(bits),
+            }
+        );
+        let current = document
+            .float(*target)
+            .unwrap_or_else(|error| panic!("STG float projection failed: {error}"));
+        assert_eq!(current, replacement);
+        let restored = document
+            .set_float(*target, STGFloatValue::from_bits(bits))
+            .unwrap_or_else(|error| panic!("STG float restore failed: {error}"));
+        assert_eq!(
+            restored,
+            STGMutation::Changed {
+                previous: replacement,
+            }
+        );
+    }
+}
+
+fn assert_stg_text_error(
+    result: Result<STGMutation<STGTextImage>, FormatError>,
+    target: STGTextTarget,
+    expected: &STGTextError,
+) {
+    match result {
+        Err(FormatError::STGText {
+            target: actual_target,
+            source,
+        }) => {
+            assert_eq!(actual_target, target);
+            assert_eq!(&source, expected);
+        }
+        Err(other) => panic!("unexpected STG text error: {other}"),
+        Ok(_) => panic!("expected STG text failure"),
+    }
+}
+
+fn assert_target_out_of_range<T>(
+    result: Result<T, FormatError>,
+    expected_target: STGTarget,
+    expected_collection: STGCollection,
+    expected_index: usize,
+    expected_count: usize,
+) {
+    match result {
+        Err(FormatError::STGTargetOutOfRange {
+            target,
+            collection,
+            index,
+            count,
+        }) => {
+            assert_eq!(target, expected_target);
+            assert_eq!(collection, expected_collection);
+            assert_eq!(index, expected_index);
+            assert_eq!(count, expected_count);
+        }
+        Err(other) => panic!("unexpected STG target error: {other}"),
+        Ok(_) => panic!("expected STG target failure"),
+    }
+}
+
+fn assert_value_kind_mismatch<T>(
+    result: Result<T, FormatError>,
+    expected_target: STGValueTarget,
+    expected_kind: STGValueKind,
+    expected_actual: STGValueKind,
+) {
+    match result {
+        Err(FormatError::STGValueKindMismatch {
+            target,
+            expected,
+            actual,
+        }) => {
+            assert_eq!(target, expected_target);
+            assert_eq!(expected, expected_kind);
+            assert_eq!(actual, expected_actual);
+        }
+        Err(other) => panic!("unexpected STG value-kind error: {other}"),
+        Ok(_) => panic!("expected STG value-kind failure"),
+    }
+}
+
+fn assert_raw_tail(document: &STGDocument, expected: &[u8]) {
+    match document.tail_status() {
+        STGTailStatus::Raw { bytes, .. } => assert_eq!(bytes, expected),
+        STGTailStatus::Parsed { .. } => panic!("expected an opaque STG tail"),
+    }
+}
+
+fn cp949(value: &str) -> Vec<u8> {
+    let (bytes, _, had_errors) = EUC_KR.encode(value);
+    assert!(!had_errors, "test text must be representable in CP949");
+    bytes.into_owned()
+}
+
+fn write_fixed_text(bytes: &mut [u8], offset: usize, width: usize, value: &[u8]) {
+    assert!(value.len() < width);
+    write_fixed_bytes(bytes, offset, width, value);
+}
+
+fn write_fixed_bytes(bytes: &mut [u8], offset: usize, width: usize, value: &[u8]) {
+    bytes[offset..offset + width].fill(0);
+    bytes[offset..offset + value.len()].copy_from_slice(value);
 }
