@@ -303,7 +303,7 @@ impl AppFrame {
                 NoticeSource::Discovery,
                 Notice::plain(
                     NoticeLevel::Warning,
-                    "Automatic Steam discovery is unavailable on this platform",
+                    "Automatic Steam search is available only on Windows.",
                 ),
             );
             cx.notify();
@@ -335,7 +335,7 @@ impl AppFrame {
         self.notices.begin(
             NoticeSource::Discovery,
             request.get(),
-            Notice::info("Detecting Steam installations"),
+            Notice::info("Searching Steam libraries for game folders"),
         );
         key
     }
@@ -352,7 +352,7 @@ impl AppFrame {
         let failure_notice = result
             .as_ref()
             .err()
-            .map(|error| Notice::error("Could not detect Steam installations", error));
+            .map(|error| Notice::error("Could not search Steam libraries", error));
         let request = key.request();
         let previous_paths = self.game_paths.clone();
         let previous_revisions = self.root_revisions;
@@ -390,7 +390,7 @@ impl AppFrame {
                 let notice = if update.installation_count == 0 {
                     Some(Notice::plain(
                         NoticeLevel::Warning,
-                        "No Steam installations were found",
+                        "No game folders were found in Steam libraries",
                     ))
                 } else if update.issue_count > 0 {
                     let issue = if update.issue_count == 1 {
@@ -400,10 +400,7 @@ impl AppFrame {
                     };
                     Some(Notice::plain(
                         NoticeLevel::Warning,
-                        format!(
-                            "Found Steam installations with {} {issue}",
-                            update.issue_count
-                        ),
+                        format!("Found game folders with {} {issue}", update.issue_count),
                     ))
                 } else {
                     None
@@ -1204,7 +1201,7 @@ mod tests {
                 assert_eq!(frame.task_launches.discovery, 0);
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Warning);
-                assert!(notice.summary().contains("unavailable"));
+                assert!(notice.summary().contains("only on Windows"));
             })
             .unwrap();
     }
@@ -1222,7 +1219,7 @@ mod tests {
                 ));
                 assert_eq!(
                     frame.notices.current().map(Notice::summary),
-                    Some("Detecting Steam installations")
+                    Some("Searching Steam libraries for game folders")
                 );
                 assert!(frame.notices.complete(
                     NoticeSource::Discovery,
@@ -1250,7 +1247,10 @@ mod tests {
                 ));
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Warning);
-                assert_eq!(notice.summary(), "No Steam installations were found");
+                assert_eq!(
+                    notice.summary(),
+                    "No game folders were found in Steam libraries"
+                );
             })
             .unwrap();
     }
@@ -1326,7 +1326,10 @@ mod tests {
                 ));
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Warning);
-                assert_eq!(notice.summary(), "No Steam installations were found");
+                assert_eq!(
+                    notice.summary(),
+                    "No game folders were found in Steam libraries"
+                );
             })
             .unwrap();
     }
@@ -1517,7 +1520,7 @@ mod tests {
                 assert_eq!(frame.game_paths.root(Game::Heroes), None);
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Warning);
-                assert_eq!(notice.summary(), "Found Steam installations with 1 issue");
+                assert_eq!(notice.summary(), "Found game folders with 1 issue");
             })
             .unwrap();
     }

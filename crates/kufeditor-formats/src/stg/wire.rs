@@ -515,11 +515,31 @@ impl Length {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn direct_writer_does_not_call_allocating_generated_encoders() {
-        let source = include_str!("wire.rs");
-        let allocating_method = [".", "to_", "bytes()"].concat();
+    use crate::generated::kuf_stg::File;
 
-        assert!(!source.contains(&allocating_method));
+    use super::super::{SOURCE_LIMIT, STGDocument, stg_test_support};
+    use super::encode;
+
+    #[test]
+    fn stg_generated_reference_matches_direct_sink() {
+        let fixture = stg_test_support::complete_stg_fixture();
+        let mut source = fixture.bytes;
+        source.truncate(fixture.offsets.suffix);
+
+        let mut offset = 0;
+        let generated =
+            File::parse(&source, &mut offset).expect("generated parser accepts fixture");
+        assert_eq!(offset, source.len());
+        let expected = generated
+            .to_bytes()
+            .expect("generated reference serializer accepts fixture");
+
+        let document = STGDocument::parse(source).expect("STG document accepts fixture");
+        let actual = encode(&document.model, SOURCE_LIMIT)
+            .expect("direct serializer accepts fixture")
+            .bytes;
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.capacity(), actual.len());
     }
 }

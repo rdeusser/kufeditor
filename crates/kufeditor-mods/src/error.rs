@@ -53,11 +53,11 @@ pub enum GameRootErrorKind {
 impl std::fmt::Display for GameRootErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
-            Self::Missing => "the game root does not exist",
-            Self::NotDirectory => "the game root is not a directory",
-            Self::SymbolicLink => "the game root is a symbolic link",
-            Self::NonUnicode => "the game root is not Unicode",
-            Self::StoreOverlapsGameRoot => "the owned mod store overlaps the game root",
+            Self::Missing => "the game folder does not exist",
+            Self::NotDirectory => "the game folder is not a directory",
+            Self::SymbolicLink => "the game folder is a symbolic link",
+            Self::NonUnicode => "the game folder path is not Unicode",
+            Self::StoreOverlapsGameRoot => "the KufEditor mod folder overlaps the game folder",
         };
         formatter.write_str(message)
     }
@@ -66,7 +66,6 @@ impl std::fmt::Display for GameRootErrorKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ManifestErrorKind {
     InvalidJSON,
-    UnsupportedVersion,
     EmptyName,
     EmptyVersion,
     EmptyAuthor,
@@ -143,8 +142,8 @@ impl std::fmt::Display for PackageErrorKind {
             Self::SymbolicLink => "the package is a symbolic link",
             Self::ZIPTooLarge => "the ZIP exceeds its byte limit",
             Self::TooManyEntries => "the ZIP exceeds its entry limit",
-            Self::EntryNameNotUTF8 => "a ZIP entry name is not UTF8",
-            Self::UnsafeEntryPath => "a ZIP entry has an unsafe game-relative path",
+            Self::EntryNameNotUTF8 => "a ZIP entry name is not UTF-8",
+            Self::UnsafeEntryPath => "a ZIP entry has an invalid game-relative path",
             Self::DuplicateEntry => "the ZIP contains duplicate portable entry names",
             Self::MissingManifest => "the ZIP has no root mod.json",
             Self::DuplicateManifest => "the ZIP has more than one root mod.json",
@@ -266,12 +265,12 @@ impl std::fmt::Display for BackupErrorKind {
             Self::SymbolicLink => "the backup path contains a symbolic link",
             Self::NotDirectory => "the backup path is not a directory",
             Self::UnsupportedObject => "the backup source contains an unsupported object",
-            Self::UnsafePath => "the backup contains an unsafe relative path",
+            Self::UnsafePath => "the backup contains an invalid relative path",
             Self::SourceChanged => "the backup source changed while it was copied",
             Self::Missing => "the backup does not exist",
             Self::InvalidMetadata => "the backup metadata is invalid",
             Self::UnsupportedVersion => "the backup metadata version is unsupported",
-            Self::WrongRoot => "the backup belongs to another game root",
+            Self::WrongRoot => "the backup belongs to another game folder",
             Self::IDMismatch => "the backup ID does not match its content",
             Self::PayloadMismatch => "the backup payload does not match its metadata",
             Self::DestinationCollision => "the backup ID collides with another directory",
@@ -283,11 +282,11 @@ impl std::fmt::Display for UninstallErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::MissingInstallation => "the installation does not exist",
-            Self::WrongRoot => "the installation belongs to another game root",
-            Self::MissingRecoveryImage => "the installation recovery image is missing",
-            Self::InvalidRecoveryImage => "the installation recovery image is invalid",
+            Self::WrongRoot => "the installation belongs to another game folder",
+            Self::MissingRecoveryImage => "the files saved before installation are missing",
+            Self::InvalidRecoveryImage => "the files saved before installation are invalid",
             Self::UnsupportedOperationVersion => {
-                "the installation recovery image version is unsupported"
+                "the saved original-file data uses an unsupported version"
             }
         })
     }
@@ -296,11 +295,11 @@ impl std::fmt::Display for UninstallErrorKind {
 impl std::fmt::Display for TargetPathErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::GameRootChanged => "the selected game root changed",
+            Self::GameRootChanged => "the selected game folder changed",
             Self::SymbolicLink => "a target component is a symbolic link",
             Self::ParentNotDirectory => "a target parent is not a directory",
             Self::NotRegularFile => "the target is not a regular file",
-            Self::Changed => "the target changed during the operation",
+            Self::Changed => "the target file changed while KufEditor was updating it",
             Self::TooLarge => "the target exceeds the file-size limit",
         })
     }
@@ -312,7 +311,7 @@ impl std::fmt::Display for InstalledFileErrorKind {
             Self::SymbolicLink => "the installed path contains a symbolic link",
             Self::NotRegularFile => "the installed path is not a regular file",
             Self::TooLarge => "the installed file exceeds its byte limit",
-            Self::Changed => "the installed file changed while its health was checked",
+            Self::Changed => "the installed file changed while KufEditor checked it",
         };
         formatter.write_str(message)
     }
@@ -322,7 +321,6 @@ impl std::fmt::Display for ManifestErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             Self::InvalidJSON => "the manifest is not valid JSON",
-            Self::UnsupportedVersion => "the manifest version is unsupported",
             Self::EmptyName => "the mod name is empty",
             Self::EmptyVersion => "the mod version is empty",
             Self::EmptyAuthor => "the mod author is empty",
@@ -346,7 +344,7 @@ pub enum ModError {
         value: String,
         kind: RelativeGamePathErrorKind,
     },
-    #[error("invalid game root for {game} at {path:?}: {kind}")]
+    #[error("invalid game folder for {game} at {path:?}: {kind}")]
     InvalidGameRoot {
         game: Game,
         path: PathBuf,
@@ -375,7 +373,7 @@ pub enum ModError {
         path: PathBuf,
         kind: InstalledFileErrorKind,
     },
-    #[error("the package is for {package}, but the selected root is for {target}")]
+    #[error("the package is for {package}, but the selected game folder is for {target}")]
     PackageGameMismatch { package: Game, target: Game },
     #[error("installation conflicts with {installation}: {kind}")]
     InstallationConflict {
@@ -383,7 +381,7 @@ pub enum ModError {
         installation: InstallationID,
         path: Option<RelativeGamePath>,
     },
-    #[error("invalid game target {path:?}: {kind}")]
+    #[error("invalid game file path {path:?}: {kind}")]
     InvalidTargetPath {
         path: PathBuf,
         kind: TargetPathErrorKind,

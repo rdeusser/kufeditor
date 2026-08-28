@@ -6,6 +6,10 @@ publish.workspace = true
 
 [dependencies]
 kufeditor-game.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

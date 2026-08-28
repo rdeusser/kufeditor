@@ -457,7 +457,7 @@ impl ApplyFixture {
             Game::Heroes => "heroes",
         };
         let manifest = format!(
-            "{{\"formatVersion\":1,\"name\":{name:?},\"version\":\"1\",\"game\":\"{game}\",\"files\":[{files}]}}"
+            "{{\"name\":{name:?},\"version\":\"1\",\"game\":\"{game}\",\"files\":[{files}]}}"
         );
         write_zip_package(
             &source,

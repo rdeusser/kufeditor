@@ -109,7 +109,7 @@ pub(crate) enum SettingsLoadError {
         path: PathBuf,
         max_bytes: u64,
     },
-    Json {
+    JSON {
         path: PathBuf,
         source: serde_json::Error,
     },
@@ -127,7 +127,7 @@ impl fmt::Display for SettingsLoadError {
                 "{} is larger than the {max_bytes}-byte settings limit",
                 path.display()
             ),
-            Self::Json { path, .. } => {
+            Self::JSON { path, .. } => {
                 write!(
                     formatter,
                     "could not parse settings from {}",
@@ -145,7 +145,7 @@ impl Error for SettingsLoadError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Read { source, .. } => Some(source),
-            Self::Json { source, .. } => Some(source),
+            Self::JSON { source, .. } => Some(source),
             Self::TooLarge { .. } | Self::UnsupportedVersion { .. } => None,
         }
     }
@@ -286,7 +286,7 @@ pub(crate) fn load_image(path: &Path) -> Result<Option<SettingsImageV1>, Setting
     }
 
     let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|source| SettingsLoadError::Json {
+        serde_json::from_slice(&bytes).map_err(|source| SettingsLoadError::JSON {
             path: path.to_path_buf(),
             source,
         })?;
@@ -297,7 +297,7 @@ pub(crate) fn load_image(path: &Path) -> Result<Option<SettingsImageV1>, Setting
     }
     serde_json::from_value(value)
         .map(Some)
-        .map_err(|source| SettingsLoadError::Json {
+        .map_err(|source| SettingsLoadError::JSON {
             path: path.to_path_buf(),
             source,
         })
@@ -485,7 +485,7 @@ mod tests {
 
         assert!(matches!(
             load_image(&path),
-            Err(SettingsLoadError::Json { path: error_path, .. }) if error_path == path
+            Err(SettingsLoadError::JSON { path: error_path, .. }) if error_path == path
         ));
     }
 

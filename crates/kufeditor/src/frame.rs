@@ -33,6 +33,7 @@ use crate::{
     mod_status::ModPresentationState,
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
+    patch_status::PatchPresentationState,
     settings::{SettingsStartup, SettingsStartupWarning, SettingsWritePump},
     state::{
         Area, ClosePolicy, RecordSelections, RequestID, STGDraftTarget, STGPresentationStates,
@@ -50,6 +51,7 @@ mod discovery;
 #[path = "discovery_status.rs"]
 pub(crate) mod discovery_status;
 pub(crate) mod mods;
+pub(crate) mod patches;
 mod save;
 mod settings;
 mod stg;
@@ -66,6 +68,8 @@ struct TaskLaunchCounts {
     crusaders_catalog: usize,
     settings: usize,
     mods: usize,
+    patch_inspections: usize,
+    patch_operations: usize,
 }
 
 struct ActiveNumberEdit {
@@ -795,6 +799,8 @@ pub struct AppFrame {
     mods_focus: FocusHandle,
     mod_inputs: ModFormInputs,
     mod_cancellation: Option<Arc<AtomicBool>>,
+    patches: PatchPresentationState,
+    patches_focus: FocusHandle,
     recent_files: kufeditor_workspace::RecentFiles,
     catalog: CatalogSession<NameDictionary, CatalogRequestError>,
     crusaders_catalog: CrusadersCatalogSession,
@@ -834,6 +840,11 @@ impl AppFrame {
         let _ = mods.set_context(active_game, 0);
         let theme = Theme::forged_steel();
         let mod_inputs = ModFormInputs::new(&theme, cx);
+        let patches = PatchPresentationState::new(
+            active_game,
+            game_paths.root(active_game).map(Path::to_path_buf),
+            0,
+        );
         let settings = SettingsWritePump::new(path, persistence);
         let mut notices = NoticeCenter::default();
         if let Some(warning) = warning {
@@ -873,6 +884,8 @@ impl AppFrame {
             mods_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             mod_inputs,
             mod_cancellation: None,
+            patches,
+            patches_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             recent_files,
             catalog: CatalogSession::default(),
             crusaders_catalog: CrusadersCatalogSession::default(),
@@ -997,7 +1010,7 @@ impl AppFrame {
             self.cancel_property_edit();
             self.notices.replace(
                 NoticeSource::Workspace,
-                Notice::info("The active document changed; edit canceled"),
+                Notice::info("The document changed. KufEditor canceled the edit."),
             );
             cx.notify();
             return;
@@ -1025,7 +1038,7 @@ impl AppFrame {
                     self.cancel_property_edit();
                     self.notices.replace(
                         NoticeSource::Workspace,
-                        Notice::info("The STG field changed; edit canceled"),
+                        Notice::info("The STG field changed. KufEditor canceled the edit."),
                     );
                     window.focus(&self.focus);
                     cx.notify();
@@ -1105,7 +1118,7 @@ impl AppFrame {
         if self.active_document != Some(document) {
             self.notices.replace(
                 NoticeSource::Workspace,
-                Notice::info("The active document changed; edit canceled"),
+                Notice::info("The document changed. KufEditor canceled the edit."),
             );
             return;
         }
@@ -1130,7 +1143,7 @@ impl AppFrame {
             self.cancel_property_edit();
             self.notices.replace(
                 NoticeSource::Workspace,
-                Notice::info("The active document changed; edit canceled"),
+                Notice::info("The document changed. KufEditor canceled the edit."),
             );
             cx.notify();
             return;
@@ -1470,7 +1483,7 @@ impl AppFrame {
             self.cancel_property_edit();
             self.notices.replace(
                 NoticeSource::Workspace,
-                Notice::info("The active document changed; edit canceled"),
+                Notice::info("The document changed. KufEditor canceled the edit."),
             );
             return;
         }
@@ -1485,7 +1498,7 @@ impl AppFrame {
             self.cancel_property_edit();
             self.notices.replace(
                 NoticeSource::Workspace,
-                Notice::info("The STG field changed; edit canceled"),
+                Notice::info("The STG field changed. KufEditor canceled the edit."),
             );
             return;
         }
@@ -1534,7 +1547,7 @@ impl AppFrame {
             self.cancel_property_edit();
             self.notices.replace(
                 NoticeSource::Workspace,
-                Notice::info("The STG field changed; edit canceled"),
+                Notice::info("The STG field changed. KufEditor canceled the edit."),
             );
             return;
         }
@@ -1673,7 +1686,7 @@ impl AppFrame {
         let notice = if failed_count > 0 {
             Notice::error_lines(
                 format!(
-                    "Opened {}; {} failed",
+                    "Opened {}. Could not open {}.",
                     file_count(accepted_count),
                     failed_count
                 ),
@@ -1685,7 +1698,7 @@ impl AppFrame {
             Notice::plain(
                 NoticeLevel::Warning,
                 format!(
-                    "Opened {}; {} omitted from recent files",
+                    "Opened {}. Could not add {} to Recent Files.",
                     file_count(accepted_count),
                     path_count(omitted_count)
                 ),
@@ -1852,10 +1865,13 @@ impl AppFrame {
             }
             Ok(false) => {}
             Err(error) => {
-                self.notices.replace(
-                    NoticeSource::Workspace,
-                    Notice::error("Could not change document history", &error),
-                );
+                let summary = if redo {
+                    "Could not redo the edit"
+                } else {
+                    "Could not undo the edit"
+                };
+                self.notices
+                    .replace(NoticeSource::Workspace, Notice::error(summary, &error));
             }
         }
         cx.notify();
@@ -1940,7 +1956,10 @@ impl AppFrame {
                     self.notices.complete(
                         NoticeSource::Workspace,
                         notice_identity,
-                        Some(Notice::error("Could not finish save", &error)),
+                        Some(Notice::error(
+                            "Could not update document state after saving",
+                            &error,
+                        )),
                     );
                 }
             },
@@ -1959,7 +1978,7 @@ impl AppFrame {
                         NoticeSource::Workspace,
                         notice_identity,
                         Some(Notice::error(
-                            "Could not reconcile failed save",
+                            "Could not restore document state after the save failed",
                             &cleanup_error,
                         )),
                     );
@@ -2140,6 +2159,9 @@ impl AppFrame {
         if area == Area::Mods {
             self.start_mod_scan(cx);
         }
+        if area == Area::Patches {
+            self.start_patch_inspection(cx);
+        }
         if area == Area::Files
             && let Some(document) = self.active_document.filter(|document| {
                 self.workspace.document_kind(*document).ok() == Some(DocumentKind::CrusadersSTG)
@@ -2282,7 +2304,11 @@ impl AppFrame {
                 views::mods::render(&self.theme, &model, &self.mods_focus, &self.mod_inputs, cx)
                     .into_any_element()
             }
-            Area::Patches => views::patches::render(&self.theme).into_any_element(),
+            Area::Patches => {
+                let model = views::patches::project_patches(&self.patches);
+                views::patches::render(&self.theme, &model, &self.patches_focus, cx)
+                    .into_any_element()
+            }
             Area::Settings => {
                 let projection = views::settings::project_settings(
                     &self.game_paths,
@@ -2588,7 +2614,7 @@ impl AppFrame {
                     (Ok(wire_index), Ok(maximum), Ok(text)) => {
                         (wire_index, maximum, text.len(), views::text::preview(text))
                     }
-                    _ => (0, 0, 0, "Unavailable".to_owned()),
+                    _ => (0, 0, 0, "Could not read text".to_owned()),
                 };
                 views::text::record_row(
                     &self.theme,
@@ -2833,7 +2859,7 @@ impl AppFrame {
                 let title = self
                     .workspace
                     .title(document_id)
-                    .unwrap_or_else(|error| format!("Unavailable: {error}"));
+                    .unwrap_or_else(|error| format!("Could not read title: {error}"));
                 let dirty = self.workspace.is_dirty(document_id).unwrap_or(false);
                 components::document_tab(
                     &self.theme,
@@ -2855,7 +2881,7 @@ impl AppFrame {
         self.notices.current().map(|notice| {
             let label = match notice.level() {
                 NoticeLevel::Info => "INFO",
-                NoticeLevel::Success => "SAVED",
+                NoticeLevel::Success => "DONE",
                 NoticeLevel::Warning => "WARNING",
                 NoticeLevel::Error => "ERROR",
             };
@@ -2986,6 +3012,8 @@ impl Render for AppFrame {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let key_context = if self.shell.area() == Area::Mods {
             "KufEditor Mods"
+        } else if self.shell.area() == Area::Patches {
+            "KufEditor Patches"
         } else if self.save_editor_is_visible() {
             "KufEditor SaveEditor"
         } else if self.stg_editor_is_visible() {
@@ -3012,6 +3040,9 @@ impl Render for AppFrame {
             .on_action(cx.listener(Self::focus_next_mod_control))
             .on_action(cx.listener(Self::focus_previous_mod_control))
             .on_action(cx.listener(Self::cancel_mod_operation))
+            .on_action(cx.listener(Self::focus_next_patch_control))
+            .on_action(cx.listener(Self::focus_previous_patch_control))
+            .on_action(cx.listener(Self::dismiss_patch_confirmation_action))
             .on_action(cx.listener(Self::open_action))
             .on_action(cx.listener(Self::save_action))
             .on_action(cx.listener(Self::save_all_action))
@@ -3502,7 +3533,7 @@ mod tests {
                 assert!(frame.recent_files.paths().is_empty());
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Error);
-                assert_eq!(notice.summary(), "Opened 0 files; 1 failed");
+                assert_eq!(notice.summary(), "Opened 0 files. Could not open 1.");
                 assert!(notice.detail().contains(&path.display().to_string()));
                 assert!(notice.detail().contains("unsupported file"));
                 assert!(notice.detail().contains(".sox"));
@@ -3607,7 +3638,7 @@ mod tests {
                 assert_eq!(frame.recent_files.paths(), [first.clone(), third.clone()]);
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Error);
-                assert_eq!(notice.summary(), "Opened 2 files; 1 failed");
+                assert_eq!(notice.summary(), "Opened 2 files. Could not open 1.");
                 assert!(
                     notice
                         .detail()
@@ -3650,7 +3681,7 @@ mod tests {
                 assert!(!frame.settings.has_failed());
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Error);
-                assert_eq!(notice.summary(), "Opened 0 files; 2 failed");
+                assert_eq!(notice.summary(), "Opened 0 files. Could not open 2.");
                 assert!(frame.schedule_settings_write(frame.shell.game(), cx));
             })
             .unwrap();
@@ -3871,7 +3902,7 @@ mod tests {
                 assert_eq!(notice.level(), NoticeLevel::Warning);
                 assert_eq!(
                     notice.summary(),
-                    "Opened 1 file; 1 path omitted from recent files"
+                    "Opened 1 file. Could not add 1 path to Recent Files."
                 );
             })
             .unwrap();
@@ -3920,7 +3951,7 @@ mod tests {
                 assert_eq!(notice.level(), NoticeLevel::Warning);
                 assert_eq!(
                     notice.summary(),
-                    "Opened 1 file; 1 path omitted from recent files"
+                    "Opened 1 file. Could not add 1 path to Recent Files."
                 );
             })
             .unwrap();
@@ -4599,7 +4630,7 @@ mod tests {
                 assert!(!frame.workspace.is_dirty(second).unwrap());
                 assert_eq!(
                     frame.notices.current().map(Notice::summary),
-                    Some("The active document changed; edit canceled")
+                    Some("The document changed. KufEditor canceled the edit.")
                 );
             })
             .unwrap();

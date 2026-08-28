@@ -221,7 +221,7 @@ impl Display for ModSelectionError {
         match self {
             Self::OutsideRoot { path, root } => write!(
                 formatter,
-                "the selected file {} is outside the configured game root {}",
+                "the selected file {} is outside the selected game folder {}",
                 path.display(),
                 root.display()
             ),
@@ -232,7 +232,7 @@ impl Display for ModSelectionError {
             ),
             Self::InvalidRelative { path, .. } => write!(
                 formatter,
-                "the selected file does not have a safe game-relative path: {}",
+                "the selected file path cannot be stored in a mod package: {}",
                 path.display()
             ),
         }
@@ -919,7 +919,7 @@ impl AppFrame {
             ModOperationKind::Apply,
             ModOperationTarget::Package(package_id),
             subject,
-            "Write this package's files into the active game folder.",
+            "Replace files in the selected game folder with files from this package.",
         );
         cx.notify();
     }
@@ -940,7 +940,7 @@ impl AppFrame {
             ModOperationKind::RemovePackage,
             ModOperationTarget::Package(package_id),
             subject,
-            "Delete this package from the local library. Installed packages cannot be removed.",
+            "Delete this package from the library. Installed packages must be uninstalled first.",
         );
         cx.notify();
     }
@@ -961,7 +961,7 @@ impl AppFrame {
             ModOperationKind::Uninstall,
             ModOperationTarget::Installation(installation_id),
             subject,
-            "Restore every before-image and remove this installation record.",
+            "Restore the original files, delete files added by the mod, and remove the mod from Installed.",
         );
         cx.notify();
     }
@@ -978,7 +978,7 @@ impl AppFrame {
             ModOperationKind::RestoreBackup,
             ModOperationTarget::Backup(backup_id),
             subject,
-            "Overlay every backed-up file. Files created after the backup remain in place.",
+            "Replace matching game files with files from this backup. Other files will stay in place.",
         );
         cx.notify();
     }
@@ -995,7 +995,7 @@ impl AppFrame {
             ModOperationKind::DeleteBackup,
             ModOperationTarget::Backup(backup_id),
             subject,
-            "Permanently delete this owned backup directory.",
+            "Permanently delete this backup.",
         );
         cx.notify();
     }
@@ -1087,7 +1087,7 @@ impl AppFrame {
             let report = service.apply(ApplyModRequest::new(&root, package_id), progress)?;
             Ok(ModOperationSuccess {
                 message: format!(
-                    "Applied {} {} · {} committed files",
+                    "Applied {} {} · updated {} files",
                     report.installation().metadata().name(),
                     report.installation().metadata().version(),
                     report.committed_paths().len()
@@ -1142,7 +1142,7 @@ impl AppFrame {
                 service.restore_backup(RestoreBackupRequest::new(&root, backup_id), progress)?;
             Ok(ModOperationSuccess {
                 message: format!(
-                    "Restored backup · {} overlaid files",
+                    "Restored backup · replaced {} files",
                     report.committed_paths().len()
                 ),
                 refresh: ModRefreshScope::Full,
@@ -1203,7 +1203,7 @@ impl AppFrame {
         if self.mods.finish_operation(launch.key) {
             self.notices.replace(
                 NoticeSource::Mods,
-                Notice::info("The selected mod operation is no longer available"),
+                Notice::info("That mod action is no longer available"),
             );
             cx.notify();
         }
@@ -1302,6 +1302,7 @@ impl AppFrame {
                 self.start_mod_scan(cx);
             }
         }
+        self.active_patch_context_changed(cx);
     }
 
     fn sync_mod_context(&mut self) -> ModContextChange {
@@ -1337,7 +1338,7 @@ fn scan_library(
             Err(ModIssueSnapshot::from_error(
                 ModIssueScope::Library,
                 "library-scan",
-                "Could not scan the mod library",
+                "Could not check the mod library",
                 &error,
             ))
         },
@@ -1375,7 +1376,7 @@ fn scan_root(
             return ModRootCompletion::Failed(ModIssueSnapshot::from_error(
                 ModIssueScope::Root,
                 "game-root",
-                "Could not inspect the configured game root",
+                "Could not check the selected game folder",
                 &error,
             ));
         }
@@ -1387,7 +1388,7 @@ fn scan_root(
                 vec![ModIssueSnapshot::from_error(
                     ModIssueScope::Installed,
                     "installation-scan",
-                    "Could not scan installed mods",
+                    "Could not check installed mods",
                     &error,
                 )],
             )
@@ -1401,7 +1402,7 @@ fn scan_root(
                 vec![ModIssueSnapshot::from_error(
                     ModIssueScope::Backups,
                     "backup-scan",
-                    "Could not scan backups",
+                    "Could not check backups",
                     &error,
                 )],
             )
@@ -1428,7 +1429,7 @@ fn installation_snapshot(scan: &InstallationScan) -> ModCollectionSnapshot<Insta
             ModIssueSnapshot::from_error(
                 ModIssueScope::Installed,
                 identity,
-                "Could not verify an installed mod",
+                "Could not check installed mod files",
                 issue.error(),
             )
         })
@@ -1979,7 +1980,7 @@ mod tests {
             assert_eq!(confirmation.operation, ModOperationKind::Apply);
             assert_eq!(confirmation.target, ModOperationTarget::Package(package_id));
             assert!(confirmation.subject.contains("Forged Pack 1.0"));
-            assert!(confirmation.consequence.contains("active game folder"));
+            assert!(confirmation.consequence.contains("selected game folder"));
         });
         draw_mod_frame(cx, frame);
         frame.update_in(cx, |frame, window, _| window.focus(&frame.mods_focus));
@@ -2050,7 +2051,7 @@ mod tests {
             assert!(
                 confirmation
                     .consequence
-                    .contains("created after the backup")
+                    .contains("Other files will stay in place")
             );
         });
         draw_mod_frame(cx, frame);
@@ -2099,7 +2100,11 @@ mod tests {
                 confirmation.target,
                 ModOperationTarget::Installation(installation_id)
             );
-            assert!(confirmation.consequence.contains("before-image"));
+            assert!(
+                confirmation
+                    .consequence
+                    .contains("Restore the original files")
+            );
         });
         draw_mod_frame(cx, frame);
         click(cx, "mods-confirmation-accept");
@@ -2114,7 +2119,11 @@ mod tests {
         frame.update(cx, |frame, _| {
             let confirmation = frame.mods.pending_confirmation().unwrap();
             assert_eq!(confirmation.operation, ModOperationKind::RemovePackage);
-            assert!(confirmation.consequence.contains("local library"));
+            assert!(
+                confirmation
+                    .consequence
+                    .contains("Delete this package from the library")
+            );
         });
         draw_mod_frame(cx, frame);
         click(cx, "mods-confirmation-accept");

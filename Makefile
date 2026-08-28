@@ -1,95 +1,61 @@
-.PHONY: all build run test clean configure rebuild generate check-generated tidy rust-build rust-test rust-run rust-lint rust-deny rust-release rust-check
-
-BUILD_DIR := build
-BUILD_TYPE := Release
+.PHONY: all build run test clean rebuild generate check-generated fmt fmt-check lint acronyms deny release check help
 
 all: build
 
-configure:
-	@mkdir -p $(BUILD_DIR)
-	@cd $(BUILD_DIR) && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+build:
+	@cargo build --workspace --locked
 
-build: configure
-	@cmake --build $(BUILD_DIR) --config $(BUILD_TYPE) --parallel
+run:
+	@cargo run --locked -p kufeditor
 
-run: build
-	@./$(BUILD_DIR)/kufeditor
-
-test: build
-	@cd $(BUILD_DIR) && ctest -C $(BUILD_TYPE) --output-on-failure
+test:
+	@cargo test --workspace --all-targets --all-features --locked
 
 clean:
-	@rm -rf $(BUILD_DIR)
+	@cargo clean
 
 rebuild: clean build
 
-# Generate C++ and Rust parsers from the shared cleave schemas.
 generate:
 	@./scripts/generate.sh
 
 check-generated:
 	@./scripts/check-generated.sh
 
-rust-build:
-	@cargo build --workspace
+fmt:
+	@cargo fmt --all
 
-rust-test:
-	@cargo test --workspace --all-features
+fmt-check:
+	@cargo fmt --all -- --check
 
-rust-run:
-	@cargo run -p kufeditor
+lint:
+	@cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-rust-lint:
-	@cargo fmt --all --check
-	@cargo clippy --workspace --all-targets --all-features -- -D warnings
+acronyms:
+	@./scripts/check-rust-acronyms.sh
 
-rust-deny:
+deny:
 	@cargo deny check
 
-rust-release:
-	@cargo build --release -p kufeditor
+release:
+	@cargo build --release --locked -p kufeditor
 
-rust-check: rust-lint rust-test rust-deny rust-release check-generated
-
-# Debug build variants
-debug:
-	@$(MAKE) BUILD_TYPE=Debug build
-
-run-debug:
-	@$(MAKE) BUILD_TYPE=Debug build
-	@./$(BUILD_DIR)/kufeditor
-
-# Verbose build
-build-verbose: configure
-	@cmake --build $(BUILD_DIR) --config $(BUILD_TYPE) --parallel --verbose
-
-# Just run tests without rebuilding
-test-only:
-	@cd $(BUILD_DIR) && ctest -C $(BUILD_TYPE) --output-on-failure
-
-tidy:
-	@fd -e cpp -e h . src test | xargs clang-format -i
+check: fmt-check acronyms lint test deny release check-generated
 
 help:
 	@echo "Available targets:"
-	@echo "  build         - Build the project (default)"
-	@echo "  run           - Build and run the application"
-	@echo "  test          - Build and run tests"
-	@echo "  clean         - Remove build directory"
-	@echo "  rebuild       - Clean and build"
-	@echo "  debug         - Build in debug mode"
-	@echo "  run-debug     - Build and run in debug mode"
-	@echo "  configure     - Run CMake configuration"
-	@echo "  build-verbose - Build with verbose output"
-	@echo "  test-only     - Run tests without rebuilding"
-	@echo "  generate      - Regenerate C++ and Rust parsers"
-	@echo "  check-generated - Verify generated parsers are current"
-	@echo "  rust-build    - Build the Rust workspace"
-	@echo "  rust-test     - Run all Rust tests"
-	@echo "  rust-run      - Run the GPUI application"
-	@echo "  rust-lint     - Check Rust formatting and lints"
-	@echo "  rust-deny     - Audit Rust dependencies"
-	@echo "  rust-release  - Build the release GPUI application"
-	@echo "  rust-check    - Run every local Rust and generation gate"
-	@echo "  tidy          - Format all .cpp and .h files with clang-format"
-	@echo "  help          - Show this help message"
+	@echo "  build           - Build the Rust workspace (default)"
+	@echo "  run             - Build and run the GPUI application"
+	@echo "  test            - Run all Rust tests"
+	@echo "  clean           - Remove Cargo build output"
+	@echo "  rebuild         - Clean and build the Rust workspace"
+	@echo "  generate        - Regenerate Cleave Rust parsers"
+	@echo "  check-generated - Verify generated Rust parsers are current"
+	@echo "  fmt             - Format the Rust workspace"
+	@echo "  fmt-check       - Verify Rust formatting"
+	@echo "  lint            - Run strict Rust lints"
+	@echo "  acronyms        - Verify project-owned acronym spelling"
+	@echo "  deny            - Audit Rust dependencies"
+	@echo "  release         - Build the optimized GPUI application"
+	@echo "  check           - Run every local release gate"
+	@echo "  help            - Show this help message"

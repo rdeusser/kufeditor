@@ -2,8 +2,7 @@ use gpui::{AnyElement, Div, div, prelude::*, px};
 
 use crate::{components, theme::Theme};
 
-const EMPTY_COPY: &str =
-    "Open a .sox data file, a Crusaders .sav file, or a Crusaders .stg file to begin editing.";
+const EMPTY_COPY: &str = "Open a SOX (.sox) data file, a Crusaders SAV (.sav) file, or a Crusaders STG (.stg) file to begin editing.";
 
 pub fn render(theme: &Theme, tabs: Vec<AnyElement>, editor: Option<Div>) -> Div {
     let body = editor.unwrap_or_else(|| {

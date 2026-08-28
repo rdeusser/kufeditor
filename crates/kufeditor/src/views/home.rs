@@ -58,23 +58,20 @@ pub fn render(theme: &Theme, game: Game, recent_rows: Vec<AnyElement>) -> Div {
                         div()
                             .text_size(px(12.0))
                             .text_color(theme.accent)
-                            .child("FORGED STEEL WORKSPACE"),
+                            .child("KINGDOM UNDER FIRE EDITOR"),
                     )
                     .child(
                         div()
                             .text_size(px(30.0))
                             .text_color(theme.text)
-                            .child("Kingdom Under Fire tools, reforged."),
+                            .child("Edit data files, mods, executable patches, and backups."),
                     )
                     .child(
                         div()
                             .max_w(px(560.0))
                             .text_size(px(15.0))
                             .text_color(theme.text_dim)
-                            .child(format!(
-                                "Editing {} data with source-preserving Rust codecs.",
-                                game.label()
-                            )),
+                            .child(format!("Current game: {}", game.label())),
                     )
                     .child(
                         div()
@@ -82,7 +79,7 @@ pub fn render(theme: &Theme, game: Game, recent_rows: Vec<AnyElement>) -> Div {
                             .items_center()
                             .gap(px(12.0))
                             .child(
-                                components::primary_button(theme, "home-open-file", "Open file")
+                                components::primary_button(theme, "home-open-file", "Open files")
                                     .on_click(|_, window: &mut Window, cx| {
                                         window.dispatch_action(Box::new(OpenFile), cx);
                                     }),
@@ -91,7 +88,7 @@ pub fn render(theme: &Theme, game: Game, recent_rows: Vec<AnyElement>) -> Div {
                                 div()
                                     .text_size(px(12.0))
                                     .text_color(theme.text_dim)
-                                    .child("TroopInfo.sox is available in this first slice."),
+                                    .child("Open SOX files or Crusaders SAV and STG files."),
                             ),
                     ),
             )

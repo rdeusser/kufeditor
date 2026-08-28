@@ -69,7 +69,7 @@ fn import_publishes_a_content_addressed_package_and_is_neutral_when_repeated()
     let source = directory.path().join("knights.zip");
     write_zip_package(
         &source,
-        legacy_manifest(
+        manifest_json(
             "Knight textures",
             "1.2.0",
             "crusaders",
@@ -143,7 +143,7 @@ fn import_accepts_deflated_packages() -> Result<(), Box<dyn std::error::Error>> 
     let source = directory.path().join("deflated.zip");
     write_zip_package(
         &source,
-        version_one_manifest("Deflated", "1", "HeRoEs", &["data/file.sox"]).as_bytes(),
+        manifest_json("Deflated", "1", "HeRoEs", &["data/file.sox"]).as_bytes(),
         &[("data/file.sox", &[b'x'; 4096])],
         FixtureCompression::Deflated,
     )?;
@@ -164,13 +164,13 @@ fn import_does_not_replace_a_content_address_collision() -> Result<(), Box<dyn s
     let other = directory.path().join("other.zip");
     write_zip_package(
         &source,
-        legacy_manifest("Source", "1", "heroes", &["file.sox"]).as_bytes(),
+        manifest_json("Source", "1", "heroes", &["file.sox"]).as_bytes(),
         &[("file.sox", b"source")],
         FixtureCompression::Stored,
     )?;
     write_zip_package(
         &other,
-        legacy_manifest("Other", "1", "heroes", &["file.sox"]).as_bytes(),
+        manifest_json("Other", "1", "heroes", &["file.sox"]).as_bytes(),
         &[("file.sox", b"other")],
         FixtureCompression::Stored,
     )?;
@@ -209,7 +209,7 @@ fn library_scan_sorts_packages_and_retains_malformed_zip_issues()
         let source = directory.path().join(filename);
         write_zip_package(
             &source,
-            legacy_manifest(name, version, "heroes", &["file.sox"]).as_bytes(),
+            manifest_json(name, version, "heroes", &["file.sox"]).as_bytes(),
             &[("file.sox", name.as_bytes())],
             FixtureCompression::Stored,
         )?;
@@ -247,7 +247,7 @@ fn canceled_import_leaves_the_library_absent() -> Result<(), Box<dyn std::error:
     let source = directory.path().join("source.zip");
     write_zip_package(
         &source,
-        legacy_manifest("Canceled", "1", "heroes", &["file.sox"]).as_bytes(),
+        manifest_json("Canceled", "1", "heroes", &["file.sox"]).as_bytes(),
         &[("file.sox", b"data")],
         FixtureCompression::Stored,
     )?;
@@ -265,7 +265,7 @@ fn canceled_import_leaves_the_library_absent() -> Result<(), Box<dyn std::error:
 fn package_validation_rejects_unsafe_entries_and_payload_mismatches()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = TestDirectory::new("unsafe")?;
-    let manifest = legacy_manifest("Unsafe", "1", "heroes", &["data/file.sox"]);
+    let manifest = manifest_json("Unsafe", "1", "heroes", &["data/file.sox"]);
     let fixtures = [
         (
             "missing-manifest.zip",
@@ -371,7 +371,7 @@ fn traversal_entries_are_reported_as_unsafe_paths() -> Result<(), Box<dyn std::e
         &[
             RawZIPEntry::file(
                 b"mod.json",
-                legacy_manifest("Unsafe", "1", "heroes", &["file.sox"]).as_bytes(),
+                manifest_json("Unsafe", "1", "heroes", &["file.sox"]).as_bytes(),
             ),
             RawZIPEntry::file(b"../file.sox", b"data"),
         ],
@@ -402,7 +402,7 @@ fn nested_manifests_are_rejected_even_when_listed_as_payloads()
         &[
             RawZIPEntry::file(
                 b"mod.json",
-                legacy_manifest("Nested", "1", "heroes", &["nested/mod.json"]).as_bytes(),
+                manifest_json("Nested", "1", "heroes", &["nested/mod.json"]).as_bytes(),
             ),
             RawZIPEntry::file(b"nested/mod.json", b"{}"),
         ],
@@ -427,7 +427,7 @@ fn nested_manifests_are_rejected_even_when_listed_as_payloads()
 fn package_validation_enforces_declared_and_actual_resource_limits()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = TestDirectory::new("limits")?;
-    let manifest = legacy_manifest("Limits", "1", "heroes", &["one", "two"]);
+    let manifest = manifest_json("Limits", "1", "heroes", &["one", "two"]);
     let source = directory.path().join("limits.zip");
     write_raw_zip(
         &source,
@@ -466,7 +466,7 @@ fn package_validation_enforces_declared_and_actual_resource_limits()
     }
 
     let actual_over_declared = directory.path().join("actual-over-declared.zip");
-    let one_file_manifest = legacy_manifest("Actual", "1", "heroes", &["one"]);
+    let one_file_manifest = manifest_json("Actual", "1", "heroes", &["one"]);
     write_raw_zip(
         &actual_over_declared,
         &[
@@ -498,7 +498,7 @@ fn a_valid_zip_with_a_non_content_addressed_library_name_is_an_issue()
     let source = stores.packages().join("friendly-name.zip");
     write_zip_package(
         &source,
-        legacy_manifest("Friendly", "1", "heroes", &["file.sox"]).as_bytes(),
+        manifest_json("Friendly", "1", "heroes", &["file.sox"]).as_bytes(),
         &[("file.sox", b"data")],
         FixtureCompression::Stored,
     )?;
@@ -557,7 +557,7 @@ fn import_rejects_a_symlinked_mod_store_before_writing_outside_application_data(
     let source = directory.path().join("source.zip");
     write_zip_package(
         &source,
-        legacy_manifest("Redirected", "1", "heroes", &["file.sox"]).as_bytes(),
+        manifest_json("Redirected", "1", "heroes", &["file.sox"]).as_bytes(),
         &[("file.sox", b"data")],
         FixtureCompression::Stored,
     )?;
@@ -581,7 +581,7 @@ fn import_rejects_a_symlinked_mod_store_before_writing_outside_application_data(
     Ok(())
 }
 
-fn legacy_manifest(name: &str, version: &str, game: &str, files: &[&str]) -> String {
+fn manifest_json(name: &str, version: &str, game: &str, files: &[&str]) -> String {
     let files = files
         .iter()
         .map(|path| format!("\"{path}\""))
@@ -589,16 +589,5 @@ fn legacy_manifest(name: &str, version: &str, game: &str, files: &[&str]) -> Str
         .join(",");
     format!(
         "{{\"name\":\"{name}\",\"version\":\"{version}\",\"game\":\"{game}\",\"files\":[{files}]}}"
-    )
-}
-
-fn version_one_manifest(name: &str, version: &str, game: &str, files: &[&str]) -> String {
-    let files = files
-        .iter()
-        .map(|path| format!("\"{path}\""))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "{{\"formatVersion\":1,\"name\":\"{name}\",\"version\":\"{version}\",\"game\":\"{game}\",\"files\":[{files}]}}"
     )
 }

@@ -1102,7 +1102,7 @@ fn stg_validation_matches_legacy_unit_rules_and_typed_locations() {
                     region: STGRegion::Areas,
                     offset: tail_start,
                 },
-                "STG tail is preserved as raw bytes"
+                "saving will write the unparsed STG bytes without changes"
             ),
         ],
     );
@@ -1142,7 +1142,7 @@ fn stg_validation_worldmap_boundary_exempts_20_and_0xff() {
                     region: STGRegion::Areas,
                     offset: tail_start,
                 },
-                "STG tail is preserved as raw bytes",
+                "saving will write the unparsed STG bytes without changes",
             ),
         ],
     );
@@ -2848,7 +2848,7 @@ fn stg_references_warn_when_the_tail_is_preserved_raw() {
                 region: STGRegion::Areas,
                 offset: tail_start,
             },
-            message: "STG tail is preserved as raw bytes",
+            message: "saving will write the unparsed STG bytes without changes",
         }]
     );
 }
@@ -2868,7 +2868,7 @@ fn stg_references_bound_the_diagnostic_result() {
                 region: STGRegion::Areas,
                 offset: tail_start,
             },
-            message: "STG tail is preserved as raw bytes",
+            message: "saving will write the unparsed STG bytes without changes",
         })
     );
     assert_eq!(

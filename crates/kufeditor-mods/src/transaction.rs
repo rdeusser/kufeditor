@@ -94,7 +94,7 @@ impl TransactionFailpoint {
 
     pub(crate) fn check_registry_publication(&self, path: &Path) -> Result<(), ModError> {
         if self.registry_publication {
-            Err(injected_error("publish installation registry", path))
+            Err(injected_error("save installed-mod list", path))
         } else {
             Ok(())
         }
@@ -233,16 +233,22 @@ impl FileTransaction {
             .map(|file| {
                 let installed_sha256 = file.installed_sha256.ok_or_else(|| {
                     ModError::io(
-                        "read staged file digest",
+                        "read prepared file checksum",
                         self.staged_path(&file.path),
-                        io::Error::new(io::ErrorKind::InvalidData, "missing staged file digest"),
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "prepared file checksum is missing",
+                        ),
                     )
                 })?;
                 let original_existed = file.original_existed.ok_or_else(|| {
                     ModError::io(
-                        "read recovery record",
+                        "read file-restoration record",
                         self.before_path(&file.path),
-                        io::Error::new(io::ErrorKind::InvalidData, "missing recovery record"),
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "file-restoration record is missing",
+                        ),
                     )
                 })?;
                 Ok(InstalledFile::new(
@@ -263,10 +269,10 @@ impl FileTransaction {
     ) -> Result<(), ModError> {
         failpoint.check_state(OperationState::Planned, &self.directory)?;
         let staged_root = self.directory.join("staged");
-        create_owned_directory(&staged_root, "create staged-file directory")?;
+        create_owned_directory(&staged_root, "create temporary prepared-file directory")?;
         let file = File::open(package.library_path()).map_err(|error| {
             ModError::io(
-                "open package for apply staging",
+                "open package while preparing files",
                 package.library_path(),
                 error,
             )
@@ -355,7 +361,7 @@ impl FileTransaction {
                     &inspection.target,
                     &self.before_path(&relative_path),
                     limits.max_file_bytes,
-                    "copy game file into recovery image",
+                    "back up original game file",
                 )?;
                 (true, Some(digest))
             } else {
@@ -467,7 +473,7 @@ impl FileTransaction {
             self.remove_created_directories();
             if let Err(cleanup_error) = fs::remove_dir_all(&self.directory) {
                 return ModError::io(
-                    "remove failed apply operation",
+                    "remove files from failed apply",
                     &self.directory,
                     cleanup_error,
                 );
@@ -685,7 +691,7 @@ impl FileTransaction {
         };
         let mut bytes = serde_json::to_vec_pretty(&image).map_err(|error| {
             ModError::io(
-                "serialize operation image",
+                "encode apply progress file",
                 self.directory.join("operation-v1.json"),
                 io::Error::new(io::ErrorKind::InvalidData, error),
             )
@@ -765,7 +771,7 @@ impl OverlayTransaction {
     ) -> Result<(), ModError> {
         failpoint.check_state(OperationState::Planned, &self.directory)?;
         let staged_root = self.directory.join("staged");
-        create_owned_directory(&staged_root, "create backup-restore staging")?;
+        create_owned_directory(&staged_root, "create temporary backup-restore folder")?;
         let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
         for (index, file) in self.files.iter().enumerate() {
             let source = backup_directory.join("files").join(file.path.as_ref());
@@ -774,7 +780,7 @@ impl OverlayTransaction {
                 &source,
                 &destination,
                 limits.max_file_bytes,
-                "stage backup file for restore",
+                "prepare backup file for restore",
             )?;
             if digest != file.staged_sha256 {
                 return Err(ModError::backup(
@@ -811,7 +817,7 @@ impl OverlayTransaction {
     ) -> Result<(), ModError> {
         validate_game_root(&self.root)?;
         let before_root = self.directory.join("before");
-        create_owned_directory(&before_root, "create backup-restore recovery")?;
+        create_owned_directory(&before_root, "back up current files before restore")?;
         let mut missing_directories = HashSet::new();
         let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
         for index in 0..self.files.len() {
@@ -829,7 +835,7 @@ impl OverlayTransaction {
                     &inspection.target,
                     &self.before_path(&path),
                     limits.max_file_bytes,
-                    "copy game file into restore recovery",
+                    "back up game file before restore",
                 )?;
                 (true, Some(digest))
             } else {
@@ -1163,7 +1169,7 @@ impl OverlayTransaction {
         }))
         .map_err(|error| {
             ModError::io(
-                "serialize backup-restore operation",
+                "encode backup-restore progress file",
                 &self.directory,
                 io::Error::new(io::ErrorKind::InvalidData, error),
             )
@@ -1241,10 +1247,10 @@ impl UninstallTransaction {
             .prefix("uninstall-")
             .tempdir_in(&self.directory)
             .map_err(|error| {
-                ModError::io("create uninstall staging directory", &self.directory, error)
+                ModError::io("create temporary uninstall folder", &self.directory, error)
             })?;
         let files_root = temporary.path().join("files");
-        create_owned_directory(&files_root, "create uninstall file staging")?;
+        create_owned_directory(&files_root, "create temporary uninstall file folder")?;
         let mut changes = Vec::new();
         let total = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
         for (index, file) in self.files.iter().enumerate() {
@@ -1254,7 +1260,7 @@ impl UninstallTransaction {
                     &inspection.target,
                     &files_root.join(file.path.as_ref()),
                     limits.max_file_bytes,
-                    "stage installed file for uninstall rollback",
+                    "back up installed file before uninstall",
                 )?;
                 if digest != file.installed_sha256 {
                     changes.push(ChangedInstalledFile::new(
@@ -1454,7 +1460,7 @@ impl UninstallTransaction {
         let operations = self.directory.parent().map(Path::to_path_buf);
         fs::remove_dir_all(&self.directory).map_err(|error| {
             ModError::io(
-                "remove completed installation recovery",
+                "remove original-file backup after uninstall",
                 &self.directory,
                 error,
             )
@@ -1592,7 +1598,7 @@ impl UninstallTransaction {
             return Ok(());
         };
         fs::remove_dir_all(&staging)
-            .map_err(|error| ModError::io("remove uninstall staging", staging, error))
+            .map_err(|error| ModError::io("remove temporary uninstall files", staging, error))
     }
 
     fn restored_paths_in_order(&self) -> Vec<RelativeGamePath> {
@@ -1613,9 +1619,12 @@ impl UninstallTransaction {
             .map(|directory| directory.join("files").join(path.as_ref()))
             .ok_or_else(|| {
                 ModError::io(
-                    "resolve uninstall staging file",
+                    "find temporary uninstall file",
                     &self.directory,
-                    io::Error::new(io::ErrorKind::NotFound, "uninstall staging is missing"),
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "temporary uninstall file is missing",
+                    ),
                 )
             })
     }
@@ -1634,7 +1643,7 @@ fn read_operation_image(
                 UninstallErrorKind::MissingRecoveryImage,
             ));
         }
-        Err(error) => return Err(ModError::io("inspect operation image", path, error)),
+        Err(error) => return Err(ModError::io("inspect saved operation state", path, error)),
     };
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
@@ -1647,11 +1656,11 @@ fn read_operation_image(
         ));
     }
     let before_stamp = file_stamp(&metadata);
-    let file =
-        File::open(path).map_err(|error| ModError::io("open operation image", path, error))?;
+    let file = File::open(path)
+        .map_err(|error| ModError::io("open saved operation state", path, error))?;
     let opened = file
         .metadata()
-        .map_err(|error| ModError::io("inspect open operation image", path, error))?;
+        .map_err(|error| ModError::io("inspect open operation state", path, error))?;
     if file_stamp(&opened) != before_stamp {
         return Err(ModError::uninstall(
             installation_id,
@@ -1666,9 +1675,9 @@ fn read_operation_image(
     );
     file.take((MAX_OPERATION_BYTES as u64).saturating_add(1))
         .read_to_end(&mut bytes)
-        .map_err(|error| ModError::io("read operation image", path, error))?;
+        .map_err(|error| ModError::io("read saved operation state", path, error))?;
     let after = fs::symlink_metadata(path)
-        .map_err(|error| ModError::io("reinspect operation image", path, error))?;
+        .map_err(|error| ModError::io("check saved operation state again", path, error))?;
     if bytes.len() > MAX_OPERATION_BYTES
         || u64::try_from(bytes.len()).unwrap_or(u64::MAX) != metadata.len()
         || after.file_type().is_symlink()
@@ -1813,7 +1822,13 @@ fn require_uninstall_directory(
                 UninstallErrorKind::MissingRecoveryImage,
             ));
         }
-        Err(error) => return Err(ModError::io("inspect recovery directory", path, error)),
+        Err(error) => {
+            return Err(ModError::io(
+                "inspect original-file backup directory",
+                path,
+                error,
+            ));
+        }
     };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(ModError::uninstall(
@@ -1844,7 +1859,7 @@ fn require_owned_recovery_file(
                 ));
             }
             Err(error) => {
-                return Err(ModError::io("inspect recovery file", current, error));
+                return Err(ModError::io("inspect original-file backup", current, error));
             }
         };
         let is_file = index.saturating_add(1) == path.component_count();
@@ -1876,7 +1891,7 @@ fn write_uninstall_staging_image(
     }))
     .map_err(|error| {
         ModError::io(
-            "serialize uninstall staging image",
+            "encode uninstall progress file",
             directory,
             io::Error::new(io::ErrorKind::InvalidData, error),
         )
@@ -1907,7 +1922,7 @@ pub(crate) fn validate_game_root(root: &GameRoot) -> Result<(), ModError> {
         }
         Err(error) => {
             return Err(ModError::io(
-                "inspect game root before mod operation",
+                "inspect game folder before changing files",
                 root.canonical_path(),
                 error,
             ));
@@ -1929,7 +1944,7 @@ pub(crate) fn validate_game_root(root: &GameRoot) -> Result<(), ModError> {
     }
     let canonical = fs::canonicalize(root.canonical_path()).map_err(|error| {
         ModError::io(
-            "canonicalize game root before mod operation",
+            "resolve game folder path before changing files",
             root.canonical_path(),
             error,
         )
@@ -1949,15 +1964,20 @@ fn prepare_operations_directory(stores: &ModStorePaths) -> Result<PathBuf, ModEr
     match fs::symlink_metadata(&operations) {
         Ok(metadata) => validate_owned_directory(&operations, &metadata)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(&operations)
-                .map_err(|error| ModError::io("create operation store", &operations, error))?;
+            fs::create_dir(&operations).map_err(|error| {
+                ModError::io("create temporary mod-work folder", &operations, error)
+            })?;
             let metadata = fs::symlink_metadata(&operations).map_err(|error| {
-                ModError::io("inspect created operation store", &operations, error)
+                ModError::io("inspect temporary mod-work folder", &operations, error)
             })?;
             validate_owned_directory(&operations, &metadata)?;
         }
         Err(error) => {
-            return Err(ModError::io("inspect operation store", operations, error));
+            return Err(ModError::io(
+                "inspect temporary mod-work folder",
+                operations,
+                error,
+            ));
         }
     }
     Ok(operations)
@@ -1975,16 +1995,20 @@ fn create_operation_directory(
             Ok(()) => return Ok((operation_id, directory)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => {
-                return Err(ModError::io("create operation directory", directory, error));
+                return Err(ModError::io(
+                    "create temporary mod-work directory",
+                    directory,
+                    error,
+                ));
             }
         }
     }
     Err(ModError::io(
-        "create unique apply operation",
+        "create temporary apply folder",
         operations,
         io::Error::new(
             io::ErrorKind::AlreadyExists,
-            "operation ID collision limit reached",
+            "temporary apply folder collision limit reached",
         ),
     ))
 }
@@ -2007,7 +2031,7 @@ fn next_operation_id(root_key: GameRootKey, seed: &[u8]) -> OperationID {
 fn create_owned_directory(path: &Path, operation: &'static str) -> Result<(), ModError> {
     fs::create_dir(path).map_err(|error| ModError::io(operation, path, error))?;
     let metadata = fs::symlink_metadata(path)
-        .map_err(|error| ModError::io("inspect created operation directory", path, error))?;
+        .map_err(|error| ModError::io("inspect temporary apply folder", path, error))?;
     validate_owned_directory(path, &metadata)
 }
 
@@ -2033,15 +2057,18 @@ fn write_staged_file(
 ) -> Result<FileSHA256, ModError> {
     let parent = destination.parent().ok_or_else(|| {
         ModError::io(
-            "resolve staged-file parent",
+            "find prepared-file folder",
             destination,
-            io::Error::new(io::ErrorKind::InvalidInput, "staged file has no parent"),
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "prepared file has no parent folder",
+            ),
         )
     })?;
     fs::create_dir_all(parent)
-        .map_err(|error| ModError::io("create staged-file parent", parent, error))?;
+        .map_err(|error| ModError::io("create prepared-file folder", parent, error))?;
     let mut temporary = NamedTempFile::new_in(parent)
-        .map_err(|error| ModError::io("create temporary staged file", parent, error))?;
+        .map_err(|error| ModError::io("create temporary prepared file", parent, error))?;
     let (digest, bytes) = copy_and_hash(
         entry,
         temporary.as_file_mut(),
@@ -2060,14 +2087,14 @@ fn write_staged_file(
     temporary
         .as_file_mut()
         .flush()
-        .map_err(|error| ModError::io("flush staged file", temporary.path(), error))?;
+        .map_err(|error| ModError::io("flush prepared file", temporary.path(), error))?;
     temporary
         .as_file()
         .sync_all()
-        .map_err(|error| ModError::io("synchronize staged file", temporary.path(), error))?;
+        .map_err(|error| ModError::io("synchronize prepared file", temporary.path(), error))?;
     temporary
         .persist_noclobber(destination)
-        .map_err(|error| ModError::io("publish staged file", destination, error.error))?;
+        .map_err(|error| ModError::io("save prepared file", destination, error.error))?;
     sync_directory(parent)?;
     Ok(digest)
 }
@@ -2161,15 +2188,18 @@ fn copy_stable_file(
     }
     let parent = destination.parent().ok_or_else(|| {
         ModError::io(
-            "resolve recovery-file parent",
+            "find original-file backup folder",
             destination,
-            io::Error::new(io::ErrorKind::InvalidInput, "recovery file has no parent"),
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "original-file backup has no parent folder",
+            ),
         )
     })?;
     fs::create_dir_all(parent)
-        .map_err(|error| ModError::io("create recovery-file parent", parent, error))?;
+        .map_err(|error| ModError::io("create original-file backup folder", parent, error))?;
     let mut temporary = NamedTempFile::new_in(parent)
-        .map_err(|error| ModError::io("create temporary recovery file", parent, error))?;
+        .map_err(|error| ModError::io("create temporary original-file backup", parent, error))?;
     let (digest, copied) = copy_and_hash(
         &mut input,
         temporary.as_file_mut(),
@@ -2181,11 +2211,10 @@ fn copy_stable_file(
     temporary
         .as_file_mut()
         .flush()
-        .map_err(|error| ModError::io("flush recovery file", temporary.path(), error))?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|error| ModError::io("synchronize recovery file", temporary.path(), error))?;
+        .map_err(|error| ModError::io("flush original-file backup", temporary.path(), error))?;
+    temporary.as_file().sync_all().map_err(|error| {
+        ModError::io("synchronize original-file backup", temporary.path(), error)
+    })?;
     let after = fs::symlink_metadata(source)
         .map_err(|error| ModError::io("reinspect source after copy", source, error))?;
     validate_regular_file(source, &after)?;
@@ -2194,7 +2223,7 @@ fn copy_stable_file(
     }
     temporary
         .persist_noclobber(destination)
-        .map_err(|error| ModError::io("publish recovery file", destination, error.error))?;
+        .map_err(|error| ModError::io("save original-file backup", destination, error.error))?;
     sync_directory(parent)?;
     Ok(digest)
 }
@@ -2307,7 +2336,7 @@ fn publish_file(
     })?;
     temporary
         .persist(destination)
-        .map_err(|error| ModError::io("publish game file", destination, error.error))?;
+        .map_err(|error| ModError::io("save game file", destination, error.error))?;
     sync_directory(parent)
 }
 
@@ -2365,23 +2394,24 @@ fn file_stamp(metadata: &fs::Metadata) -> FileStamp {
 
 fn publish_control_file(parent: &Path, destination: &Path, bytes: &[u8]) -> Result<(), ModError> {
     let mut temporary = NamedTempFile::new_in(parent)
-        .map_err(|error| ModError::io("create temporary operation image", parent, error))?;
-    temporary.write_all(bytes).map_err(|error| {
-        ModError::io("write temporary operation image", temporary.path(), error)
-    })?;
-    temporary.as_file_mut().flush().map_err(|error| {
-        ModError::io("flush temporary operation image", temporary.path(), error)
-    })?;
+        .map_err(|error| ModError::io("create temporary progress file", parent, error))?;
+    temporary
+        .write_all(bytes)
+        .map_err(|error| ModError::io("write temporary progress file", temporary.path(), error))?;
+    temporary
+        .as_file_mut()
+        .flush()
+        .map_err(|error| ModError::io("flush temporary progress file", temporary.path(), error))?;
     temporary.as_file().sync_all().map_err(|error| {
         ModError::io(
-            "synchronize temporary operation image",
+            "synchronize temporary progress file",
             temporary.path(),
             error,
         )
     })?;
     temporary
         .persist(destination)
-        .map_err(|error| ModError::io("publish operation image", destination, error.error))?;
+        .map_err(|error| ModError::io("save operation progress", destination, error.error))?;
     sync_directory(parent)
 }
 

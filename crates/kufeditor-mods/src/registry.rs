@@ -712,7 +712,7 @@ fn validate_installed_path(
     let root_metadata = match fs::symlink_metadata(&current) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(ModError::io("inspect game root health", current, error)),
+        Err(error) => return Err(ModError::io("check game folder", current, error)),
     };
     validate_health_component(&current, &root_metadata, false)?;
     for (index, component) in relative_path.as_str().split('/').enumerate() {
@@ -867,9 +867,9 @@ fn publish_registry_image_with_hook(
         )
     })?;
     before_publish(temporary.path())?;
-    let file = temporary.persist(&registry_path).map_err(|error| {
-        ModError::io("publish installation registry", &registry_path, error.error)
-    })?;
+    let file = temporary
+        .persist(&registry_path)
+        .map_err(|error| ModError::io("save installed-mod list", &registry_path, error.error))?;
     drop(file);
     sync_directory(&root)
 }

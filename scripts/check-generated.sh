@@ -7,5 +7,4 @@ project_root="$(cd -- "${script_dir}/.." && pwd)"
 "${script_dir}/generate.sh"
 git -C "${project_root}" diff --exit-code -- \
     schemas \
-    src/parsers \
     crates/kufeditor-formats/src/generated

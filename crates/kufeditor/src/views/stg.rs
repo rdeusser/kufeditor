@@ -137,7 +137,7 @@ impl STGFieldProjection {
             STGText::Decoded(value) => (display_text(value.as_ref()), STGFieldState::Value),
             STGText::Raw(bytes) => (
                 format!(
-                    "Invalid source text · {} · {}",
+                    "Invalid text data · {} · {}",
                     byte_count(bytes.len()),
                     hex_preview(bytes)
                 ),
@@ -308,10 +308,10 @@ pub enum STGCatalogAvailability {
 impl STGCatalogAvailability {
     pub fn message(&self) -> Option<&str> {
         match self {
-            Self::Missing => {
-                Some("Crusaders names are not configured; raw values remain available.")
-            }
-            Self::Loading => Some("Loading Crusaders names; raw values remain available."),
+            Self::Missing => Some(
+                "Configure the Crusaders game folder to show names. Numeric IDs remain editable.",
+            ),
+            Self::Loading => Some("Loading Crusaders names. Numeric IDs remain editable."),
             Self::Failed(error) => Some(error),
             Self::Ready => None,
         }
@@ -364,7 +364,7 @@ pub fn render_editor(
                             .border_color(theme.border)
                             .text_size(px(10.0))
                             .text_color(theme.text_dim)
-                            .child("STRUCTURED VIEW"),
+                            .child("EDITABLE VALUES"),
                     ),
             )
             .child(
@@ -735,7 +735,7 @@ pub fn choice_value_row(
                 .debug_selector(move || selector.clone())
                 .text_size(px(10.0))
                 .text_color(theme.accent)
-                .child("UNKNOWN VALUE · PRESERVED UNTIL YOU CHOOSE A DEFINED VALUE")
+                .child("UNKNOWN VALUE · LEAVE IT UNCHANGED OR SELECT A REPLACEMENT")
         }))
         .child(div().flex().flex_wrap().gap(px(5.0)).children(choices))
 }
@@ -797,15 +797,15 @@ pub fn raw_tail_panel(theme: &Theme, raw: &STGRawTailProjection) -> Stateful<Div
             div()
                 .text_size(px(16.0))
                 .text_color(theme.text)
-                .child(format!("{} is unparsed", raw.section().label())),
+                .child(format!("{} could not be parsed", raw.section().label())),
         )
         .child(div().text_color(theme.text_dim).child(format!(
-            "Parsing first failed in {} at byte {}.",
+            "Parsing stopped in {} at byte {}.",
             raw.region(),
             raw.offset()
         )))
         .child(div().text_color(theme.accent).child(format!(
-            "All {} are preserved exactly and will be written without changes.",
+            "KufEditor will write all {} without changes.",
             byte_count(raw.bytes())
         )))
 }
@@ -858,7 +858,7 @@ pub fn master_row(
                 .flex_none()
                 .text_size(px(9.0))
                 .text_color(theme.accent)
-                .child("INSPECTING")
+                .child("SELECTED")
         }))
 }
 
@@ -2393,7 +2393,7 @@ mod tests {
     }
 
     #[test]
-    fn stg_view_catalog_states_explain_raw_value_fallbacks() {
+    fn stg_view_catalog_states_explain_numeric_id_editing() {
         let states = [
             STGCatalogAvailability::Missing,
             STGCatalogAvailability::Loading,
@@ -2401,7 +2401,12 @@ mod tests {
             STGCatalogAvailability::Ready,
         ];
 
-        assert!(states[0].message().unwrap().contains("not configured"));
+        assert!(
+            states[0]
+                .message()
+                .unwrap()
+                .contains("Configure the Crusaders game folder")
+        );
         assert!(states[1].message().unwrap().contains("Loading"));
         assert!(
             states[2]

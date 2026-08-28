@@ -1338,7 +1338,7 @@ pub fn choice_value_row(
                 .debug_selector(move || selector.clone())
                 .text_size(px(10.0))
                 .text_color(theme.accent)
-                .child("UNKNOWN VALUE · PRESERVED UNTIL YOU CHOOSE A DEFINED VALUE")
+                .child("UNKNOWN VALUE · LEAVE IT UNCHANGED OR SELECT A REPLACEMENT")
         }))
         .child(div().flex().flex_wrap().gap(px(5.0)).children(choices))
 }
@@ -1473,7 +1473,7 @@ pub fn unit_row(
             div()
                 .text_color(theme.accent)
                 .text_size(px(11.0))
-                .child("INSPECTING")
+                .child("SELECTED")
         }))
 }
 
@@ -1627,7 +1627,9 @@ pub fn inline_name_unavailable(theme: &Theme, subject: &'static str) -> Stateful
         .border_color(theme.accent)
         .text_size(px(12.0))
         .text_color(theme.text_dim)
-        .child(format!("{subject} name is unavailable; showing raw IDs."))
+        .child(format!(
+            "{subject} name is unavailable. Numeric IDs are shown instead."
+        ))
 }
 
 fn editing_badge(theme: &Theme) -> Div {
@@ -1639,7 +1641,7 @@ fn editing_badge(theme: &Theme) -> Div {
         .border_color(theme.border)
         .text_size(px(10.0))
         .text_color(theme.text_dim)
-        .child("TYPED EDITING")
+        .child("EDITABLE VALUES")
 }
 
 #[cfg(test)]

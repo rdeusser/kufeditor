@@ -131,6 +131,7 @@ pub(crate) struct ModCreateModel {
 pub(crate) struct ModConfirmationModel {
     pub(crate) title: String,
     pub(crate) consequence: String,
+    pub(crate) action_label: &'static str,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -232,11 +233,12 @@ pub(crate) fn project_mods(state: &ModPresentationState) -> ModViewModel {
         pending_confirmation: state.pending_confirmation().map(|confirmation| {
             ModConfirmationModel {
                 title: format!(
-                    "Confirm {} for {}",
+                    "{}: {}?",
                     confirmation.operation.label(),
                     confirmation.subject
                 ),
                 consequence: confirmation.consequence.clone(),
+                action_label: confirmation.operation.label(),
             }
         }),
         progress: state.progress().map(|progress| ModProgressModel {
@@ -255,10 +257,10 @@ fn content_state(state: &ModPresentationState, rows_empty: bool) -> ModContentSt
     match state.section() {
         ModSection::Library => match state.library_state() {
             ModLibraryState::Idle => ModContentState::Idle {
-                message: "The package library has not been scanned yet.",
+                message: "Select Refresh to check the package library.",
             },
             ModLibraryState::Loading => ModContentState::Loading {
-                message: "Scanning the package library…",
+                message: "Checking the package library…",
             },
             ModLibraryState::Ready(_) if rows_empty => ModContentState::Empty {
                 title: "No packages in the library",
@@ -284,10 +286,10 @@ fn content_state(state: &ModPresentationState, rows_empty: bool) -> ModContentSt
         ),
         ModSection::Create => match state.root_state() {
             ModRootState::Idle => ModContentState::Idle {
-                message: "Open Mods to inspect the configured game root.",
+                message: "Select Refresh to check the selected game folder.",
             },
             ModRootState::Loading => ModContentState::Loading {
-                message: "Inspecting the configured game root…",
+                message: "Checking the selected game folder…",
             },
             ModRootState::MissingRoot => ModContentState::MissingRoot {
                 requirement: root_requirement(state, ModSection::Create),
@@ -309,10 +311,10 @@ fn root_content(
 ) -> ModContentState {
     match state.root_state() {
         ModRootState::Idle => ModContentState::Idle {
-            message: "The game root has not been scanned yet.",
+            message: "Select Refresh to check the selected game folder.",
         },
         ModRootState::Loading => ModContentState::Loading {
-            message: "Scanning the configured game root…",
+            message: "Checking the selected game folder…",
         },
         ModRootState::MissingRoot => ModContentState::MissingRoot {
             requirement: root_requirement(state, state.section()),
@@ -382,7 +384,7 @@ fn installed_action(
         Some(InstalledModStatus::Missing) => {
             ModActionAvailability::disabled("Installed files are missing.")
         }
-        None => ModActionAvailability::disabled("Health check failed."),
+        None => ModActionAvailability::disabled("KufEditor could not check the installed files."),
     }
 }
 
@@ -576,10 +578,10 @@ fn root_requirement(state: &ModPresentationState, section: ModSection) -> String
 
 const fn installed_health(status: Option<InstalledModStatus>) -> &'static str {
     match status {
-        Some(InstalledModStatus::Clean) => "Clean",
-        Some(InstalledModStatus::Modified) => "Modified",
-        Some(InstalledModStatus::Missing) => "Missing files",
-        None => "Health unavailable",
+        Some(InstalledModStatus::Clean) => "Files match package",
+        Some(InstalledModStatus::Modified) => "Files changed",
+        Some(InstalledModStatus::Missing) => "Files missing",
+        None => "Could not check files",
     }
 }
 
@@ -609,26 +611,26 @@ fn short_id(value: &str) -> &str {
 
 const fn progress_phase_label(phase: ModProgressPhase) -> &'static str {
     match phase {
-        ModProgressPhase::InspectingPackage => "Inspecting package",
+        ModProgressPhase::InspectingPackage => "Checking package",
         ModProgressPhase::CopyingPackage => "Copying package",
         ModProgressPhase::CreatingPackage => "Creating package",
-        ModProgressPhase::PublishingPackage => "Publishing package",
-        ModProgressPhase::PlanningApply => "Planning apply",
-        ModProgressPhase::StagingFiles => "Staging files",
-        ModProgressPhase::CreatingRecovery => "Creating recovery",
-        ModProgressPhase::CommittingFiles => "Committing files",
-        ModProgressPhase::PublishingInstallation => "Publishing installation",
-        ModProgressPhase::PlanningUninstall => "Planning uninstall",
-        ModProgressPhase::StagingUninstall => "Staging uninstall",
-        ModProgressPhase::RestoringFiles => "Restoring files",
-        ModProgressPhase::PublishingUninstall => "Publishing uninstall",
-        ModProgressPhase::ScanningBackup => "Scanning backup",
-        ModProgressPhase::CopyingBackup => "Copying backup",
-        ModProgressPhase::PublishingBackup => "Publishing backup",
-        ModProgressPhase::StagingBackupRestore => "Staging backup restore",
-        ModProgressPhase::CreatingRestoreRecovery => "Creating restore recovery",
-        ModProgressPhase::RestoringBackup => "Restoring backup",
-        ModProgressPhase::RollingBack => "Rolling back",
+        ModProgressPhase::PublishingPackage => "Saving package",
+        ModProgressPhase::PlanningApply => "Checking package files",
+        ModProgressPhase::StagingFiles => "Preparing game files",
+        ModProgressPhase::CreatingRecovery => "Backing up current files",
+        ModProgressPhase::CommittingFiles => "Replacing game files",
+        ModProgressPhase::PublishingInstallation => "Recording installed mod",
+        ModProgressPhase::PlanningUninstall => "Checking installed files",
+        ModProgressPhase::StagingUninstall => "Preparing to uninstall",
+        ModProgressPhase::RestoringFiles => "Restoring original files",
+        ModProgressPhase::PublishingUninstall => "Removing installation record",
+        ModProgressPhase::ScanningBackup => "Checking backup",
+        ModProgressPhase::CopyingBackup => "Copying game files",
+        ModProgressPhase::PublishingBackup => "Saving backup record",
+        ModProgressPhase::StagingBackupRestore => "Preparing backup files",
+        ModProgressPhase::CreatingRestoreRecovery => "Backing up current files before restore",
+        ModProgressPhase::RestoringBackup => "Restoring backup files",
+        ModProgressPhase::RollingBack => "Restoring previous files",
     }
 }
 
@@ -733,7 +735,7 @@ fn section_rail(
     let root = model
         .configured_root
         .as_deref()
-        .unwrap_or("Game root not configured");
+        .unwrap_or("Game folder not configured");
     div()
         .w(px(182.0))
         .flex_none()
@@ -751,7 +753,7 @@ fn section_rail(
                 .pb(px(9.0))
                 .text_size(px(11.0))
                 .text_color(theme.accent)
-                .child("MOD WORKSHOP"),
+                .child("MODS"),
         )
         .children(section_items)
         .child(div().flex_1())
@@ -841,7 +843,7 @@ fn route_body(
                             div()
                                 .text_size(px(12.0))
                                 .text_color(theme.accent)
-                                .child("SCAN ISSUES"),
+                                .child("ISSUES"),
                         )
                         .children(issues)
                 })),
@@ -948,7 +950,7 @@ fn confirmation_panel(
                 .child(mod_action_button(
                     theme,
                     "mods-confirmation-accept".to_owned(),
-                    "Confirm",
+                    confirmation.action_label,
                     &ModActionAvailability::enabled(),
                     ModControlAction::ConfirmOperation,
                     cx,
@@ -964,9 +966,9 @@ fn progress_panel(
     let cancel = if progress.can_cancel {
         ModActionAvailability::enabled()
     } else if progress.cancel_requested {
-        ModActionAvailability::disabled("Cancellation was requested.")
+        ModActionAvailability::disabled("Cancel requested.")
     } else {
-        ModActionAvailability::disabled("This phase must finish without interruption.")
+        ModActionAvailability::disabled("This step cannot be canceled.")
     };
     components::surface(theme)
         .id("mods-progress")
@@ -998,7 +1000,7 @@ fn progress_panel(
             div()
                 .text_size(px(12.0))
                 .text_color(theme.accent)
-                .child("Cancellation requested")
+                .child("Cancel requested")
         }))
         .child(
             div()
@@ -1008,7 +1010,7 @@ fn progress_panel(
                 .child(mod_action_button(
                     theme,
                     "mods-progress-cancel".to_owned(),
-                    "Cancel operation",
+                    "Cancel",
                     &cancel,
                     ModControlAction::DismissOrCancel,
                     cx,
@@ -1036,7 +1038,7 @@ fn backup_creation_panel(
         .flex()
         .flex_col()
         .gap(px(8.0))
-        .child(status_title(theme, "Create a full backup"))
+        .child(status_title(theme, "Create a backup"))
         .child(
             div()
                 .text_size(px(12.0))
@@ -1075,7 +1077,7 @@ fn render_content(
                 .child(*message),
         ),
         ModContentState::MissingRoot { requirement } => surface
-            .child(status_title(theme, "Game root required"))
+            .child(status_title(theme, "Game folder required"))
             .child(div().text_color(theme.text_dim).child(requirement.clone())),
         ModContentState::Empty { title, next_action } => surface
             .child(status_title(theme, title))
@@ -1440,10 +1442,12 @@ fn status_title(theme: &Theme, title: &str) -> Div {
 
 const fn section_description(section: ModSection) -> &'static str {
     match section {
-        ModSection::Installed => "Installed packages and current file health.",
-        ModSection::Library => "Validated packages available to either game.",
-        ModSection::Backups => "Full snapshots for the active game root.",
-        ModSection::Create => "Build a portable package from selected game files.",
+        ModSection::Installed => {
+            "Mods installed for the selected game and the status of their files."
+        }
+        ModSection::Library => "Packages imported into KufEditor.",
+        ModSection::Backups => "Copies of files from the selected game folder.",
+        ModSection::Create => "Create a ZIP package from selected game files.",
     }
 }
 
@@ -1567,7 +1571,7 @@ mod tests {
         );
         assert_eq!(
             unavailable.action.reason.as_deref(),
-            Some("Health check failed.")
+            Some("KufEditor could not check the installed files.")
         );
     }
 

@@ -7,6 +7,7 @@ mod frame;
 mod mod_status;
 mod notices;
 mod number_edit;
+mod patch_status;
 mod settings;
 mod state;
 #[cfg(test)]

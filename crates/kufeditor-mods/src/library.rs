@@ -204,7 +204,7 @@ impl ModService {
                 })
             }
             Err(error) => Err(ModError::io(
-                "publish imported package",
+                "save imported package",
                 destination,
                 error.error,
             )),

@@ -208,7 +208,7 @@ fn game_root_rejects_a_symbolic_link() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[test]
-fn legacy_manifest_parses_case_insensitive_games_and_emits_version_one()
+fn manifest_parses_case_insensitive_games_and_omits_format_version()
 -> Result<(), Box<dyn std::error::Error>> {
     let source = br#"{
   "name": "Knight textures",
@@ -245,7 +245,6 @@ fn legacy_manifest_parses_case_insensitive_games_and_emits_version_one()
         encoded,
         concat!(
             "{\n",
-            "  \"formatVersion\": 1,\n",
             "  \"name\": \"Knight textures\",\n",
             "  \"version\": \"1.2.0\",\n",
             "  \"author\": \"KUF community\",\n",
@@ -263,24 +262,15 @@ fn legacy_manifest_parses_case_insensitive_games_and_emits_version_one()
 }
 
 #[test]
-fn manifest_rejects_unsupported_games_versions_and_duplicate_paths() {
+fn manifest_rejects_unknown_games_and_duplicate_paths() {
     let invalid = [
         br#"{"name":"A","version":"1","game":"unknown","files":["a"]}"#.as_slice(),
-        br#"{"formatVersion":2,"name":"A","version":"1","game":"heroes","files":["a"]}"#,
         br#"{"name":"A","version":"1","game":"heroes","files":["Data/a","data/A"]}"#,
     ];
 
     for source in invalid {
         assert!(ModManifest::from_json(source, &ModLimits::default()).is_err());
     }
-}
-
-#[test]
-fn manifest_rejects_an_explicit_null_format_version() {
-    let source =
-        br#"{"formatVersion":null,"name":"A","version":"1","game":"heroes","files":["a"]}"#;
-
-    assert!(ModManifest::from_json(source, &ModLimits::default()).is_err());
 }
 
 #[test]

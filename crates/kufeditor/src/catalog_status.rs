@@ -87,8 +87,8 @@ pub(crate) enum CatalogRequestError {
 impl Display for CatalogRequestError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Installation(_) => formatter.write_str("could not inspect the game installation"),
-            Self::Load(_) => formatter.write_str("could not load the name dictionary"),
+            Self::Installation(_) => formatter.write_str("could not read the game folder"),
+            Self::Load(_) => formatter.write_str("could not load game names"),
         }
     }
 }

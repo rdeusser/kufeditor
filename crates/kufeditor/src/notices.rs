@@ -100,7 +100,7 @@ impl Notice {
     }
 }
 
-fn format_error(error: &dyn Error) -> String {
+pub(crate) fn format_error(error: &dyn Error) -> String {
     let mut detail = error.to_string();
     let mut source = error.source();
     while let Some(cause) = source {
@@ -122,6 +122,7 @@ pub(crate) enum NoticeSource {
     Discovery,
     Catalog,
     Mods,
+    Patches,
 }
 
 struct NoticeSlot {

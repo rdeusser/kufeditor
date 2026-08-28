@@ -862,10 +862,10 @@ fn recovery_paths(error: &ModError) -> Vec<String> {
         return Vec::new();
     };
     let groups = [
-        ("Committed", recovery.committed()),
-        ("Rolled back", recovery.rolled_back()),
-        ("Rollback failed", recovery.rollback_failed()),
-        ("Unchanged", recovery.unchanged()),
+        ("Files changed", recovery.committed()),
+        ("Files restored", recovery.rolled_back()),
+        ("Files not restored", recovery.rollback_failed()),
+        ("Files unchanged", recovery.unchanged()),
     ];
     groups
         .into_iter()

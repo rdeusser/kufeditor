@@ -692,7 +692,7 @@ pub enum STGTextEncoding {
 impl std::fmt::Display for STGTextEncoding {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::UTF8 => "UTF8",
+            Self::UTF8 => "UTF-8",
             Self::CP949 => "CP949",
         })
     }

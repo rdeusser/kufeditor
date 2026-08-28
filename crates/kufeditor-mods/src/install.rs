@@ -968,7 +968,7 @@ mod tests {
             .unix_permissions(0o644);
         writer.start_file("mod.json", options)?;
         writer.write_all(
-            br#"{"formatVersion":1,"name":"Fixture","version":"1","game":"heroes","files":["a.sox","b.sox","c.sox"]}"#,
+            br#"{"name":"Fixture","version":"1","game":"heroes","files":["a.sox","b.sox","c.sox"]}"#,
         )?;
         for (name, bytes) in [
             ("a.sox", b"new-a".as_slice()),

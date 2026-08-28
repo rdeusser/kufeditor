@@ -313,7 +313,7 @@ impl InstalledFixture {
             .collect::<Vec<_>>()
             .join(",");
         let manifest = format!(
-            "{{\"formatVersion\":1,\"name\":\"Fixture\",\"version\":\"1\",\"game\":\"heroes\",\"files\":[{files}]}}"
+            "{{\"name\":\"Fixture\",\"version\":\"1\",\"game\":\"heroes\",\"files\":[{files}]}}"
         );
         write_zip_package(
             &source,

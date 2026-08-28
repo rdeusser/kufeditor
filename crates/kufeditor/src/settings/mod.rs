@@ -139,7 +139,7 @@ mod tests {
         assert_eq!(startup.persistence, PersistenceMode::Enabled);
         assert!(matches!(
             startup.warning,
-            Some(SettingsStartupWarning::Load(SettingsLoadError::Json { .. }))
+            Some(SettingsStartupWarning::Load(SettingsLoadError::JSON { .. }))
         ));
     }
 

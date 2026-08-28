@@ -132,7 +132,7 @@ fn installation_projection(paths: &GamePaths, game: Game) -> InstallationProject
 fn discovery_projection(discovery: &DiscoveryStatus, available: bool) -> DiscoveryProjection {
     if !available {
         return DiscoveryProjection::Unavailable {
-            reason: "Automatic Steam discovery is available only on Windows".to_owned(),
+            reason: "Automatic Steam search is available only on Windows.".to_owned(),
         };
     }
     match discovery {
@@ -183,7 +183,7 @@ pub(crate) fn render(
     let auto_detect = action_button(
         theme,
         projection.auto_detect_id,
-        "Auto-detect",
+        "Search Steam",
         projection.auto_detect_enabled,
     )
     .when(projection.auto_detect_enabled, |button| {
@@ -256,7 +256,7 @@ fn installations_surface(
         .flex()
         .flex_col()
         .gap(px(14.0))
-        .child(section_title(theme, "Game installations"))
+        .child(section_title(theme, "Game folders"))
         .children(rows)
         .child(
             div()
@@ -275,7 +275,7 @@ fn catalog_surface(theme: &Theme, catalog: &CatalogProjection) -> Div {
         .flex()
         .flex_col()
         .gap(px(10.0))
-        .child(section_title(theme, "Active catalog"))
+        .child(section_title(theme, "Game names"))
         .child(
             div()
                 .text_color(theme.text_dim)
@@ -369,28 +369,42 @@ fn section_title(theme: &Theme, label: &'static str) -> Div {
 
 fn catalog_text(catalog: &CatalogProjection) -> String {
     match catalog {
-        CatalogProjection::NotConfigured => "Not configured".to_owned(),
-        CatalogProjection::Loading => "Loading game catalogs".to_owned(),
-        CatalogProjection::Ready => "Ready".to_owned(),
+        CatalogProjection::NotConfigured => "Choose a game folder to load names.".to_owned(),
+        CatalogProjection::Loading => "Loading game names".to_owned(),
+        CatalogProjection::Ready => "Game names loaded".to_owned(),
         CatalogProjection::ReadyWithIssues { issue_count } => {
             let issue = if *issue_count == 1 { "issue" } else { "issues" };
-            format!("Ready with {issue_count} {issue}")
+            format!("Game names loaded with {issue_count} {issue}")
         }
-        CatalogProjection::Failed(error) => format!("Failed: {error}"),
+        CatalogProjection::Failed(error) => format!("Could not load game names: {error}"),
     }
 }
 
 fn discovery_text(discovery: &DiscoveryProjection) -> String {
     match discovery {
         DiscoveryProjection::Unavailable { reason } => reason.clone(),
-        DiscoveryProjection::Idle => "Scan Steam libraries for game folders".to_owned(),
-        DiscoveryProjection::Loading => "Scanning Steam libraries".to_owned(),
+        DiscoveryProjection::Idle => "Search Steam libraries for game folders".to_owned(),
+        DiscoveryProjection::Loading => "Searching Steam libraries".to_owned(),
         DiscoveryProjection::Ready {
             installation_count,
             issue_count,
             ..
-        } => format!("Found {installation_count} installations with {issue_count} issues"),
-        DiscoveryProjection::Failed { error, .. } => format!("Discovery failed: {error}"),
+        } => {
+            let folder = if *installation_count == 1 {
+                "folder"
+            } else {
+                "folders"
+            };
+            if *issue_count == 0 {
+                format!("Found {installation_count} game {folder}")
+            } else {
+                let issue = if *issue_count == 1 { "issue" } else { "issues" };
+                format!("Found {installation_count} game {folder} with {issue_count} {issue}")
+            }
+        }
+        DiscoveryProjection::Failed { error, .. } => {
+            format!("Could not search Steam libraries: {error}")
+        }
     }
 }
 
@@ -502,7 +516,10 @@ mod tests {
             projection.catalog,
             CatalogProjection::ReadyWithIssues { issue_count: 3 }
         );
-        assert_eq!(catalog_text(&projection.catalog), "Ready with 3 issues");
+        assert_eq!(
+            catalog_text(&projection.catalog),
+            "Game names loaded with 3 issues"
+        );
     }
 
     #[test]
@@ -547,7 +564,7 @@ mod tests {
             project_settings(&paths, &catalog, &failed, &recent, true).discovery,
             DiscoveryProjection::Failed {
                 request: key.request().get(),
-                error: "automatic Steam discovery is unavailable on this platform".to_owned(),
+                error: "automatic Steam search is available only on Windows".to_owned(),
             }
         );
     }

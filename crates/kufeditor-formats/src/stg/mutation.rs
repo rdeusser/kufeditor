@@ -81,7 +81,7 @@ impl STGDocument {
                         region: failure.region(),
                         offset: failure.offset(),
                     },
-                    "STG tail is preserved as raw bytes",
+                    "saving will write the unparsed STG bytes without changes",
                 ));
                 return diagnostics.finish();
             }

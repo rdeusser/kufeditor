@@ -1,32 +1,21 @@
-#![allow(
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    reason = "the compatibility parser reads one checked-in, structurally asserted C++ initializer"
-)]
-
 use std::collections::HashSet;
 
 use kufeditor_formats::stg::catalog::{STGScriptInfo, action, actions, condition, conditions};
 
-const LEGACY_CATALOG: &str = include_str!("../../../src/formats/stg_script_catalog.h");
+const FNV64_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV64_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct LegacyEntry {
-    id: u32,
-    name: String,
-    parameter_count: u32,
-    parameter_hints: [String; 3],
+#[test]
+fn script_catalog_retains_the_migrated_compatibility_snapshot() {
+    assert_eq!(conditions().len(), 59);
+    assert_eq!(actions().len(), 167);
+    assert_eq!(catalog_identity(), 0x0df0_6072_6802_eddf);
 }
 
 #[test]
-fn rust_catalog_matches_every_legacy_condition_and_action_tuple() {
-    let legacy_conditions = parse_table(LEGACY_CATALOG, "kConditions[] = {");
-    let legacy_actions = parse_table(LEGACY_CATALOG, "kActions[] = {");
-
-    assert_eq!(legacy_conditions.len(), 59);
-    assert_eq!(legacy_actions.len(), 167);
-    assert_catalog_matches(&legacy_conditions, conditions());
-    assert_catalog_matches(&legacy_actions, actions());
+fn script_catalog_ids_are_unique() {
+    assert_unique_ids("condition", conditions());
+    assert_unique_ids("action", actions());
 }
 
 #[test]
@@ -56,177 +45,42 @@ fn lookups_preserve_known_gaps_and_raw_ids() {
     assert!(action(u32::MAX).is_none());
 }
 
-#[test]
-fn compatibility_comparison_rejects_missing_extra_duplicate_and_changed_entries() {
-    let legacy = parse_table(LEGACY_CATALOG, "kConditions[] = {");
-    let rust = owned_entries(conditions());
-
-    assert!(catalogs_match(&legacy, &rust));
-
-    let mut missing = rust.clone();
-    missing.pop();
-    assert!(!catalogs_match(&legacy, &missing));
-
-    let mut extra = rust.clone();
-    extra.push(LegacyEntry {
-        id: 999,
-        name: "EXTRA".to_owned(),
-        parameter_count: 0,
-        parameter_hints: [String::new(), String::new(), String::new()],
-    });
-    assert!(!catalogs_match(&legacy, &extra));
-
-    let mut duplicate = rust.clone();
-    duplicate[1] = duplicate[0].clone();
-    assert!(!catalogs_match(&legacy, &duplicate));
-
-    let mut changed = rust;
-    changed[0].parameter_hints[0] = "Changed".to_owned();
-    assert!(!catalogs_match(&legacy, &changed));
+fn catalog_identity() -> u64 {
+    let mut hash = FNV64_OFFSET_BASIS;
+    update_hash(&mut hash, b"conditions\0");
+    update_catalog_hash(&mut hash, conditions());
+    update_hash(&mut hash, b"actions\0");
+    update_catalog_hash(&mut hash, actions());
+    hash
 }
 
-fn assert_catalog_matches(legacy: &[LegacyEntry], rust: &[STGScriptInfo]) {
-    let rust = owned_entries(rust);
-    assert!(
-        catalogs_match(legacy, &rust),
-        "Rust and legacy STG catalogs differ\nlegacy: {legacy:#?}\nrust: {rust:#?}"
-    );
-}
-
-fn catalogs_match(left: &[LegacyEntry], right: &[LegacyEntry]) -> bool {
-    if left != right {
-        return false;
-    }
-
-    let left_ids: HashSet<_> = left.iter().map(|entry| entry.id).collect();
-    let right_ids: HashSet<_> = right.iter().map(|entry| entry.id).collect();
-    left_ids.len() == left.len() && right_ids.len() == right.len()
-}
-
-fn owned_entries(entries: &[STGScriptInfo]) -> Vec<LegacyEntry> {
-    entries
-        .iter()
-        .map(|entry| LegacyEntry {
-            id: entry.id,
-            name: entry.name.to_owned(),
-            parameter_count: entry.parameter_count,
-            parameter_hints: entry.parameter_hints.map(str::to_owned),
-        })
-        .collect()
-}
-
-fn parse_table(source: &str, marker: &str) -> Vec<LegacyEntry> {
-    let (_, remainder) = source.split_once(marker).unwrap();
-    let (body, _) = remainder.split_once("};").unwrap();
-    let mut parser = Parser::new(body);
-    let mut entries = Vec::new();
-
-    while parser.peek().is_some() {
-        parser.expect(b'{');
-        let id = parser.number();
-        parser.expect(b',');
-        let name = parser.string();
-        parser.expect(b',');
-        let parameter_count = parser.number();
-        parser.expect(b',');
-        parser.expect(b'{');
-        let parameter_hints = [
-            parser.string(),
-            {
-                parser.expect(b',');
-                parser.string()
-            },
-            {
-                parser.expect(b',');
-                parser.string()
-            },
-        ];
-        parser.expect(b'}');
-        parser.expect(b'}');
-        parser.consume(b',');
-        entries.push(LegacyEntry {
-            id,
-            name,
-            parameter_count,
-            parameter_hints,
-        });
-    }
-
-    entries
-}
-
-struct Parser<'a> {
-    source: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> Parser<'a> {
-    const fn new(source: &'a str) -> Self {
-        Self {
-            source: source.as_bytes(),
-            offset: 0,
+fn update_catalog_hash(hash: &mut u64, entries: &[STGScriptInfo]) {
+    for entry in entries {
+        update_hash(hash, &entry.id.to_le_bytes());
+        update_hash(hash, entry.name.as_bytes());
+        update_hash(hash, &[0]);
+        update_hash(hash, &entry.parameter_count.to_le_bytes());
+        for hint in entry.parameter_hints {
+            update_hash(hash, hint.as_bytes());
+            update_hash(hash, &[0]);
         }
     }
+}
 
-    fn peek(&mut self) -> Option<u8> {
-        self.skip_whitespace();
-        self.source.get(self.offset).copied()
+fn update_hash(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(FNV64_PRIME);
     }
+}
 
-    fn consume(&mut self, expected: u8) -> bool {
-        if self.peek() != Some(expected) {
-            return false;
-        }
-        self.offset += 1;
-        true
-    }
-
-    fn expect(&mut self, expected: u8) {
+fn assert_unique_ids(label: &str, entries: &[STGScriptInfo]) {
+    let mut ids = HashSet::with_capacity(entries.len());
+    for entry in entries {
         assert!(
-            self.consume(expected),
-            "expected {:?} at byte {}",
-            char::from(expected),
-            self.offset
+            ids.insert(entry.id),
+            "{label} ID {} is duplicated",
+            entry.id
         );
-    }
-
-    fn number(&mut self) -> u32 {
-        self.skip_whitespace();
-        let start = self.offset;
-        while self.source.get(self.offset).is_some_and(u8::is_ascii_digit) {
-            self.offset += 1;
-        }
-        assert_ne!(self.offset, start, "expected number at byte {start}");
-        std::str::from_utf8(&self.source[start..self.offset])
-            .unwrap()
-            .parse()
-            .unwrap()
-    }
-
-    fn string(&mut self) -> String {
-        self.expect(b'"');
-        let start = self.offset;
-        while self.source.get(self.offset).copied() != Some(b'"') {
-            assert!(
-                self.source.get(self.offset).is_some(),
-                "unterminated string at byte {start}"
-            );
-            self.offset += 1;
-        }
-        let value = std::str::from_utf8(&self.source[start..self.offset])
-            .unwrap()
-            .to_owned();
-        self.expect(b'"');
-        value
-    }
-
-    fn skip_whitespace(&mut self) {
-        while self
-            .source
-            .get(self.offset)
-            .is_some_and(u8::is_ascii_whitespace)
-        {
-            self.offset += 1;
-        }
     }
 }

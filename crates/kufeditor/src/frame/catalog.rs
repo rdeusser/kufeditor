@@ -24,7 +24,7 @@ impl AppFrame {
         self.notices.begin(
             NoticeSource::Catalog,
             request.get(),
-            Notice::info("Loading game catalogs"),
+            Notice::info("Loading game names"),
         );
         cx.notify();
 
@@ -64,14 +64,14 @@ impl AppFrame {
                     let issue_label = if issue_count == 1 { "issue" } else { "issues" };
                     Notice::plain(
                         NoticeLevel::Warning,
-                        format!("Loaded game catalogs with {issue_count} {issue_label}"),
+                        format!("Loaded game names with {issue_count} {issue_label}"),
                     )
                 });
                 self.notices
                     .complete(NoticeSource::Catalog, request.get(), notice);
             }
             Err(error) => {
-                let notice = Notice::error("Could not load game catalogs", &error);
+                let notice = Notice::error("Could not load game names", &error);
                 if !self.catalog.finish_failed(key, error) {
                     return;
                 }
@@ -127,7 +127,7 @@ mod tests {
         frame.notices.begin(
             NoticeSource::Catalog,
             request.get(),
-            Notice::info("Loading game catalogs"),
+            Notice::info("Loading game names"),
         );
         key
     }
@@ -323,7 +323,7 @@ mod tests {
                 ));
                 assert_eq!(
                     frame.notices.current().map(Notice::summary),
-                    Some("Loading game catalogs")
+                    Some("Loading game names")
                 );
             })
             .unwrap();
@@ -436,7 +436,7 @@ mod tests {
                     ));
                     assert_eq!(
                         frame.notices.current().map(Notice::summary),
-                        Some("Loading game catalogs")
+                        Some("Loading game names")
                     );
                 })
                 .unwrap();
@@ -533,7 +533,7 @@ mod tests {
                 ));
                 let notice = frame.notices.current().unwrap();
                 assert_eq!(notice.level(), NoticeLevel::Warning);
-                assert_eq!(notice.summary(), "Loaded game catalogs with 1 issue");
+                assert_eq!(notice.summary(), "Loaded game names with 1 issue");
             })
             .unwrap();
     }

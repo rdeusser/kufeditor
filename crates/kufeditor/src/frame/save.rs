@@ -636,7 +636,8 @@ impl AppFrame {
                 }));
                 item.into_any_element()
             }
-            Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
+            Ok(_) => save::empty_state(&self.theme, "KufEditor could not display this save row.")
+                .into_any_element(),
             Err(error) => save::empty_state(&self.theme, format!("Could not read unit: {error}"))
                 .into_any_element(),
         }
@@ -657,12 +658,12 @@ impl AppFrame {
         details.push(
             save::group(
                 &self.theme,
-                "RAW IDENTITY",
+                "UNIT IDENTITY",
                 vec![
                     save::value_row(
                         &self.theme,
                         save_local_id("save-unit-name", document, unit.row.source_index),
-                        "Resolved Name",
+                        "Unit Name",
                         unit.row.label.clone(),
                     )
                     .into_any_element(),
@@ -719,12 +720,12 @@ impl AppFrame {
             let (selector, message) = if state.player_only() {
                 (
                     "save-equipment-filter-empty",
-                    "This save has no player units, so there is no equipment to inspect.",
+                    "This save has no player units. No equipment is available.",
                 )
             } else {
                 (
                     "save-equipment-save-empty",
-                    "This save has no units, so there is no equipment to inspect.",
+                    "This save has no units. No equipment is available.",
                 )
             };
             content.push(
@@ -739,7 +740,7 @@ impl AppFrame {
             &self.theme,
             "save-equipment",
             "Equipment",
-            "Six stable equipment slots for the inspected unit".to_owned(),
+            "Six equipment slots for the selected unit".to_owned(),
             content,
         )
     }
@@ -797,7 +798,7 @@ impl AppFrame {
         let mut content = vec![
             save::group(
                 &self.theme,
-                "INSPECTED UNIT",
+                "SELECTED UNIT",
                 vec![
                     save::value_row(
                         &self.theme,
@@ -834,9 +835,10 @@ impl AppFrame {
                         save::text_value_row(
                             &self.theme,
                             projection_element_id("save-equipment-attribute", attribute.id),
-                            format!("{} · raw {}", attribute.name, attribute.raw_index),
+                            format!("{} · ID {}", attribute.name, attribute.raw_index),
                             attribute.effect.clone().unwrap_or_else(|| {
-                                "No catalog effect is available; raw value preserved.".to_owned()
+                                "No catalog effect matches this attribute. KufEditor will write the original value."
+                                    .to_owned()
                             }),
                         )
                         .into_any_element()
@@ -919,7 +921,7 @@ impl AppFrame {
                 .child(save::section_header(
                     &self.theme,
                     "Roster",
-                    format!("{leader_count} player leaders · {row_count} virtual world-map rows"),
+                    format!("{leader_count} player leaders · {row_count} world-map rows"),
                 ))
                 .child(
                     div()
@@ -961,7 +963,8 @@ impl AppFrame {
             )
             .debug_selector(|| "save-player-leader-row".to_owned())
             .into_any_element(),
-            Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
+            Ok(_) => save::empty_state(&self.theme, "KufEditor could not display this save row.")
+                .into_any_element(),
             Err(error) => save::empty_state(&self.theme, format!("Could not read leader: {error}"))
                 .into_any_element(),
         }
@@ -1011,7 +1014,8 @@ impl AppFrame {
                 )
                 .into_any_element()
             }
-            Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
+            Ok(_) => save::empty_state(&self.theme, "KufEditor could not display this save row.")
+                .into_any_element(),
             Err(error) => save::empty_state(&self.theme, format!("Could not read row: {error}"))
                 .into_any_element(),
         }
@@ -1181,7 +1185,8 @@ impl AppFrame {
                     cx,
                 )
             }
-            Ok(_) => save::empty_state(&self.theme, "Unexpected save row kind.").into_any_element(),
+            Ok(_) => save::empty_state(&self.theme, "KufEditor could not display this save row.")
+                .into_any_element(),
             Err(error) => save::empty_state(&self.theme, format!("Could not read row: {error}"))
                 .into_any_element(),
         }
@@ -1374,7 +1379,7 @@ impl AppFrame {
                     &self.theme,
                     "save-catalog-not-configured",
                     "Crusaders installation is not configured",
-                    Some("Raw IDs remain available without game names.".to_owned()),
+                    Some("Numeric IDs remain editable without game names.".to_owned()),
                 )
                 .into_any_element(),
             ),
@@ -1383,7 +1388,7 @@ impl AppFrame {
                     &self.theme,
                     "save-catalog-dormant",
                     "Crusaders names are unavailable",
-                    Some("Raw IDs remain available.".to_owned()),
+                    Some("Numeric IDs remain editable.".to_owned()),
                 )
                 .into_any_element(),
             ),
@@ -1392,7 +1397,7 @@ impl AppFrame {
                     &self.theme,
                     "save-catalog-loading",
                     "Loading Crusaders names",
-                    Some("The save remains readable as raw values.".to_owned()),
+                    Some("Numeric IDs remain editable while names load.".to_owned()),
                 )
                 .into_any_element(),
             ),
@@ -1401,7 +1406,7 @@ impl AppFrame {
                     &self.theme,
                     "save-catalog-failed",
                     "Could not load Crusaders names",
-                    Some(format!("{error}. Raw IDs remain available.")),
+                    Some(format!("{error}. Numeric IDs remain editable.")),
                 )
                 .into_any_element(),
             ),
@@ -1411,7 +1416,10 @@ impl AppFrame {
                     &self.theme,
                     "save-catalog-ready-issues",
                     format!("Loaded names with {issue_count} catalog issues"),
-                    Some("Some records can use raw fallback labels.".to_owned()),
+                    Some(
+                        "Some records do not have game names. Their numeric IDs are shown instead."
+                            .to_owned(),
+                    ),
                 )
                 .into_any_element(),
             ),

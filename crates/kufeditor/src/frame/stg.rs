@@ -69,8 +69,8 @@ impl STGSearchKind {
 
     const fn placeholder(self) -> &'static str {
         match self {
-            Self::Units => "Search units by name, ID, or source index",
-            Self::Events => "Search events by description, ID, or source index",
+            Self::Units => "Search units by name, ID, or record index",
+            Self::Events => "Search events by description, ID, or record index",
         }
     }
 
@@ -1063,7 +1063,7 @@ impl AppFrame {
         let input = cx.new(|cx| {
             TextInput::new(
                 query.clone(),
-                "Search references by name, ID, or source index",
+                "Search references by name, ID, or record index",
                 "stg-reference-search-input",
                 colors,
                 cx,
@@ -1761,7 +1761,7 @@ impl AppFrame {
                     &self.theme,
                     "stg-catalog-not-configured",
                     "Crusaders installation is not configured",
-                    Some("Raw STG values remain available without game names.".to_owned()),
+                    Some("Numeric IDs remain editable without game names.".to_owned()),
                 )
                 .into_any_element(),
             ),
@@ -1770,7 +1770,7 @@ impl AppFrame {
                     &self.theme,
                     "stg-catalog-dormant",
                     "Crusaders names are unavailable",
-                    Some("Raw STG values remain available.".to_owned()),
+                    Some("Numeric IDs remain editable.".to_owned()),
                 )
                 .into_any_element(),
             ),
@@ -1779,7 +1779,7 @@ impl AppFrame {
                     &self.theme,
                     "stg-catalog-loading",
                     "Loading Crusaders names",
-                    Some("The STG remains readable as source values.".to_owned()),
+                    Some("Numeric IDs remain editable while names load.".to_owned()),
                 )
                 .into_any_element(),
             ),
@@ -1788,7 +1788,7 @@ impl AppFrame {
                     &self.theme,
                     "stg-catalog-failed",
                     "Could not load Crusaders names",
-                    Some(format!("{error}. Raw STG values remain available.")),
+                    Some(format!("{error}. Numeric IDs remain editable.")),
                 )
                 .into_any_element(),
             ),
@@ -1798,7 +1798,10 @@ impl AppFrame {
                     &self.theme,
                     "stg-catalog-ready-issues",
                     format!("Loaded names with {issue_count} catalog issues"),
-                    Some("Some STG rows can use raw fallback labels.".to_owned()),
+                    Some(
+                        "Some rows do not have game names. Their numeric IDs are shown instead."
+                            .to_owned(),
+                    ),
                 )
                 .into_any_element(),
             ),
@@ -1820,7 +1823,7 @@ impl AppFrame {
             return stg::empty_state(
                 &self.theme,
                 "stg-tail-projection-error",
-                "This parsed STG section could not be projected.",
+                "KufEditor could not display this parsed STG section.",
             )
             .into_any_element();
         };
@@ -1830,7 +1833,7 @@ impl AppFrame {
             return stg::empty_state(
                 &self.theme,
                 "stg-tail-projection-error",
-                "This raw STG section could not be projected.",
+                "KufEditor could not display the unparsed bytes in this STG section.",
             )
             .into_any_element();
         };
@@ -1838,7 +1841,7 @@ impl AppFrame {
             &self.theme,
             stg_section_id(section.section()),
             section.section().label(),
-            "Opaque source data",
+            "Unparsed bytes from the opened file",
             vec![stg::raw_tail_panel(&self.theme, raw).into_any_element()],
         )
         .into_any_element()
@@ -1956,7 +1959,7 @@ impl AppFrame {
                     section,
                     target,
                     label,
-                    format!("Invalid source string · {} bytes", bytes.len()),
+                    format!("Invalid string data · {} bytes", bytes.len()),
                     STGFieldState::InvalidText,
                 ),
             },
@@ -2005,7 +2008,7 @@ impl AppFrame {
                     STGSection::Header,
                     STGProjectionField::Reserved("header-source"),
                     "Configuration and reserved data",
-                    "620-byte header block preserved from source",
+                    "KufEditor will write these 620 bytes without changes",
                 ),
                 "stg-header-reserved".to_owned(),
                 cx,
@@ -2016,10 +2019,10 @@ impl AppFrame {
             &self.theme,
             "stg-header",
             "Header",
-            "Map resources, cameras, settings, and source-preserved metadata",
+            "Map resources, cameras, settings, and reserved file data",
             vec![
                 stg::group(&self.theme, "MISSION HEADER", fields).into_any_element(),
-                stg::group(&self.theme, "ADVANCED · READ ONLY", advanced)
+                stg::group(&self.theme, "RESERVED DATA · READ ONLY", advanced)
                     .id("stg-header-advanced")
                     .debug_selector(|| "stg-header-advanced".to_owned())
                     .into_any_element(),
@@ -2136,7 +2139,7 @@ impl AppFrame {
                 stg::empty_state(
                     &self.theme,
                     "stg-unit-detail-empty",
-                    "Select a unit to inspect its source fields.",
+                    "Select a unit to edit its fields.",
                 )
                 .size_full()
                 .into_any_element()
@@ -2445,7 +2448,7 @@ impl AppFrame {
                 stg::empty_state(
                     &self.theme,
                     "stg-area-detail-empty",
-                    "Select an area to inspect its source fields.",
+                    "Select an area to edit its fields.",
                 )
                 .size_full()
                 .into_any_element()
@@ -2525,7 +2528,7 @@ impl AppFrame {
             vec![
                 stg::group(&self.theme, "AREA", identity).into_any_element(),
                 stg::group(&self.theme, "BOUNDS", bounds).into_any_element(),
-                stg::group(&self.theme, "ADVANCED · READ ONLY", advanced).into_any_element(),
+                stg::group(&self.theme, "UNKNOWN VALUES · READ ONLY", advanced).into_any_element(),
             ],
         )
         .debug_selector(|| "stg-area-detail".to_owned())
@@ -2562,7 +2565,7 @@ impl AppFrame {
                 stg::empty_state(
                     &self.theme,
                     "stg-variable-detail-empty",
-                    "Select a variable to inspect its typed source value.",
+                    "Select a variable to edit its value.",
                 )
                 .size_full()
                 .into_any_element()
@@ -2573,7 +2576,7 @@ impl AppFrame {
             &self.theme,
             "stg-variables",
             "Variables",
-            format!("{count} typed variables"),
+            format!("{count} variables"),
             list,
             details,
         )
@@ -2617,7 +2620,7 @@ impl AppFrame {
                                 document,
                                 STGSection::Variables,
                                 value,
-                                "Initial typed value",
+                                "Initial value",
                             ),
                             format!("stg-variable-{variable}-value"),
                             cx,
@@ -2661,7 +2664,7 @@ impl AppFrame {
                 stg::empty_state(
                     &self.theme,
                     "stg-footer-detail-empty",
-                    "Select a footer entry to inspect its slot data.",
+                    "Select a footer entry to view its slot data.",
                 )
                 .size_full()
                 .into_any_element()
@@ -2672,7 +2675,7 @@ impl AppFrame {
             &self.theme,
             "stg-footer",
             "Footer",
-            format!("{count} source-preserved entries"),
+            format!("{count} footer entries"),
             list,
             details,
         )
@@ -3179,7 +3182,7 @@ impl AppFrame {
             let replace = components::choice_button(
                 &self.theme,
                 SharedString::from(field.id().element_key("stg-float-replace")),
-                "Replace",
+                "Replace value",
                 false,
             )
             .debug_selector(move || replace_selector.clone())
@@ -3260,7 +3263,7 @@ impl AppFrame {
             let replace = components::choice_button(
                 &self.theme,
                 SharedString::from(field.id().element_key("stg-text-replace")),
-                "Replace",
+                "Replace value",
                 false,
             )
             .debug_selector(move || replace_selector.clone())
@@ -3403,7 +3406,7 @@ impl AppFrame {
             components::choice_button(
                 &self.theme,
                 SharedString::from(format!("stg-reference-open:{target:?}")),
-                "Refs",
+                "Choose reference",
                 self.stg_presentations.get(document).is_some_and(|state| {
                     state
                         .reference_picker()
@@ -3450,13 +3453,9 @@ impl AppFrame {
         let count = rows.len();
         let rows = STGVirtualRows::events(document, rows);
         let list = if rows.is_empty() {
-            stg::empty_state(
-                &self.theme,
-                "stg-event-empty",
-                "This STG has no events. Parsed event blocks remain source-preserved.",
-            )
-            .size_full()
-            .into_any_element()
+            stg::empty_state(&self.theme, "stg-event-empty", "This STG has no events.")
+                .size_full()
+                .into_any_element()
         } else {
             self.stg_master_list(
                 document,
@@ -3478,7 +3477,7 @@ impl AppFrame {
                 stg::empty_state(
                     &self.theme,
                     "stg-event-detail-empty",
-                    "Select an event to inspect its conditions, actions, and parameters.",
+                    "Select an event to edit its conditions, actions, and parameters.",
                 )
                 .size_full()
                 .into_any_element()
@@ -3489,7 +3488,7 @@ impl AppFrame {
             &self.theme,
             "stg-events",
             "Events",
-            format!("{count} events across source blocks"),
+            format!("{count} events"),
             list,
             details,
         )
@@ -3602,7 +3601,7 @@ impl AppFrame {
                 return stg::empty_state(
                     &self.theme,
                     "stg-event-detail-overflow",
-                    "This event has too many flattened detail rows to display safely.",
+                    "This event has too many detail rows to display.",
                 )
                 .size_full()
                 .into_any_element();
@@ -3760,7 +3759,7 @@ impl AppFrame {
                                 .text_size(px(10.0))
                                 .text_color(self.theme.accent)
                                 .child(format!(
-                                    "RAW {} · NO MATCH",
+                                    "ID {} · NOT FOUND",
                                     current
                                         .map_or_else(|| "?".to_owned(), |value| value.to_string())
                                 ))
@@ -3769,7 +3768,7 @@ impl AppFrame {
                             components::toolbar_button(
                                 &self.theme,
                                 "stg-reference-raw-number",
-                                "Edit raw number",
+                                "Edit ID",
                                 true,
                             )
                             .debug_selector(|| "stg-reference-raw-number".to_owned())
@@ -3953,7 +3952,7 @@ impl AppFrame {
             .map_or_else(
                 || {
                     let text = if picker.query().is_empty() {
-                        "Search references by name, ID, or source index".to_owned()
+                        "Search references by name, ID, or record index".to_owned()
                     } else {
                         format!("⌕ {}", picker.query())
                     };
@@ -4150,7 +4149,7 @@ impl AppFrame {
             return stg::empty_state(
                 &self.theme,
                 "stg-reference-row-error",
-                "This reference has an invalid source ID.",
+                "This reference has an invalid ID.",
             )
             .into_any_element();
         };
@@ -4206,7 +4205,7 @@ impl AppFrame {
                     .workspace
                     .stg_text(document, STGTextTarget::UnitName { unit })
                     .ok()?;
-                let source = name.decoded().unwrap_or("Invalid source name");
+                let source = name.decoded().unwrap_or("Invalid name data");
                 let id = self
                     .workspace
                     .stg_number(
@@ -4219,7 +4218,7 @@ impl AppFrame {
                     .ok()?;
                 Some((
                     format!("{:03} · {}", unit + 1, empty_stg_text(source)),
-                    format!("source index {unit} · troop ID {id}"),
+                    format!("record index {unit} · troop ID {id}"),
                 ))
             }
             (STGReferenceKind::Area, STGReferenceCursor::Index(area)) => {
@@ -4227,9 +4226,7 @@ impl AppFrame {
                     .workspace
                     .stg_text(document, STGTextTarget::AreaDescription { area })
                     .ok()?;
-                let source = description
-                    .decoded()
-                    .unwrap_or("Invalid source description");
+                let source = description.decoded().unwrap_or("Invalid description data");
                 let id = self
                     .workspace
                     .stg_number(
@@ -4242,7 +4239,7 @@ impl AppFrame {
                     .ok()?;
                 Some((
                     format!("{:03} · {}", area + 1, empty_stg_text(source)),
-                    format!("source index {area} · area ID {id}"),
+                    format!("record index {area} · area ID {id}"),
                 ))
             }
             (STGReferenceKind::Variable, STGReferenceCursor::Index(variable)) => {
@@ -4250,14 +4247,14 @@ impl AppFrame {
                     .workspace
                     .stg_text(document, STGTextTarget::VariableName { variable })
                     .ok()?;
-                let source = name.decoded().unwrap_or("Invalid source name");
+                let source = name.decoded().unwrap_or("Invalid name data");
                 let id = self
                     .workspace
                     .stg_number(document, STGNumberTarget::VariableID { variable })
                     .ok()?;
                 Some((
                     format!("{:03} · {}", variable + 1, empty_stg_text(source)),
-                    format!("source index {variable} · variable ID {id}"),
+                    format!("record index {variable} · variable ID {id}"),
                 ))
             }
             (
@@ -4535,7 +4532,7 @@ impl AppFrame {
         let name = self
             .workspace
             .stg_text(document, STGTextTarget::UnitName { unit })?;
-        let internal = name.decoded().unwrap_or("Invalid source name");
+        let internal = name.decoded().unwrap_or("Invalid name data");
         let read_unit_field = |field| -> STGProjectionResult<i64> {
             self.workspace
                 .stg_number(document, STGNumberTarget::Unit { unit, field })
@@ -4573,9 +4570,7 @@ impl AppFrame {
         let description = self
             .workspace
             .stg_text(document, STGTextTarget::AreaDescription { area })?;
-        let source = description
-            .decoded()
-            .unwrap_or("Invalid source description");
+        let source = description.decoded().unwrap_or("Invalid description data");
         let id = self.workspace.stg_number(
             document,
             STGNumberTarget::Area {
@@ -4601,7 +4596,7 @@ impl AppFrame {
         let name = self
             .workspace
             .stg_text(document, STGTextTarget::VariableName { variable })?;
-        let source = name.decoded().unwrap_or("Invalid source name");
+        let source = name.decoded().unwrap_or("Invalid name data");
         let id = self
             .workspace
             .stg_number(document, STGNumberTarget::VariableID { variable })?;
@@ -4629,10 +4624,7 @@ impl AppFrame {
         let projection = self.workspace.stg_event_block(document, block)?;
         Ok((
             format!("Event block {block} · empty"),
-            format!(
-                "block header {} · no events · source block remains visible",
-                projection.header
-            ),
+            format!("block header {} · no events", projection.header),
         ))
     }
 
@@ -4700,7 +4692,7 @@ impl AppFrame {
             return stg::empty_state(
                 &self.theme,
                 "stg-event-detail-row-error",
-                "This flattened row lost its event identity.",
+                "KufEditor could not identify this event detail row.",
             )
             .into_any_element();
         };
@@ -4963,7 +4955,7 @@ impl AppFrame {
                     projection
                         .description
                         .decoded()
-                        .map_or_else(|| "Invalid source text".to_owned(), empty_stg_text_owned),
+                        .map_or_else(|| "Invalid text data".to_owned(), empty_stg_text_owned),
                 ))
             }
             STGEventDetailRow::EventField(STGEventDetailField::ID) => {
@@ -4980,7 +4972,7 @@ impl AppFrame {
                         script.label()
                     ),
                     format!(
-                        "raw type {} · {} parameters",
+                        "type ID {} · {} parameters",
                         script.id, script.parameter_count
                     ),
                 ))
@@ -4999,7 +4991,7 @@ impl AppFrame {
             }
             STGEventDetailRow::AddScript(kind) => Ok((
                 format!("Add {}", kind.label()),
-                "Read-only in this structured-view stage".to_owned(),
+                "This editor cannot add conditions or actions.".to_owned(),
             )),
         }
     }

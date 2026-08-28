@@ -1,7 +1,6 @@
-# Build directories
-build/
+# Build output
+/build/
 /target/
-cmake-build-*/
 .cache
 
 # IDE
@@ -25,11 +24,5 @@ cmake-build-*/
 # macOS
 .DS_Store
 
-# CMake
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-compile_commands.json
-
-# ImGui layout state
-imgui.ini
+# Pre-cutover local UI state
+/imgui.ini

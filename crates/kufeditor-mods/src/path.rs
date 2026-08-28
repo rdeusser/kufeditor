@@ -179,7 +179,7 @@ impl GameRoot {
                 ));
             }
             Err(error) => {
-                return Err(ModError::io("inspect game root", configured_path, error));
+                return Err(ModError::io("inspect game folder", configured_path, error));
             }
         };
         if metadata.file_type().is_symlink() {
@@ -205,7 +205,7 @@ impl GameRoot {
         }
 
         let canonical_path = fs::canonicalize(&configured_path)
-            .map_err(|error| ModError::io("canonicalize game root", &configured_path, error))?;
+            .map_err(|error| ModError::io("resolve game folder path", &configured_path, error))?;
         if canonical_path.to_str().is_none() {
             return Err(invalid_game_root(
                 game,
@@ -274,16 +274,28 @@ fn canonicalize_missing_path(path: &Path) -> Result<PathBuf, ModError> {
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let Some(name) = existing.file_name() else {
-                    return Err(ModError::io("canonicalize owned mod store", path, error));
+                    return Err(ModError::io(
+                        "resolve KufEditor mod folder path",
+                        path,
+                        error,
+                    ));
                 };
                 missing.push(name.to_os_string());
                 let Some(parent) = existing.parent() else {
-                    return Err(ModError::io("canonicalize owned mod store", path, error));
+                    return Err(ModError::io(
+                        "resolve KufEditor mod folder path",
+                        path,
+                        error,
+                    ));
                 };
                 existing = parent;
             }
             Err(error) => {
-                return Err(ModError::io("canonicalize owned mod store", path, error));
+                return Err(ModError::io(
+                    "resolve KufEditor mod folder path",
+                    path,
+                    error,
+                ));
             }
         }
     }
@@ -340,7 +352,7 @@ digest_id!(InstallationID, "installation");
 digest_id!(FileSHA256, "file SHA256");
 digest_id!(BackupID, "backup");
 digest_id!(OperationID, "operation");
-digest_id!(GameRootKey, "game root");
+digest_id!(GameRootKey, "game folder");
 
 impl InstallationID {
     pub(crate) fn for_installation(

@@ -252,7 +252,7 @@ impl ModService {
         let output = output.to_path_buf();
         let file = temporary
             .persist(&output)
-            .map_err(|error| ModError::io("publish created mod package", &output, error.error))?;
+            .map_err(|error| ModError::io("save created mod package", &output, error.error))?;
         drop(file);
         Ok(CreatedMod {
             package: inspected.at_path(output),

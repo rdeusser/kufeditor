@@ -493,7 +493,7 @@ fn publish_backup(
         ));
     }
     fs::rename(temporary, &destination)
-        .map_err(|error| ModError::io("publish backup directory", &destination, error))?;
+        .map_err(|error| ModError::io("save backup directory", &destination, error))?;
     sync_directory(backup_root)?;
     let _ = progress.report(&ModProgress {
         phase: ModProgressPhase::PublishingBackup,
@@ -652,7 +652,7 @@ fn copy_backup_source(
     }
     temporary
         .persist_noclobber(destination)
-        .map_err(|error| ModError::io("publish backup file", destination, error.error))?;
+        .map_err(|error| ModError::io("save backup file", destination, error.error))?;
     sync_directory(parent)?;
     Ok(sha256)
 }
@@ -1215,7 +1215,7 @@ fn write_backup_metadata(directory: &Path, image: &BackupImage) -> Result<(), Mo
         .map_err(|error| ModError::io("synchronize backup metadata", temporary.path(), error))?;
     temporary
         .persist_noclobber(&path)
-        .map_err(|error| ModError::io("publish backup metadata", &path, error.error))?;
+        .map_err(|error| ModError::io("save backup metadata", &path, error.error))?;
     sync_directory(directory)
 }
 

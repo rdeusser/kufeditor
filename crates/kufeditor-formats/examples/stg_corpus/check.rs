@@ -121,6 +121,10 @@ impl RegionCounts {
     }
 
     #[cfg(test)]
+    #[allow(
+        dead_code,
+        reason = "used by the integration-test module, but not the example test target"
+    )]
     pub const fn set(&mut self, region: RegionCount, value: Option<u64>) {
         match region {
             RegionCount::Units => self.units = value,
@@ -229,6 +233,10 @@ impl CorpusManifest {
     }
 
     #[cfg(test)]
+    #[allow(
+        dead_code,
+        reason = "used by the integration-test module, but not the example test target"
+    )]
     pub fn identity(&self) -> u64 {
         fnv64(self.render().as_bytes())
     }
@@ -258,6 +266,10 @@ pub struct Corpus {
 
 impl Corpus {
     #[cfg(test)]
+    #[allow(
+        dead_code,
+        reason = "used by the integration-test module, but not the example test target"
+    )]
     pub fn relative_paths(&self) -> Vec<&str> {
         self.files
             .iter()
@@ -266,6 +278,10 @@ impl Corpus {
     }
 
     #[cfg(test)]
+    #[allow(
+        dead_code,
+        reason = "used by the integration-test module, but not the example test target"
+    )]
     pub const fn summary(&self) -> CorpusSummary {
         self.summary
     }

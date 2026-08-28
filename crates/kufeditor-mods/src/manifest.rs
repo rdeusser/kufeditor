@@ -1,12 +1,10 @@
 use std::collections::HashSet;
 
 use kufeditor_game::Game;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
 
 use crate::{ManifestErrorKind, ModError, ModLimits, RelativeGamePath};
-
-const MANIFEST_VERSION: u64 = 1;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModTimestamp(String);
@@ -138,9 +136,6 @@ impl ModManifest {
         }
         let image: ManifestImage = serde_json::from_slice(source)
             .map_err(|_| ModError::manifest(ManifestErrorKind::InvalidJSON))?;
-        if image.format_version.unwrap_or(MANIFEST_VERSION) != MANIFEST_VERSION {
-            return Err(ModError::manifest(ManifestErrorKind::UnsupportedVersion));
-        }
         if u64::try_from(image.files.len()).unwrap_or(u64::MAX) > limits.max_package_files {
             return Err(ModError::manifest(ManifestErrorKind::TooManyFiles));
         }
@@ -171,7 +166,6 @@ impl ModManifest {
 
     pub fn to_json(&self) -> Result<Vec<u8>, ModError> {
         let image = ManifestImageRef {
-            format_version: MANIFEST_VERSION,
             name: self.metadata.name(),
             version: self.metadata.version(),
             author: self.metadata.author(),
@@ -219,8 +213,6 @@ pub(crate) const fn game_name(game: Game) -> &'static str {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ManifestImage {
-    #[serde(default, deserialize_with = "deserialize_manifest_version")]
-    format_version: Option<u64>,
     name: String,
     version: String,
     author: Option<String>,
@@ -230,17 +222,9 @@ struct ManifestImage {
     files: Vec<String>,
 }
 
-fn deserialize_manifest_version<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    u64::deserialize(deserializer).map(Some)
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ManifestImageRef<'a> {
-    format_version: u64,
     name: &'a str,
     version: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]

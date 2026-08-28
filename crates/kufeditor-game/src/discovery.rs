@@ -31,7 +31,7 @@ impl DiscoveryReport {
 
 #[derive(Debug, Error)]
 #[error(
-    "could not inspect the {game} candidate at {} while reading {}: {source}",
+    "could not inspect the {game} folder at {} while reading {}: {source}",
     root.display(),
     path.display()
 )]
@@ -45,7 +45,7 @@ pub struct DiscoveryIssue {
 
 #[derive(Debug, Error)]
 pub enum DiscoveryError {
-    #[error("automatic Steam discovery is unavailable on this platform")]
+    #[error("automatic Steam search is available only on Windows")]
     Unavailable,
 }
 

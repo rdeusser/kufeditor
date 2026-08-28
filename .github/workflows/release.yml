@@ -14,12 +14,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, name: linux-x64, artifact: kufeditor-linux-x64 }
-          - { os: ubuntu-24.04-arm, name: linux-arm64, artifact: kufeditor-linux-arm64 }
-          - { os: windows-2022, name: windows-x64, vcpkg_triplet: x64-windows-static, artifact: kufeditor-windows-x64 }
-          - { os: macos-15-intel, name: macos-x64, artifact: kufeditor-macos-x64 }
-          - { os: macos-15, name: macos-arm64, artifact: kufeditor-macos-arm64 }
-          - { os: macos-26, name: macos-26-arm64, artifact: kufeditor-macos-26-arm64 }
+          - { os: ubuntu-24.04, artifact: kufeditor-linux-x64 }
+          - { os: ubuntu-24.04-arm, artifact: kufeditor-linux-arm64 }
+          - { os: windows-2022, artifact: kufeditor-windows-x64 }
+          - { os: macos-15-intel, artifact: kufeditor-macos-x64 }
+          - { os: macos-15, artifact: kufeditor-macos-arm64 }
+          - { os: macos-26, artifact: kufeditor-macos-26-arm64 }
 
     runs-on: ${{ matrix.os }}
 
@@ -38,13 +38,11 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Install dependencies (Linux)
+      - name: Install GPUI dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build \
-            libconfig++-dev \
             libgl1-mesa-dev \
             libxrandr-dev \
             libxinerama-dev \
@@ -61,62 +59,21 @@ jobs:
             libvulkan-dev \
             pkg-config
 
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ninja libconfig pkg-config
-
-      - name: Setup MSVC (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Setup vcpkg (Windows)
-        if: runner.os == 'Windows'
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: '66c0373dc7fca549e5803087b9487edfe3aca0a1'
-
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: vcpkg install libconfig:${{ matrix.vcpkg_triplet }} libiconv:${{ matrix.vcpkg_triplet }}
-
       - name: Build Rust application
-        run: cargo build --release -p kufeditor
-
-      - name: Configure (Unix)
-        if: runner.os != 'Windows'
-        run: >
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
-            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
-            -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded `
-            -DCMAKE_TOOLCHAIN_FILE="${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: cargo build --release --locked -p kufeditor
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          cp build/kufeditor dist/
+          cp target/release/kufeditor dist/
           tar -czvf ${{ matrix.artifact }}.tar.gz -C dist kufeditor
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           mkdir -p dist
-          cp build/kufeditor dist/
+          cp target/release/kufeditor dist/
           cd dist && zip -r ../${{ matrix.artifact }}.zip kufeditor
 
       - name: Package (Windows)
@@ -124,8 +81,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          $exe = if (Test-Path "build/Release/kufeditor.exe") { "build/Release/kufeditor.exe" } else { "build/kufeditor.exe" }
-          Copy-Item $exe dist/
+          Copy-Item target/release/kufeditor.exe dist/
           Compress-Archive -Path dist/kufeditor.exe -DestinationPath ${{ matrix.artifact }}.zip
 
       - name: Upload artifact
