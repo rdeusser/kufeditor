@@ -4026,7 +4026,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn save_text_input_tab_reenters_save_controls_without_committing(cx: &mut TestAppContext) {
+    fn save_text_input_tab_can_leave_the_draft_without_committing(cx: &mut TestAppContext) {
         cx.update(crate::actions::bind);
         cx.update(crate::text_input::bind);
         let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
@@ -4049,7 +4049,7 @@ mod tests {
         cx.run_until_parked();
         key_cycle(cx, "enter");
 
-        frame.update(cx, |frame, _| {
+        frame.update_in(cx, |frame, window, _| {
             assert_eq!(
                 frame
                     .workspace
@@ -4058,10 +4058,7 @@ mod tests {
                 "Alpha",
             );
             assert!(frame.text_edit.is_none());
-            assert_eq!(
-                frame.save_presentations.get(document).unwrap().section(),
-                SaveSection::Units,
-            );
+            assert!(frame.focus.is_focused(window));
         });
     }
 

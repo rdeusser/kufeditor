@@ -56,11 +56,6 @@ pub(crate) struct RecentLimitProjection {
     pub(crate) selected: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SettingsLayoutProjection {
-    BoundedVerticalScroll,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SettingsProjection {
     pub(crate) installations: [InstallationProjection; 2],
@@ -71,7 +66,6 @@ pub(crate) struct SettingsProjection {
     pub(crate) recent_limits: [RecentLimitProjection; 4],
     pub(crate) clear_recents_id: &'static str,
     pub(crate) clear_recents_enabled: bool,
-    pub(crate) layout: SettingsLayoutProjection,
 }
 
 pub(crate) fn project_settings<T, E>(
@@ -107,7 +101,6 @@ where
         }),
         clear_recents_id: "settings-clear-recents",
         clear_recents_enabled: !recent.paths().is_empty(),
-        layout: SettingsLayoutProjection::BoundedVerticalScroll,
     }
 }
 
@@ -214,34 +207,83 @@ pub(crate) fn render(
     });
     let discovery_text = discovery_text(&projection.discovery);
 
-    settings_layout([
-        installations_surface(theme, installation_rows, auto_detect, discovery_text),
-        catalog_surface(theme, &projection.catalog),
-        recent_files_surface(theme, recent_limits, clear_recents),
-    ])
+    settings_layout(
+        theme,
+        [
+            installations_surface(theme, installation_rows, auto_detect, discovery_text),
+            catalog_surface(theme, &projection.catalog),
+            recent_files_surface(theme, recent_limits, clear_recents),
+        ],
+    )
 }
 
-fn settings_layout(surfaces: [Div; 3]) -> Stateful<Div> {
-    settings_scroll_root().child(settings_bounded_content().children(surfaces))
-}
-
-fn settings_scroll_root() -> Stateful<Div> {
+fn settings_layout(theme: &Theme, surfaces: [Div; 3]) -> Stateful<Div> {
+    let [installations, catalog, recent_files] = surfaces;
     div()
         .id("settings-content")
         .size_full()
-        .overflow_y_scroll()
-        .p(px(28.0))
-        .flex()
-        .justify_center()
-}
-
-fn settings_bounded_content() -> Div {
-    div()
-        .w_full()
-        .max_w(px(860.0))
         .flex()
         .flex_col()
-        .gap(px(18.0))
+        .bg(theme.background)
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .h(px(62.0))
+                .px(px(18.0))
+                .border_b_1()
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_size(px(18.0))
+                                .text_color(theme.text)
+                                .child("Settings"),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(theme.text_dim)
+                                .child("Game folders and editor preferences"),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .id("settings-scroll")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .p(px(18.0))
+                .flex()
+                .items_start()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .id("settings-primary-column")
+                        .debug_selector(|| "settings-primary-column".to_owned())
+                        .flex_1()
+                        .min_w_0()
+                        .child(installations),
+                )
+                .child(
+                    div()
+                        .id("settings-secondary-column")
+                        .debug_selector(|| "settings-secondary-column".to_owned())
+                        .flex_none()
+                        .w(px(400.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .child(catalog)
+                        .child(recent_files),
+                ),
+        )
 }
 
 fn installations_surface(
@@ -252,7 +294,7 @@ fn installations_surface(
 ) -> Div {
     components::surface(theme)
         .w_full()
-        .p(px(24.0))
+        .p(px(18.0))
         .flex()
         .flex_col()
         .gap(px(14.0))
@@ -271,7 +313,7 @@ fn installations_surface(
 fn catalog_surface(theme: &Theme, catalog: &CatalogProjection) -> Div {
     components::surface(theme)
         .w_full()
-        .p(px(24.0))
+        .p(px(18.0))
         .flex()
         .flex_col()
         .gap(px(10.0))
@@ -286,7 +328,7 @@ fn catalog_surface(theme: &Theme, catalog: &CatalogProjection) -> Div {
 fn recent_files_surface(theme: &Theme, limits: Vec<Stateful<Div>>, clear: Stateful<Div>) -> Div {
     components::surface(theme)
         .w_full()
-        .p(px(24.0))
+        .p(px(18.0))
         .flex()
         .flex_col()
         .gap(px(12.0))
@@ -362,7 +404,7 @@ fn action_button(
 
 fn section_title(theme: &Theme, label: &'static str) -> Div {
     div()
-        .text_size(px(20.0))
+        .text_size(px(17.0))
         .text_color(theme.text)
         .child(label)
 }
@@ -412,14 +454,10 @@ fn discovery_text(discovery: &DiscoveryProjection) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use gpui::{Overflow, Styled, px};
     use kufeditor_game::{DiscoveryError, Game, GamePaths, scan_steam_common_directories};
     use kufeditor_workspace::{RECENT_FILE_LIMITS, RecentFiles};
 
-    use super::{
-        CatalogProjection, DiscoveryProjection, SettingsLayoutProjection, catalog_text,
-        project_settings, settings_bounded_content, settings_scroll_root,
-    };
+    use super::{CatalogProjection, DiscoveryProjection, catalog_text, project_settings};
     use crate::{
         catalog_status::{CatalogKey, CatalogStatus},
         frame::discovery_status::{DiscoveryKey, DiscoveryStatus, RootRevisions},
@@ -632,27 +670,5 @@ mod tests {
 
             assert_eq!(selected_limits, vec![selected]);
         }
-    }
-
-    #[test]
-    fn settings_view_content_requests_vertical_scrolling_and_bounded_width() {
-        let projection = project_settings(
-            &GamePaths::default(),
-            &CatalogStatus::<(), &'static str>::NotConfigured,
-            &DiscoveryStatus::Idle,
-            &RecentFiles::default(),
-            true,
-        );
-
-        assert_eq!(
-            projection.layout,
-            SettingsLayoutProjection::BoundedVerticalScroll
-        );
-
-        let mut root = settings_scroll_root();
-        assert_eq!(root.style().overflow.y, Some(Overflow::Scroll));
-
-        let mut content = settings_bounded_content();
-        assert_eq!(content.style().max_size.width, Some(px(860.0).into()));
     }
 }

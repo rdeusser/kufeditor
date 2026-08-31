@@ -1197,7 +1197,7 @@ pub fn group(theme: &Theme, label: &'static str, fields: Vec<AnyElement>) -> Div
         .flex_col()
         .child(
             div()
-                .h(px(38.0))
+                .h(px(34.0))
                 .px(px(13.0))
                 .flex()
                 .items_center()
@@ -1209,10 +1209,10 @@ pub fn group(theme: &Theme, label: &'static str, fields: Vec<AnyElement>) -> Div
         )
         .child(
             div()
-                .p(px(9.0))
+                .p(px(7.0))
                 .flex()
                 .flex_col()
-                .gap(px(6.0))
+                .gap(px(4.0))
                 .children(fields),
         )
 }
@@ -1251,9 +1251,9 @@ pub fn value_row(
 ) -> Stateful<Div> {
     div()
         .id(id)
-        .min_h(px(36.0))
+        .min_h(px(34.0))
         .px(px(10.0))
-        .py(px(7.0))
+        .py(px(6.0))
         .flex()
         .items_center()
         .gap(px(14.0))

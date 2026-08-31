@@ -1564,7 +1564,6 @@ impl ClosePolicy {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Area {
     #[default]
-    Home,
     Files,
     Mods,
     Patches,
@@ -1572,11 +1571,10 @@ pub enum Area {
 }
 
 impl Area {
-    pub const PRIMARY: [Self; 4] = [Self::Home, Self::Files, Self::Mods, Self::Patches];
+    pub const WORKSPACES: [Self; 3] = [Self::Files, Self::Mods, Self::Patches];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Home => "Home",
             Self::Files => "Files",
             Self::Mods => "Mods",
             Self::Patches => "Patches",
@@ -1586,25 +1584,24 @@ impl Area {
 
     pub const fn element_id(self) -> &'static str {
         match self {
-            Self::Home => "rail-home",
-            Self::Files => "rail-files",
-            Self::Mods => "rail-mods",
-            Self::Patches => "rail-patches",
-            Self::Settings => "rail-settings",
+            Self::Files => "workspace-files",
+            Self::Mods => "workspace-mods",
+            Self::Patches => "workspace-patches",
+            Self::Settings => "toolbar-settings",
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct NavigationProjection {
-    pub(crate) primary: &'static [Area],
-    pub(crate) bottom: Area,
+pub(crate) struct WorkspaceProjection {
+    pub(crate) tabs: &'static [Area],
+    pub(crate) settings: Area,
 }
 
-pub(crate) const fn navigation_projection() -> NavigationProjection {
-    NavigationProjection {
-        primary: &Area::PRIMARY,
-        bottom: Area::Settings,
+pub(crate) const fn workspace_projection() -> WorkspaceProjection {
+    WorkspaceProjection {
+        tabs: &Area::WORKSPACES,
+        settings: Area::Settings,
     }
 }
 
@@ -1729,13 +1726,13 @@ impl ShellState {
 
 #[cfg(test)]
 mod tests {
-    use super::{Area, ShellState, navigation_projection};
+    use super::{Area, ShellState, workspace_projection};
     use kufeditor_game::Game;
 
     #[test]
-    fn shell_starts_at_home_for_crusaders() {
+    fn shell_starts_in_files_for_crusaders() {
         let state = ShellState::default();
-        assert_eq!(state.area(), Area::Home);
+        assert_eq!(state.area(), Area::Files);
         assert_eq!(state.game(), Game::Crusaders);
     }
 
@@ -1752,7 +1749,7 @@ mod tests {
     fn shell_can_start_with_the_persisted_game() {
         let state = ShellState::with_game(Game::Heroes);
 
-        assert_eq!(state.area(), Area::Home);
+        assert_eq!(state.area(), Area::Files);
         assert_eq!(state.game(), Game::Heroes);
     }
 
@@ -1816,17 +1813,17 @@ mod tests {
     }
 
     #[test]
-    fn navigation_keeps_settings_below_the_primary_destinations() {
+    fn workspace_tabs_keep_files_mods_and_patches_as_peers() {
         assert_eq!(
-            Area::PRIMARY,
-            [Area::Home, Area::Files, Area::Mods, Area::Patches],
+            Area::WORKSPACES.as_slice(),
+            &[Area::Files, Area::Mods, Area::Patches],
         );
         assert_eq!(Area::Settings.label(), "Settings");
-        assert_eq!(Area::Settings.element_id(), "rail-settings");
+        assert_eq!(Area::Settings.element_id(), "toolbar-settings");
 
-        let projection = navigation_projection();
-        assert_eq!(projection.primary, Area::PRIMARY);
-        assert_eq!(projection.bottom, Area::Settings);
+        let projection = workspace_projection();
+        assert_eq!(projection.tabs, Area::WORKSPACES);
+        assert_eq!(projection.settings, Area::Settings);
     }
 
     #[test]

@@ -9,7 +9,6 @@ const UI_SOURCES: &[(&str, &str)] = &[
     ("frame/save.rs", include_str!("../src/frame/save.rs")),
     ("frame/stg.rs", include_str!("../src/frame/stg.rs")),
     ("views/files.rs", include_str!("../src/views/files.rs")),
-    ("views/home.rs", include_str!("../src/views/home.rs")),
     ("views/mods.rs", include_str!("../src/views/mods.rs")),
     ("views/patches.rs", include_str!("../src/views/patches.rs")),
     ("views/save.rs", include_str!("../src/views/save.rs")),

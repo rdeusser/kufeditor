@@ -6014,7 +6014,7 @@ mod tests {
                     .get(document)
                     .unwrap()
                     .binding_generation();
-                frame.select_area(Area::Home, cx);
+                frame.select_area(Area::Mods, cx);
                 let hidden_view_generation = frame
                     .stg_presentations
                     .get(document)
@@ -6067,13 +6067,13 @@ mod tests {
     }
 
     #[gpui::test]
-    fn stg_view_draws_all_six_sections_inside_the_product_navigation(cx: &mut TestAppContext) {
+    fn stg_view_draws_all_six_sections_inside_the_focused_shell(cx: &mut TestAppContext) {
         let frame = cx.new(|cx| AppFrame::new(test_startup(), cx));
         let cx = cx.add_empty_window();
         let document = activate_stg(&frame, cx, stg_fixture());
 
         draw_stg_frame(cx, &frame);
-        assert!(cx.debug_bounds("product-navigation").is_some());
+        assert!(cx.debug_bounds("workspace-tabs").is_some());
         assert!(cx.debug_bounds("stg-section-rail").is_some());
         assert!(cx.debug_bounds("stg-header").is_some());
         assert!(cx.debug_bounds("stg-header-map-filename").is_some());

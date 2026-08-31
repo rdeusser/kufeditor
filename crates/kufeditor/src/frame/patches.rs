@@ -216,9 +216,12 @@ impl AppFrame {
                         &error,
                     ),
                 };
-                let _ =
+                let completed =
                     self.notices
                         .complete(NoticeSource::Patches, key.request().get(), Some(notice));
+                if completed {
+                    self.schedule_success_notice_dismissal(NoticeSource::Patches, cx);
+                }
                 self.start_patch_inspection(cx);
             }
         }

@@ -737,30 +737,38 @@ fn section_rail(
         .as_deref()
         .unwrap_or("Game folder not configured");
     div()
-        .w(px(182.0))
+        .w(px(260.0))
         .flex_none()
-        .p(px(14.0))
         .flex()
         .flex_col()
-        .gap(px(8.0))
         .bg(theme.surface)
         .border_r_1()
         .border_color(theme.border)
         .child(
             div()
-                .px(px(12.0))
-                .pt(px(5.0))
-                .pb(px(9.0))
+                .flex()
+                .items_center()
+                .h(px(48.0))
+                .px(px(14.0))
+                .border_b_1()
+                .border_color(theme.border)
                 .text_size(px(11.0))
-                .text_color(theme.accent)
-                .child("MODS"),
+                .text_color(theme.text_dim)
+                .child("MOD WORKSPACE"),
         )
-        .children(section_items)
+        .child(
+            div()
+                .p(px(8.0))
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .children(section_items),
+        )
         .child(div().flex_1())
         .child(
             div()
-                .px(px(12.0))
-                .py(px(9.0))
+                .px(px(14.0))
+                .py(px(12.0))
                 .border_t_1()
                 .border_color(theme.border)
                 .flex()
@@ -799,22 +807,21 @@ fn route_body(
         .map(|issue| render_issue(theme, issue))
         .collect::<Vec<_>>();
     div()
-        .id("mods-scroll")
-        .debug_selector(|| "mods-scroll".to_owned())
+        .id("mods-canvas")
+        .debug_selector(|| "mods-canvas".to_owned())
         .flex_1()
         .min_w_0()
         .min_h_0()
-        .overflow_y_scroll()
-        .p(px(28.0))
+        .flex()
+        .flex_col()
+        .bg(theme.background)
+        .child(route_header(theme, model, cx))
         .child(
             div()
-                .w_full()
-                .max_w(px(920.0))
-                .mx_auto()
+                .flex_1()
+                .min_h_0()
                 .flex()
-                .flex_col()
-                .gap(px(16.0))
-                .child(route_header(theme, model, cx))
+                .flex_col_reverse()
                 .children(
                     model
                         .pending_confirmation
@@ -827,26 +834,38 @@ fn route_body(
                         .as_ref()
                         .map(|progress| progress_panel(theme, progress, cx)),
                 )
-                .children(
-                    (model.section == ModSection::Backups)
-                        .then(|| backup_creation_panel(theme, model, inputs, cx)),
-                )
-                .child(render_content(theme, model, rows, inputs, cx))
-                .children((!issues.is_empty()).then(|| {
-                    components::surface(theme)
-                        .w_full()
+                .child(
+                    div()
+                        .id("mods-scroll")
+                        .debug_selector(|| "mods-scroll".to_owned())
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
                         .p(px(18.0))
                         .flex()
                         .flex_col()
-                        .gap(px(10.0))
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .text_color(theme.accent)
-                                .child("ISSUES"),
+                        .gap(px(12.0))
+                        .children(
+                            (model.section == ModSection::Backups)
+                                .then(|| backup_creation_panel(theme, model, inputs, cx)),
                         )
-                        .children(issues)
-                })),
+                        .child(render_content(theme, model, rows, inputs, cx))
+                        .children((!issues.is_empty()).then(|| {
+                            components::surface(theme)
+                                .w_full()
+                                .p(px(18.0))
+                                .flex()
+                                .flex_col()
+                                .gap(px(10.0))
+                                .child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .text_color(theme.accent)
+                                        .child("ISSUES"),
+                                )
+                                .children(issues)
+                        })),
+                ),
         )
 }
 
@@ -870,22 +889,29 @@ fn route_header(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>)
     div()
         .w_full()
         .flex()
-        .items_end()
+        .flex_none()
+        .items_center()
         .justify_between()
-        .gap(px(18.0))
+        .h(px(62.0))
+        .px(px(18.0))
+        .gap(px(16.0))
+        .bg(theme.background)
+        .border_b_1()
+        .border_color(theme.border)
         .child(
             div()
                 .flex()
                 .flex_col()
-                .gap(px(5.0))
+                .gap(px(2.0))
                 .child(
                     div()
-                        .text_size(px(26.0))
+                        .text_size(px(18.0))
                         .text_color(theme.text)
                         .child(model.section.label()),
                 )
                 .child(
                     div()
+                        .text_size(px(12.0))
                         .text_color(theme.text_dim)
                         .child(section_description(model.section)),
                 ),
@@ -902,7 +928,7 @@ fn route_header(theme: &Theme, model: &ModViewModel, cx: &mut Context<AppFrame>)
                         .rounded_md()
                         .bg(theme.accent_dim)
                         .text_size(px(12.0))
-                        .text_color(theme.accent)
+                        .text_color(theme.text)
                         .child(operation)
                 }))
                 .child(refresh)

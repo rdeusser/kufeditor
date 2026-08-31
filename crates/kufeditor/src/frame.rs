@@ -1,8 +1,18 @@
+/*
+THESIS: Files, Mods, and Patches are peer workspaces; KufEditor refuses a dashboard home and permanent product rail.
+OWN-WORLD: Matte graphite fields, cool text, restrained blue focus, hairline seams, compact controls, and status color used only for state.
+STORY: Select a game, enter a workspace, act in one dominant canvas, and always see whether the change can be recovered.
+FIRST VIEWPORT: A 58px toolbar and 44px workspace strip sit above a 260px navigator and dominant canvas; a compact status bar anchors the bottom.
+FORM: Native Utility, Focused Split composition, standing-exit direction, seed 5380cca1.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+*/
+
 use std::{
     cell::Cell,
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, atomic::AtomicBool},
+    time::Duration,
 };
 
 use gpui::prelude::*;
@@ -30,7 +40,7 @@ use crate::{
     components,
     crusaders_catalog_status::CrusadersCatalogSession,
     float_edit::{FloatCommand, FloatEdit, FloatOutcome},
-    mod_status::ModPresentationState,
+    mod_status::{ModOperationKind, ModPresentationState, ModProgressSnapshot},
     notices::{Notice, NoticeCenter, NoticeLevel, NoticeSource},
     number_edit::{NumberCommand, NumberEdit, NumberOutcome},
     patch_status::PatchPresentationState,
@@ -38,7 +48,7 @@ use crate::{
     state::{
         Area, ClosePolicy, RecordSelections, RequestID, STGDraftTarget, STGPresentationStates,
         STGReferenceCursor, STGSection, SaveListCursor, SaveListKind, SavePresentationStates,
-        ShellState, navigation_projection,
+        ShellState, workspace_projection,
     },
     text_input::{TextInput, TextInputColors, TextInputEvent},
     theme::Theme,
@@ -58,6 +68,8 @@ mod stg;
 use self::discovery::{BrowsePromptLauncher, PlatformBrowsePromptLauncher};
 use self::mods::{ModFormInputs, ModPromptLauncher, PlatformModPromptLauncher};
 use self::settings::protected_settings_notice;
+
+const SUCCESS_NOTICE_LIFETIME: Duration = Duration::from_secs(3);
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -704,6 +716,113 @@ enum CloseDocuments {
     Discard,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StatusBarTone {
+    Ready,
+    Warning,
+    Danger,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StatusBarProjection {
+    status: String,
+    detail: String,
+    tone: StatusBarTone,
+}
+
+impl StatusBarProjection {
+    fn new(status: impl Into<String>, detail: impl Into<String>, tone: StatusBarTone) -> Self {
+        Self {
+            status: status.into(),
+            detail: detail.into(),
+            tone,
+        }
+    }
+}
+
+fn mod_operation_status(
+    operation: ModOperationKind,
+    progress: Option<&ModProgressSnapshot>,
+) -> StatusBarProjection {
+    let (status, base_detail) = match operation {
+        ModOperationKind::Import => (
+            "Importing package",
+            "Validating the package; installed game files are unchanged",
+        ),
+        ModOperationKind::Create => (
+            "Creating package",
+            "Building the package; installed game files are unchanged",
+        ),
+        ModOperationKind::Apply => (
+            "Applying mod",
+            "Updating installed game files transactionally",
+        ),
+        ModOperationKind::Uninstall => (
+            "Uninstalling mod",
+            "Restoring the mod's saved before-images",
+        ),
+        ModOperationKind::CreateBackup => (
+            "Creating backup",
+            "Copying current game files into a backup",
+        ),
+        ModOperationKind::RestoreBackup => (
+            "Restoring backup",
+            "Restoring game files from the selected backup",
+        ),
+        ModOperationKind::DeleteBackup => (
+            "Deleting backup",
+            "Deleting the selected backup; game files are unchanged",
+        ),
+        ModOperationKind::RemovePackage => (
+            "Removing package",
+            "Removing the local package; installed game files are unchanged",
+        ),
+    };
+    let detail = match progress {
+        Some(progress) if progress.cancel_requested => {
+            "Cancellation requested; stopping at a safe boundary".to_owned()
+        }
+        Some(progress) if progress.total > 0 => format!(
+            "{base_detail} · {} of {} complete",
+            progress.completed, progress.total
+        ),
+        Some(_) | None => base_detail.to_owned(),
+    };
+    StatusBarProjection::new(status, detail, StatusBarTone::Warning)
+}
+
+fn pending_mod_status(operation: ModOperationKind) -> StatusBarProjection {
+    let detail = match operation {
+        ModOperationKind::Import => {
+            "The package is validated before import; installed game files are unchanged"
+        }
+        ModOperationKind::Create => "The package is built without changing installed game files",
+        ModOperationKind::Apply => {
+            "Before-images are created before game files change; a failed apply rolls back committed paths"
+        }
+        ModOperationKind::Uninstall => {
+            "Saved before-images are validated before original files are restored and mod-added files are removed"
+        }
+        ModOperationKind::CreateBackup => {
+            "Current game files are copied into a backup; game files are unchanged"
+        }
+        ModOperationKind::RestoreBackup => {
+            "Recovery copies protect rollback if the restore fails; other game files are unchanged"
+        }
+        ModOperationKind::DeleteBackup => {
+            "The backup is permanently deleted; game files are unchanged"
+        }
+        ModOperationKind::RemovePackage => {
+            "The package is permanently removed from the library; installed game files are unchanged"
+        }
+    };
+    StatusBarProjection::new(
+        format!("{} confirmation", operation.label()),
+        detail,
+        StatusBarTone::Warning,
+    )
+}
+
 enum SaveAsPromptResult {
     Selected(PathBuf),
     Canceled,
@@ -838,7 +957,7 @@ impl AppFrame {
         let mod_service = ModService::new(mod_stores.clone());
         let mut mods = ModPresentationState::default();
         let _ = mods.set_context(active_game, 0);
-        let theme = Theme::forged_steel();
+        let theme = Theme::native_utility();
         let mod_inputs = ModFormInputs::new(&theme, cx);
         let patches = PatchPresentationState::new(
             active_game,
@@ -1386,6 +1505,11 @@ impl AppFrame {
             .number_edit
             .as_mut()
             .map_or(NumberOutcome::Cancel, |edit| edit.editor.apply(command));
+        self.handle_number_outcome(outcome, cx);
+        cx.notify();
+    }
+
+    fn handle_number_outcome(&mut self, outcome: NumberOutcome, cx: &mut Context<Self>) {
         match outcome {
             NumberOutcome::Continue => {
                 if self
@@ -1402,7 +1526,6 @@ impl AppFrame {
             NumberOutcome::Cancel => self.cancel_property_edit(),
             NumberOutcome::Commit(value) => self.commit_number_edit(value, cx),
         }
-        cx.notify();
     }
 
     fn handle_float_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -1415,6 +1538,11 @@ impl AppFrame {
             .float_edit
             .as_mut()
             .map_or(FloatOutcome::Cancel, |edit| edit.editor.apply(command));
+        self.handle_float_outcome(outcome, cx);
+        cx.notify();
+    }
+
+    fn handle_float_outcome(&mut self, outcome: FloatOutcome, cx: &mut Context<Self>) {
         match outcome {
             FloatOutcome::Continue => {
                 if self
@@ -1431,7 +1559,31 @@ impl AppFrame {
             FloatOutcome::Cancel => self.cancel_property_edit(),
             FloatOutcome::Commit(value) => self.commit_float_edit(value, cx),
         }
-        cx.notify();
+    }
+
+    fn commit_active_property_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if let Some(edit) = self.number_edit.as_mut() {
+            let outcome = edit.editor.apply(NumberCommand::Commit);
+            self.handle_number_outcome(outcome, cx);
+            cx.notify();
+            return self.number_edit.is_none();
+        }
+        if let Some(edit) = self.float_edit.as_mut() {
+            let outcome = edit.editor.apply(FloatCommand::Commit);
+            self.handle_float_outcome(outcome, cx);
+            cx.notify();
+            return self.float_edit.is_none();
+        }
+        let text = self.text_edit.as_ref().map(|edit| {
+            let input = edit.input.clone();
+            let value = input.read(cx).content().to_owned();
+            (input, value)
+        });
+        if let Some((input, value)) = text {
+            self.handle_text_input_event(&input, &TextInputEvent::Commit(value), window, cx);
+            return self.text_edit.is_none();
+        }
+        true
     }
 
     fn focus_next_save_control(
@@ -1706,20 +1858,28 @@ impl AppFrame {
         } else {
             Notice::success(format!("Opened {}", file_count(accepted_count)))
         };
-        self.notices
-            .complete(NoticeSource::Open, request.get(), Some(notice));
+        if self
+            .notices
+            .complete(NoticeSource::Open, request.get(), Some(notice))
+        {
+            self.schedule_success_notice_dismissal(NoticeSource::Open, cx);
+        }
         cx.notify();
     }
 
-    fn save_action(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
-        self.cancel_property_edit();
+    fn save_action(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.commit_active_property_edit(window, cx) {
+            return;
+        }
         if let Some(document_id) = self.active_document {
             self.start_save(document_id, None, cx);
         }
     }
 
-    fn save_all_action(&mut self, _: &SaveAll, _: &mut Window, cx: &mut Context<Self>) {
-        self.cancel_property_edit();
+    fn save_all_action(&mut self, _: &SaveAll, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.commit_active_property_edit(window, cx) {
+            return;
+        }
         let document_ids = self.workspace.document_ids().to_vec();
         let mut started = false;
         for document_id in document_ids {
@@ -1742,8 +1902,10 @@ impl AppFrame {
         }
     }
 
-    fn save_as_action(&mut self, _: &SaveAs, _: &mut Window, cx: &mut Context<Self>) {
-        self.cancel_property_edit();
+    fn save_as_action(&mut self, _: &SaveAs, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.commit_active_property_edit(window, cx) {
+            return;
+        }
         cx.notify();
         let Some(document_id) = self.active_document else {
             return;
@@ -1922,7 +2084,9 @@ impl AppFrame {
         cx.spawn(async move |entity, cx| {
             let result = task.await;
             let _ = entity.update(cx, move |frame, cx| {
-                frame.finish_save_result(request_document, token, notice_identity, result);
+                if frame.finish_save_result(request_document, token, notice_identity, result) {
+                    frame.schedule_success_notice_dismissal(NoticeSource::Workspace, cx);
+                }
                 frame.continue_close(cx);
                 cx.notify();
             });
@@ -1937,7 +2101,7 @@ impl AppFrame {
         token: SaveToken,
         notice_identity: u64,
         result: Result<kufeditor_workspace::SavedDocument, kufeditor_workspace::WorkspaceError>,
-    ) {
+    ) -> bool {
         match result {
             Ok(saved) => match self.workspace.finish_save(saved) {
                 Ok(()) => {
@@ -1949,7 +2113,7 @@ impl AppFrame {
                         NoticeSource::Workspace,
                         notice_identity,
                         Some(Notice::success(format!("Saved {name}"))),
-                    );
+                    )
                 }
                 Err(error) => {
                     self.cancel_close_after_document_save_failure();
@@ -1961,6 +2125,7 @@ impl AppFrame {
                             &error,
                         )),
                     );
+                    false
                 }
             },
             Err(error) => match self.workspace.finish_save_failure(document_id, token) {
@@ -1971,6 +2136,7 @@ impl AppFrame {
                         notice_identity,
                         Some(Notice::error("Could not save document", &error)),
                     );
+                    false
                 }
                 Err(cleanup_error) => {
                     self.cancel_close_after_document_save_failure();
@@ -1982,9 +2148,27 @@ impl AppFrame {
                             &cleanup_error,
                         )),
                     );
+                    false
                 }
             },
         }
+    }
+
+    fn schedule_success_notice_dismissal(&mut self, source: NoticeSource, cx: &mut Context<Self>) {
+        let Some(token) = self.notices.success_token(source) else {
+            return;
+        };
+        cx.spawn(async move |entity, cx| {
+            cx.background_executor()
+                .timer(SUCCESS_NOTICE_LIFETIME)
+                .await;
+            let _ = entity.update(cx, move |frame, cx| {
+                if frame.notices.clear_token(token) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn allocate_workspace_notice_identity(&mut self) -> u64 {
@@ -2030,26 +2214,65 @@ impl AppFrame {
     }
 
     fn top_bar(&self, cx: &mut Context<Self>) -> Div {
+        let settings = Area::Settings;
         div()
             .flex()
             .items_center()
-            .h(px(54.0))
-            .px(px(18.0))
-            .gap(px(8.0))
+            .flex_none()
+            .h(px(58.0))
+            .px(px(16.0))
+            .gap(px(12.0))
             .bg(self.theme.surface)
             .border_b_1()
             .border_color(self.theme.border)
             .child(
                 div()
                     .flex_none()
-                    .w(px(172.0))
+                    .w(px(132.0))
                     .text_size(px(18.0))
-                    .text_color(self.theme.accent)
+                    .text_color(self.theme.text)
                     .child("KufEditor"),
             )
-            .child(self.file_actions())
-            .child(div().flex_1())
             .child(self.game_picker(cx))
+            .child(self.contextual_actions())
+            .child(div().flex_1())
+            .child(self.toolbar_status())
+            .child(
+                components::toolbar_button(
+                    &self.theme,
+                    settings.element_id(),
+                    settings.label(),
+                    true,
+                )
+                .when(self.shell.area() == settings, |button| {
+                    button
+                        .bg(self.theme.accent_dim)
+                        .border_color(self.theme.accent)
+                        .text_color(self.theme.text)
+                })
+                .on_click(cx.listener(move |frame, _, _, cx| {
+                    frame.select_area(settings, cx);
+                })),
+            )
+    }
+
+    fn contextual_actions(&self) -> Div {
+        if self.shell.area() == Area::Files {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .h(px(24.0))
+                        .w(px(1.0))
+                        .bg(self.theme.border),
+                )
+                .child(self.file_actions())
+        } else {
+            div()
+        }
     }
 
     fn file_actions(&self) -> Div {
@@ -2061,76 +2284,164 @@ impl AppFrame {
             .active_document
             .is_some_and(|id| self.workspace.can_redo(id).unwrap_or(false));
 
+        div().flex().items_center().child(
+            div()
+                .id("toolbar-file-actions")
+                .debug_selector(|| "toolbar-file-actions".to_owned())
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(action_button(
+                            &self.theme,
+                            "toolbar-open",
+                            "Open",
+                            true,
+                            OpenFile,
+                        ))
+                        .child(action_button(
+                            &self.theme,
+                            "toolbar-save",
+                            "Save",
+                            has_document,
+                            Save,
+                        ))
+                        .child(action_button(
+                            &self.theme,
+                            "toolbar-save-as",
+                            "Save as",
+                            has_document,
+                            SaveAs,
+                        ))
+                        .child(action_button(
+                            &self.theme,
+                            "toolbar-save-all",
+                            "Save all",
+                            has_document,
+                            SaveAll,
+                        )),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .h(px(24.0))
+                        .w(px(1.0))
+                        .bg(self.theme.border),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(action_button(
+                            &self.theme,
+                            "toolbar-undo",
+                            "Undo",
+                            can_undo,
+                            Undo,
+                        ))
+                        .child(action_button(
+                            &self.theme,
+                            "toolbar-redo",
+                            "Redo",
+                            can_redo,
+                            Redo,
+                        )),
+                ),
+        )
+    }
+
+    fn game_picker(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         div()
+            .id("toolbar-game-context")
+            .debug_selector(|| "toolbar-game-context".to_owned())
             .flex()
             .items_center()
             .gap(px(8.0))
-            .child(action_button(
-                &self.theme,
-                "toolbar-open",
-                "Open",
-                true,
-                OpenFile,
-            ))
-            .child(action_button(
-                &self.theme,
-                "toolbar-save",
-                "Save",
-                has_document,
-                Save,
-            ))
-            .child(action_button(
-                &self.theme,
-                "toolbar-save-as",
-                "Save as",
-                has_document,
-                SaveAs,
-            ))
-            .child(action_button(
-                &self.theme,
-                "toolbar-save-all",
-                "Save all",
-                has_document,
-                SaveAll,
-            ))
-            .child(action_button(
-                &self.theme,
-                "toolbar-undo",
-                "Undo",
-                can_undo,
-                Undo,
-            ))
-            .child(action_button(
-                &self.theme,
-                "toolbar-redo",
-                "Redo",
-                can_redo,
-                Redo,
-            ))
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(self.theme.text_dim)
+                    .child("GAME"),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .h(px(34.0))
+                    .p(px(2.0))
+                    .gap(px(2.0))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(self.theme.border)
+                    .bg(self.theme.background)
+                    .children(Game::ALL.into_iter().map(|game| {
+                        let id = match game {
+                            Game::Crusaders => "game-crusaders",
+                            Game::Heroes => "game-heroes",
+                        };
+                        let selected = self.shell.game() == game;
+                        let hover = if selected {
+                            self.theme.accent_dim
+                        } else {
+                            self.theme.raised
+                        };
+                        div()
+                            .id(id)
+                            .flex()
+                            .items_center()
+                            .h_full()
+                            .px(px(10.0))
+                            .rounded_md()
+                            .bg(if selected {
+                                self.theme.accent_dim
+                            } else {
+                                self.theme.background
+                            })
+                            .text_color(if selected {
+                                self.theme.text
+                            } else {
+                                self.theme.text_dim
+                            })
+                            .cursor_pointer()
+                            .hover(move |style| style.bg(hover))
+                            .on_click(cx.listener(move |frame, _, _, cx| {
+                                frame.select_game(game, cx);
+                            }))
+                            .child(game.label())
+                    })),
+            )
     }
 
-    fn game_picker(&self, cx: &mut Context<Self>) -> Div {
+    fn toolbar_status(&self) -> Div {
+        let dirty = self.dirty_count();
         div()
             .flex()
             .items_center()
-            .gap(px(6.0))
-            .children(Game::ALL.into_iter().map(|game| {
-                let id = match game {
-                    Game::Crusaders => "game-crusaders",
-                    Game::Heroes => "game-heroes",
-                };
-                let selected = self.shell.game() == game;
-                components::toolbar_button(&self.theme, id, game.label(), true)
-                    .when(selected, |button| {
-                        button
-                            .bg(self.theme.accent_dim)
-                            .border_color(self.theme.accent)
-                            .text_color(self.theme.accent)
-                    })
-                    .on_click(cx.listener(move |frame, _, _, cx| {
-                        frame.select_game(game, cx);
-                    }))
+            .gap(px(7.0))
+            .px(px(4.0))
+            .text_size(px(12.0))
+            .text_color(if dirty == 0 {
+                self.theme.text_dim
+            } else {
+                self.theme.warning
+            })
+            .child(div().size(px(6.0)).rounded_full().bg(if dirty == 0 {
+                self.theme.success
+            } else {
+                self.theme.warning
             }))
+            .child(if dirty == 0 {
+                "No unsaved changes".to_owned()
+            } else if dirty == 1 {
+                "1 file has unsaved changes".to_owned()
+            } else {
+                format!("{dirty} files have unsaved changes")
+            })
     }
 
     fn select_game(&mut self, game: Game, cx: &mut Context<Self>) {
@@ -2204,66 +2515,78 @@ impl AppFrame {
         cx.notify();
     }
 
-    fn navigation(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let projection = navigation_projection();
+    fn workspace_tabs(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let projection = workspace_projection();
         div()
-            .id("product-navigation")
-            .debug_selector(|| "product-navigation".to_owned())
+            .id("workspace-tabs")
+            .debug_selector(|| "workspace-tabs".to_owned())
             .flex()
-            .flex_col()
             .flex_none()
-            .w(px(196.0))
-            .p(px(12.0))
-            .gap(px(8.0))
+            .h(px(44.0))
+            .gap(px(1.0))
             .bg(self.theme.surface)
-            .border_r_1()
+            .border_b_1()
             .border_color(self.theme.border)
-            .children(projection.primary.iter().copied().map(|area| {
-                components::rail_item(
-                    &self.theme,
-                    area.element_id(),
-                    area.label(),
-                    self.shell.area() == area,
-                )
-                .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.select_area(area, cx);
-                }))
+            .children(projection.tabs.iter().copied().map(|area| {
+                let selected = self.shell.area() == area;
+                let hover = self.theme.raised;
+                let element_id = area.element_id();
+                div()
+                    .id(element_id)
+                    .debug_selector(move || element_id.to_owned())
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .justify_center()
+                    .h_full()
+                    .border_b_2()
+                    .border_color(if selected {
+                        self.theme.accent
+                    } else {
+                        self.theme.surface
+                    })
+                    .bg(if selected {
+                        self.theme.raised
+                    } else {
+                        self.theme.surface
+                    })
+                    .text_color(if selected {
+                        self.theme.text
+                    } else {
+                        self.theme.text_dim
+                    })
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(hover))
+                    .on_click(cx.listener(move |frame, _, _, cx| {
+                        frame.select_area(area, cx);
+                    }))
+                    .child(area.label())
             }))
-            .child(div().flex_1())
-            .child(
-                components::rail_item(
-                    &self.theme,
-                    projection.bottom.element_id(),
-                    projection.bottom.label(),
-                    self.shell.area() == projection.bottom,
-                )
-                .on_click(cx.listener(move |frame, _, _, cx| {
-                    frame.select_area(projection.bottom, cx);
-                })),
-            )
     }
 
-    fn home_recent_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        match views::home::project_recent_files(self.recent_files.paths()) {
-            views::home::RecentFilesProjection::Empty(message) => vec![
+    fn recent_file_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        match views::files::project_recent_files(self.recent_files.paths()) {
+            views::files::RecentFilesProjection::Empty(message) => vec![
                 div()
-                    .id("home-recent-empty")
-                    .py(px(12.0))
+                    .id("files-recent-empty")
+                    .px(px(12.0))
+                    .py(px(10.0))
                     .text_color(self.theme.text_dim)
                     .child(message)
                     .into_any_element(),
             ],
-            views::home::RecentFilesProjection::Rows(rows) => rows
+            views::files::RecentFilesProjection::Rows(rows) => rows
                 .into_iter()
                 .enumerate()
                 .map(|(index, row)| {
                     let path = row.path;
                     let hover = self.theme.raised;
                     div()
-                        .id(("home-recent-row", index))
+                        .id(("files-recent-row", index))
                         .w_full()
                         .px(px(12.0))
-                        .py(px(10.0))
+                        .py(px(9.0))
                         .flex()
                         .flex_col()
                         .gap(px(3.0))
@@ -2289,15 +2612,17 @@ impl AppFrame {
 
     fn content(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.shell.area() {
-            Area::Home => {
-                views::home::render(&self.theme, self.shell.game(), self.home_recent_rows(cx))
-                    .into_any_element()
-            }
             Area::Files => {
                 let editor = self
                     .active_document
                     .map(|document_id| self.document_editor(document_id, cx));
-                views::files::render(&self.theme, self.document_tabs(cx), editor).into_any_element()
+                views::files::render(
+                    &self.theme,
+                    self.document_tabs(cx),
+                    editor,
+                    self.recent_file_rows(cx),
+                )
+                .into_any_element()
             }
             Area::Mods => {
                 let model = views::mods::project_mods(&self.mods);
@@ -2320,6 +2645,89 @@ impl AppFrame {
                 views::settings::render(&self.theme, projection, cx).into_any_element()
             }
         }
+    }
+
+    fn status_bar_projection(&self) -> StatusBarProjection {
+        let dirty = self.dirty_count();
+        if self.settings.has_failed() {
+            StatusBarProjection::new("Settings could not be saved", "", StatusBarTone::Danger)
+        } else if let Some(pending) = self.mods.pending_confirmation() {
+            pending_mod_status(pending.operation)
+        } else if let Some(pending) = self.patches.pending_confirmation() {
+            StatusBarProjection::new(
+                "Patch confirmation",
+                format!("Backup target: {}", pending.backup().display()),
+                StatusBarTone::Warning,
+            )
+        } else if let Some(operation) = self.mods.active_operation() {
+            mod_operation_status(operation, self.mods.progress())
+        } else if self.patches.operation_in_progress() {
+            StatusBarProjection::new(
+                "Updating executable",
+                self.patches.active_backup().map_or_else(
+                    || "Writing Kuf2Main.exe".to_owned(),
+                    |backup| format!("Backup target: {}", backup.display()),
+                ),
+                StatusBarTone::Warning,
+            )
+        } else if dirty > 0 {
+            StatusBarProjection::new(
+                "Unsaved changes",
+                "Save or undo before closing the document",
+                StatusBarTone::Warning,
+            )
+        } else {
+            StatusBarProjection::new("Ready", "", StatusBarTone::Ready)
+        }
+    }
+
+    fn status_bar(&self) -> Stateful<Div> {
+        let projection = self.status_bar_projection();
+        let color = match projection.tone {
+            StatusBarTone::Ready => self.theme.success,
+            StatusBarTone::Warning => self.theme.warning,
+            StatusBarTone::Danger => self.theme.danger,
+        };
+        let status = div()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .items_center()
+            .gap(px(8.0))
+            .child(div().flex_none().size(px(6.0)).rounded_full().bg(color))
+            .child(
+                div()
+                    .id("status-bar-status")
+                    .flex_none()
+                    .text_size(px(12.0))
+                    .text_color(self.theme.text)
+                    .child(projection.status),
+            )
+            .children((!projection.detail.is_empty()).then(|| {
+                div()
+                    .id("status-bar-detail")
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(12.0))
+                    .text_color(self.theme.text_dim)
+                    .child(projection.detail)
+            }));
+
+        div()
+            .id("status-bar")
+            .debug_selector(|| "status-bar".to_owned())
+            .flex()
+            .flex_none()
+            .items_center()
+            .h(px(32.0))
+            .px(px(14.0))
+            .gap(px(16.0))
+            .bg(self.theme.surface)
+            .border_t_1()
+            .border_color(self.theme.border)
+            .child(status)
+            .children(self.status_bar_notice())
     }
 
     fn document_editor(&self, document_id: DocumentID, cx: &mut Context<Self>) -> Div {
@@ -2877,42 +3285,44 @@ impl AppFrame {
             .collect()
     }
 
-    fn notice_bar(&self) -> Option<AnyElement> {
+    fn status_bar_notice(&self) -> Option<AnyElement> {
         self.notices.current().map(|notice| {
-            let label = match notice.level() {
-                NoticeLevel::Info => "INFO",
-                NoticeLevel::Success => "DONE",
-                NoticeLevel::Warning => "WARNING",
-                NoticeLevel::Error => "ERROR",
+            let (label, color) = match notice.level() {
+                NoticeLevel::Info => ("INFO", self.theme.accent),
+                NoticeLevel::Success => ("DONE", self.theme.success),
+                NoticeLevel::Warning => ("WARNING", self.theme.warning),
+                NoticeLevel::Error => ("ERROR", self.theme.danger),
             };
             div()
-                .id("workspace-notice")
+                .id("status-bar-notice")
+                .debug_selector(|| "status-bar-notice".to_owned())
                 .flex()
+                .flex_none()
                 .items_center()
-                .gap(px(10.0))
-                .px(px(18.0))
-                .py(px(8.0))
-                .bg(self.theme.accent_dim)
-                .border_b_1()
-                .border_color(self.theme.accent)
+                .min_w_0()
+                .max_w(px(620.0))
+                .gap(px(8.0))
+                .overflow_hidden()
+                .child(div().flex_none().size(px(6.0)).rounded_full().bg(color))
                 .child(
                     div()
                         .flex_none()
                         .text_size(px(11.0))
-                        .text_color(self.theme.accent)
+                        .text_color(color)
                         .child(label),
                 )
                 .child(
                     div()
                         .flex_none()
+                        .text_size(px(12.0))
                         .text_color(self.theme.text)
                         .child(notice.summary().to_owned()),
                 )
                 .children((!notice.detail().is_empty()).then(|| {
                     div()
-                        .flex_1()
                         .min_w_0()
                         .truncate()
+                        .text_size(px(12.0))
                         .text_color(self.theme.text_dim)
                         .child(notice.detail().to_owned())
                 }))
@@ -3054,21 +3464,16 @@ impl Render for AppFrame {
             .on_action(cx.listener(Self::apply_stg_structural_edit))
             .on_action(cx.listener(Self::select_stg_reference))
             .child(self.top_bar(cx))
-            .children(self.notice_bar())
+            .child(self.workspace_tabs(cx))
             .child(
                 div()
-                    .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(self.navigation(cx))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .child(self.content(cx)),
-                    ),
+                    .min_w_0()
+                    .overflow_hidden()
+                    .child(self.content(cx)),
             )
+            .child(self.status_bar())
     }
 }
 
@@ -3088,11 +3493,12 @@ mod tests {
         rc::Rc,
         sync::{Arc, Mutex},
         task::{Context as TaskContext, Poll, Waker},
+        time::Duration,
     };
 
     use gpui::{
         AppContext, BackgroundExecutor, Context, EntityInputHandler, PathPromptOptions, Render,
-        Task, TestAppContext, WindowOptions,
+        Task, TestAppContext, WindowOptions, point, px, size,
     };
     use kufeditor_game::Game;
     use kufeditor_workspace::{
@@ -3104,16 +3510,17 @@ mod tests {
     use super::{
         ActiveNumberEdit, AppFrame, CloseDocuments, EditorRoute, OpenPathLoader,
         OpenPromptLauncher, OpenPromptResult, SkillTextProjection, SkillTypeChoice, TextEditTarget,
-        editor_route, invalid_number_notice, open_prompt_copy, skill_text_projection,
-        troop_diagnostic_title,
+        editor_route, invalid_number_notice, mod_operation_status, open_prompt_copy,
+        pending_mod_status, skill_text_projection, troop_diagnostic_title,
     };
     use crate::{
-        actions::{OpenFile, SaveAs},
+        actions::{OpenFile, Save, SaveAs},
         catalog_status::CatalogStatus,
         frame::discovery_status::DiscoveryStatus,
+        mod_status::ModOperationKind,
         notices::{Notice, NoticeLevel, NoticeSource},
         settings::{SettingsQueueResult, SettingsStartup, image_from_runtime},
-        state::{Area, RecordSelections, RequestID, navigation_projection},
+        state::{Area, RecordSelections, RequestID, workspace_projection},
         test_support::SaveFixture,
         text_input::{TextInputEvent, bind as bind_text_input},
     };
@@ -4180,6 +4587,103 @@ mod tests {
     }
 
     #[gpui::test]
+    fn save_action_commits_the_active_number_draft_before_writing(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("TroopInfo.sox");
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+        let document = window
+            .update(cx, |frame, window, cx| {
+                let document = open_troop(frame, &path.to_string_lossy(), 130);
+                frame.activate_document(document, cx);
+                frame.begin_number_edit(ActiveNumberEdit::troop_field(
+                    document,
+                    0,
+                    TroopField::MoveSpeed,
+                    130,
+                ));
+                window.focus(&frame.focus);
+                document
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "1 4 5");
+        window
+            .update(cx, |frame, window, cx| {
+                assert_eq!(
+                    frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                    Some("145")
+                );
+
+                frame.save_action(&Save, window, cx);
+
+                assert_eq!(
+                    frame
+                        .workspace
+                        .troop_value(document, 0, TroopField::MoveSpeed)
+                        .unwrap(),
+                    145
+                );
+                assert!(frame.number_edit.is_none());
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+        let loaded = load_path(path).unwrap();
+        let Document::Troop(troop) = loaded.document() else {
+            panic!("saved SOX document changed format");
+        };
+        assert_eq!(troop.value(0, TroopField::MoveSpeed).unwrap(), 145);
+    }
+
+    #[gpui::test]
+    fn save_action_keeps_an_invalid_number_draft_open(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("TroopInfo.sox");
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+        let document = window
+            .update(cx, |frame, window, cx| {
+                let document = open_troop(frame, &path.to_string_lossy(), 130);
+                frame.activate_document(document, cx);
+                frame.begin_number_edit(ActiveNumberEdit::troop_field(
+                    document,
+                    0,
+                    TroopField::MoveSpeed,
+                    130,
+                ));
+                window.focus(&frame.focus);
+                document
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "backspace");
+        window
+            .update(cx, |frame, window, cx| {
+                frame.save_action(&Save, window, cx);
+
+                assert_eq!(
+                    frame.number_edit.as_ref().map(|edit| edit.editor.draft()),
+                    Some("")
+                );
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Enter a whole number within the allowed range")
+                );
+                assert!(!frame.workspace.save_in_progress(document).unwrap());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn save_tab_bindings_preserve_text_sox_input_tab_insertion(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             crate::actions::bind(cx);
@@ -4215,14 +4719,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn text_sox_canceled_save_as_notifies_after_canceling_the_draft(cx: &mut TestAppContext) {
+    fn canceled_save_as_keeps_the_committed_text_edit_unsaved(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
+            bind_text_input(cx);
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
             })
             .unwrap()
         });
-        window
+        let document = window
             .update(cx, |frame, window, cx| {
                 let document = open_text_sox(frame, "StringTable.sox", &[(9001, "Alpha")]);
                 frame.activate_document(document, cx);
@@ -4233,29 +4738,29 @@ mod tests {
                     window,
                     cx,
                 );
+                document
             })
             .unwrap();
-        let frame_entity = window.root(cx).unwrap();
-        let notification_count = Rc::new(Cell::new(0_usize));
-        cx.update(|cx| {
-            let notification_count = Rc::clone(&notification_count);
-            cx.observe(&frame_entity, move |_, _| {
-                notification_count.set(notification_count.get() + 1);
-            })
-            .detach();
-        });
 
+        cx.simulate_keystrokes(window.into(), "B r a v o");
         window
             .update(cx, |frame, window, cx| {
                 frame.save_as_action(&SaveAs, window, cx);
                 assert!(frame.text_edit.is_none());
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Bravo");
+                assert!(frame.workspace.is_dirty(document).unwrap());
             })
             .unwrap();
         assert!(cx.did_prompt_for_new_path());
         cx.simulate_new_path_selection(|_| None);
         cx.run_until_parked();
 
-        assert_eq!(notification_count.get(), 1);
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(frame.workspace.text_sox_text(document, 0).unwrap(), "Bravo");
+                assert!(frame.workspace.is_dirty(document).unwrap());
+            })
+            .unwrap();
     }
 
     #[gpui::test]
@@ -4962,7 +5467,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn app_frame_opens_at_home(cx: &mut TestAppContext) {
+    fn app_frame_opens_in_files(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
@@ -4972,9 +5477,215 @@ mod tests {
 
         window
             .update(cx, |frame, _, _| {
-                assert_eq!(frame.shell.area(), Area::Home);
+                assert_eq!(frame.shell.area(), Area::Files);
             })
             .unwrap();
+    }
+
+    #[gpui::test]
+    fn app_shell_keeps_the_approved_first_viewport_geometry(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        let root = frame.clone();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(1320.0), px(840.0)),
+            move |_, _| root,
+        );
+
+        let tabs = cx.debug_bounds("workspace-tabs").unwrap();
+        let files_tab = cx.debug_bounds("workspace-files").unwrap();
+        let mods_tab = cx.debug_bounds("workspace-mods").unwrap();
+        let patches_tab = cx.debug_bounds("workspace-patches").unwrap();
+        let game_context = cx.debug_bounds("toolbar-game-context").unwrap();
+        let file_actions = cx.debug_bounds("toolbar-file-actions").unwrap();
+        let navigator = cx.debug_bounds("files-navigator").unwrap();
+        let status_bar = cx.debug_bounds("status-bar").unwrap();
+
+        assert_eq!(tabs.origin.y, px(58.0));
+        assert_eq!(tabs.size.height, px(44.0));
+        assert!(files_tab.size.width > px(430.0));
+        assert!(mods_tab.size.width > px(430.0));
+        assert!(patches_tab.size.width > px(430.0));
+        assert_eq!(files_tab.origin.x, tabs.origin.x);
+        assert_eq!(patches_tab.right(), tabs.right());
+        assert!(file_actions.origin.x >= game_context.right() + px(20.0));
+        assert_eq!(navigator.origin.y, px(102.0));
+        assert_eq!(navigator.size.width, px(260.0));
+        assert_eq!(tabs.bottom(), navigator.origin.y);
+        assert_eq!(navigator.bottom(), status_bar.origin.y);
+        assert_eq!(status_bar.size.height, px(32.0));
+    }
+
+    #[gpui::test]
+    fn transient_notice_stays_in_the_bottom_right_status_bar(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        frame.update(cx, |frame, cx| {
+            frame.notices.replace(
+                NoticeSource::Workspace,
+                Notice::success("Saved TroopInfo.sox"),
+            );
+            cx.notify();
+        });
+        let root = frame.clone();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(1320.0), px(840.0)),
+            move |_, _| root,
+        );
+
+        let tabs = cx.debug_bounds("workspace-tabs").unwrap();
+        let navigator = cx.debug_bounds("files-navigator").unwrap();
+        let status_bar = cx.debug_bounds("status-bar").unwrap();
+        let notice = cx.debug_bounds("status-bar-notice").unwrap();
+
+        assert_eq!(navigator.origin.y, tabs.bottom());
+        assert_eq!(notice.right() + px(14.0), status_bar.right());
+        assert!(notice.origin.y >= status_bar.origin.y);
+        assert!(notice.bottom() <= status_bar.bottom());
+    }
+
+    #[gpui::test]
+    fn success_notice_expires_after_three_seconds(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |frame, _, cx| {
+                frame.notices.replace(
+                    NoticeSource::Workspace,
+                    Notice::success("Saved TroopInfo.sox"),
+                );
+                frame.schedule_success_notice_dismissal(NoticeSource::Workspace, cx);
+            })
+            .unwrap();
+
+        cx.executor().advance_clock(Duration::from_millis(2_999));
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Saved TroopInfo.sox")
+                );
+            })
+            .unwrap();
+
+        cx.executor().advance_clock(Duration::from_millis(1));
+        window
+            .update(cx, |frame, _, _| {
+                assert!(frame.notices.current().is_none());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn success_notice_timer_keeps_a_newer_error(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|cx| AppFrame::new(test_startup(), cx))
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |frame, _, cx| {
+                frame.notices.replace(
+                    NoticeSource::Workspace,
+                    Notice::success("Saved TroopInfo.sox"),
+                );
+                frame.schedule_success_notice_dismissal(NoticeSource::Workspace, cx);
+                frame.notices.replace(
+                    NoticeSource::Workspace,
+                    Notice::plain(NoticeLevel::Error, "Could not save TroopInfo.sox"),
+                );
+            })
+            .unwrap();
+
+        cx.executor().advance_clock(Duration::from_secs(3));
+        window
+            .update(cx, |frame, _, _| {
+                assert_eq!(
+                    frame.notices.current().map(Notice::summary),
+                    Some("Could not save TroopInfo.sox")
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn files_keeps_its_contextual_navigator_when_a_document_is_open(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        frame.update(cx, |frame, cx| {
+            let document = open_troop(frame, "TroopInfo.sox", 10);
+            frame.activate_document(document, cx);
+        });
+        let root = frame.clone();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(1180.0), px(720.0)),
+            move |_, _| root,
+        );
+
+        let navigator = cx.debug_bounds("files-navigator").unwrap();
+        let canvas = cx.debug_bounds("files-document-canvas").unwrap();
+        assert_eq!(navigator.size.width, px(260.0));
+        assert_eq!(navigator.right(), canvas.origin.x);
+        assert!(cx.debug_bounds("files-active-editor").is_some());
+    }
+
+    #[gpui::test]
+    fn patches_keeps_a_contextual_navigator_beside_its_canvas(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        frame.update(cx, |frame, cx| frame.select_area(Area::Patches, cx));
+        let root = frame.clone();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(1180.0), px(720.0)),
+            move |_, _| root,
+        );
+
+        let navigator = cx.debug_bounds("patches-navigator").unwrap();
+        let canvas = cx.debug_bounds("patches-canvas").unwrap();
+        assert_eq!(navigator.size.width, px(260.0));
+        assert_eq!(navigator.right(), canvas.origin.x);
+    }
+
+    #[gpui::test]
+    fn settings_columns_fit_the_minimum_window_width(cx: &mut TestAppContext) {
+        let (frame, cx) = cx.add_window_view(|_, cx| AppFrame::new(test_startup(), cx));
+        frame.update(cx, |frame, cx| frame.select_area(Area::Settings, cx));
+        let root = frame.clone();
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(px(1180.0), px(720.0)),
+            move |_, _| root,
+        );
+
+        let primary = cx.debug_bounds("settings-primary-column").unwrap();
+        let secondary = cx.debug_bounds("settings-secondary-column").unwrap();
+        assert!(primary.size.width >= px(700.0));
+        assert_eq!(secondary.size.width, px(400.0));
+        assert_eq!(primary.right() + px(12.0), secondary.origin.x);
+    }
+
+    #[test]
+    fn status_bar_copy_matches_the_operation_scope() {
+        let import = mod_operation_status(ModOperationKind::Import, None);
+        let apply = mod_operation_status(ModOperationKind::Apply, None);
+        let remove = mod_operation_status(ModOperationKind::RemovePackage, None);
+
+        assert_eq!(import.status, "Importing package");
+        assert!(import.detail.contains("game files are unchanged"));
+        assert_eq!(apply.status, "Applying mod");
+        assert!(apply.detail.contains("transactionally"));
+        assert_eq!(remove.status, "Removing package");
+        assert!(remove.detail.contains("game files are unchanged"));
+        let pending_apply = pending_mod_status(ModOperationKind::Apply);
+        let pending_delete = pending_mod_status(ModOperationKind::DeleteBackup);
+        assert!(pending_apply.detail.contains("Before-images are created"));
+        assert!(pending_apply.detail.contains("rolls back committed paths"));
+        assert!(pending_delete.detail.contains("game files are unchanged"));
     }
 
     #[gpui::test]
@@ -5366,7 +6077,7 @@ mod tests {
         assert_eq!(cx.read(|app| app.windows().len()), 1);
         sentinel
             .update(cx, |frame, _, _| {
-                assert_eq!(frame.shell.area(), Area::Home);
+                assert_eq!(frame.shell.area(), Area::Files);
             })
             .unwrap();
     }
@@ -5795,7 +6506,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn navigation_selecting_settings_updates_the_shell_route(cx: &mut TestAppContext) {
+    fn toolbar_settings_updates_the_shell_route(cx: &mut TestAppContext) {
         let window = cx.update(|cx| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| AppFrame::new(test_startup(), cx))
@@ -5807,9 +6518,9 @@ mod tests {
             .update(cx, |frame, _, cx| {
                 frame.select_area(Area::Settings, cx);
                 assert_eq!(frame.shell.area(), Area::Settings);
-                let navigation = navigation_projection();
-                assert_eq!(navigation.primary, Area::PRIMARY);
-                assert_eq!(navigation.bottom, Area::Settings);
+                let workspace = workspace_projection();
+                assert_eq!(workspace.tabs, Area::WORKSPACES);
+                assert_eq!(workspace.settings, Area::Settings);
             })
             .unwrap();
     }

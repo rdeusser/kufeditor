@@ -630,9 +630,12 @@ impl AppFrame {
             ModPathsPromptResult::Canceled => None,
             ModPathsPromptResult::Failed(notice) => Some(notice),
         };
-        let _ = self
+        let completed = self
             .notices
             .complete(NoticeSource::Mods, key.request().get(), notice);
+        if completed {
+            self.schedule_success_notice_dismissal(NoticeSource::Mods, cx);
+        }
         self.resume_interrupted_mod_scan(cx);
         cx.notify();
     }
@@ -862,11 +865,14 @@ impl AppFrame {
                     return;
                 }
                 self.mod_cancellation = None;
-                let _ = self.notices.complete(
+                let completed = self.notices.complete(
                     NoticeSource::Mods,
                     launch.key.request().get(),
                     Some(Notice::success(success.message)),
                 );
+                if completed {
+                    self.schedule_success_notice_dismissal(NoticeSource::Mods, cx);
+                }
                 self.refresh_after_mod_operation(success.refresh, cx);
             }
             Err(error) => {
@@ -1981,6 +1987,9 @@ mod tests {
             assert_eq!(confirmation.target, ModOperationTarget::Package(package_id));
             assert!(confirmation.subject.contains("Forged Pack 1.0"));
             assert!(confirmation.consequence.contains("selected game folder"));
+            let status = frame.status_bar_projection();
+            assert!(status.detail.contains("Before-images are created"));
+            assert!(status.detail.contains("rolls back committed paths"));
         });
         draw_mod_frame(cx, frame);
         frame.update_in(cx, |frame, window, _| window.focus(&frame.mods_focus));
@@ -2068,6 +2077,9 @@ mod tests {
             let confirmation = frame.mods.pending_confirmation().unwrap();
             assert_eq!(confirmation.operation, ModOperationKind::DeleteBackup);
             assert!(confirmation.consequence.contains("Permanently delete"));
+            let status = frame.status_bar_projection();
+            assert!(status.detail.contains("permanently deleted"));
+            assert!(status.detail.contains("game files are unchanged"));
         });
         draw_mod_frame(cx, frame);
         click(cx, "mods-confirmation-accept");

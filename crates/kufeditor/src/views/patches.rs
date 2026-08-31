@@ -317,48 +317,123 @@ pub(crate) fn render(
         .id("patches-route")
         .debug_selector(|| "patches-route".to_owned())
         .size_full()
-        .overflow_y_scroll()
+        .flex()
+        .flex_col()
         .bg(theme.background)
-        .p(px(24.0))
         .child(
             div()
-                .w_full()
-                .max_w(px(980.0))
-                .mx_auto()
                 .flex()
-                .flex_col()
-                .gap(px(14.0))
+                .flex_none()
+                .items_center()
+                .justify_between()
+                .h(px(62.0))
+                .px(px(18.0))
+                .border_b_1()
+                .border_color(theme.border)
                 .child(
                     div()
                         .flex()
-                        .items_center()
-                        .justify_between()
+                        .flex_col()
+                        .gap(px(2.0))
                         .child(
                             div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.0))
-                                .child(
-                                    div()
-                                        .text_size(px(22.0))
-                                        .text_color(theme.text)
-                                        .child("Executable Patches"),
-                                )
-                                .child(
-                                    div()
-                                        .text_color(theme.text_dim)
-                                        .child(format!("{} · Kuf2Main.exe patches", model.game)),
-                                ),
+                                .text_size(px(18.0))
+                                .text_color(theme.text)
+                                .child("Executable Patches"),
                         )
-                        .child(refresh),
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(theme.text_dim)
+                                .child(format!("{} · Kuf2Main.exe", model.game)),
+                        ),
                 )
-                .children(
-                    model
-                        .confirmation
-                        .as_ref()
-                        .map(|confirmation| render_confirmation(theme, confirmation, cx)),
-                )
-                .child(render_content(theme, model, cx)),
+                .child(refresh),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(render_navigator(theme, model, cx))
+                .child(
+                    div()
+                        .id("patches-canvas")
+                        .debug_selector(|| "patches-canvas".to_owned())
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .overflow_y_scroll()
+                        .p(px(18.0))
+                        .child(render_content(theme, model, cx)),
+                ),
+        )
+        .children(
+            model
+                .confirmation
+                .as_ref()
+                .map(|confirmation| render_confirmation(theme, confirmation, cx)),
+        )
+}
+
+fn render_navigator(
+    theme: &Theme,
+    model: &PatchViewModel,
+    cx: &mut Context<AppFrame>,
+) -> Stateful<Div> {
+    let ready = matches!(model.content, PatchContentState::Ready);
+    div()
+        .id("patches-navigator")
+        .debug_selector(|| "patches-navigator".to_owned())
+        .flex()
+        .flex_none()
+        .flex_col()
+        .w(px(260.0))
+        .min_h_0()
+        .bg(theme.surface)
+        .border_r_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_between()
+                .h(px(48.0))
+                .px(px(12.0))
+                .border_b_1()
+                .border_color(theme.border)
+                .text_size(px(11.0))
+                .text_color(theme.text_dim)
+                .child("PATCHES")
+                .child(model.patches.len().to_string()),
+        )
+        .child(
+            div()
+                .id("patches-navigator-scroll")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .p(px(10.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .when(ready, |list| {
+                    list.children(
+                        model
+                            .patches
+                            .iter()
+                            .map(|patch| render_patch_card(theme, patch, cx)),
+                    )
+                })
+                .when(!ready, |list| {
+                    list.child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(theme.text_dim)
+                            .child("Patch controls appear after Kuf2Main.exe is checked."),
+                    )
+                }),
         )
 }
 
@@ -412,7 +487,7 @@ fn render_ready(theme: &Theme, model: &PatchViewModel, cx: &mut Context<AppFrame
         .w_full()
         .flex()
         .flex_col()
-        .gap(px(14.0))
+        .gap(px(10.0))
         .children(model.busy.then(|| {
             status_panel(
                 theme,
@@ -420,26 +495,16 @@ fn render_ready(theme: &Theme, model: &PatchViewModel, cx: &mut Context<AppFrame
                 "Wait for the write and follow-up check to finish.",
             )
         }))
+        .child(
+            div()
+                .h(px(30.0))
+                .flex()
+                .items_center()
+                .text_size(px(11.0))
+                .text_color(theme.text_dim)
+                .child("EXECUTABLE DETAILS"),
+        )
         .child(executable_panel(theme, model))
-        .child(
-            div()
-                .text_size(px(13.0))
-                .text_color(theme.accent)
-                .child("EXECUTABLE PATCHES"),
-        )
-        .children(
-            model
-                .patches
-                .iter()
-                .map(|patch| render_patch_card(theme, patch, cx)),
-        )
-        .child(
-            div()
-                .pt(px(4.0))
-                .text_size(px(13.0))
-                .text_color(theme.accent)
-                .child("FIRE RATE"),
-        )
         .child(render_fire_rates(theme, model, cx))
 }
 
@@ -495,18 +560,19 @@ fn render_patch_card(
         .id(id)
         .debug_selector(move || id.to_owned())
         .w_full()
-        .p(px(18.0))
+        .p(px(12.0))
         .flex()
         .flex_col()
         .gap(px(8.0))
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap(px(8.0))
                 .child(
                     div()
-                        .text_size(px(17.0))
+                        .text_size(px(14.0))
                         .text_color(theme.text)
                         .child(patch.name),
                 )

@@ -25,6 +25,15 @@ use gpui::{
 use crate::frame::AppFrame;
 use crate::settings::{SettingsStartup, settings_path};
 
+const WINDOW_WIDTH: f32 = 1320.0;
+const WINDOW_HEIGHT: f32 = 840.0;
+const WINDOW_MIN_WIDTH: f32 = 1180.0;
+const WINDOW_MIN_HEIGHT: f32 = 720.0;
+
+fn minimum_window_size() -> gpui::Size<gpui::Pixels> {
+    size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT))
+}
+
 fn main() -> ExitCode {
     let startup_failed = Rc::new(Cell::new(false));
     let failure_in_app = Rc::clone(&startup_failed);
@@ -39,10 +48,11 @@ fn main() -> ExitCode {
             }
         })
         .detach();
-        let bounds = Bounds::centered(None, size(px(1180.0), px(780.0)), cx);
+        let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
         let opened = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_min_size: Some(minimum_window_size()),
                 titlebar: Some(TitlebarOptions {
                     title: Some("KufEditor".into()),
                     ..Default::default()
@@ -81,5 +91,17 @@ fn main() -> ExitCode {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{px, size};
+
+    use super::minimum_window_size;
+
+    #[test]
+    fn window_minimum_preserves_the_focused_split_shell() {
+        assert_eq!(minimum_window_size(), size(px(1180.0), px(720.0)));
     }
 }

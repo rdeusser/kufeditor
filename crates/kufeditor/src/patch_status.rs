@@ -277,6 +277,12 @@ impl PatchPresentationState {
         self.active_operation.is_some()
     }
 
+    pub(crate) fn active_backup(&self) -> Option<&Path> {
+        self.active_operation
+            .as_ref()
+            .map(|operation| operation.backup.as_path())
+    }
+
     pub(crate) fn set_context(
         &mut self,
         game: Game,
@@ -495,6 +501,10 @@ mod tests {
         let launch = state.confirm_operation().expect("current confirmation");
         assert_eq!(launch.operation(), operation);
         assert!(state.operation_in_progress());
+        assert_eq!(
+            state.active_backup(),
+            Some(Path::new("/games/crusaders/Kuf2Main.exe.bak"))
+        );
         assert!(!state.request_operation(PatchOperation::SetFireRate {
             id: FireRatePresetID::Turbo,
         }));

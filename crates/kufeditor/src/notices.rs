@@ -125,6 +125,12 @@ pub(crate) enum NoticeSource {
     Patches,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NoticeToken {
+    source: NoticeSource,
+    sequence: u64,
+}
+
 struct NoticeSlot {
     identity: NoticeIdentity,
     sequence: u64,
@@ -181,6 +187,19 @@ impl NoticeSlot {
             }
         }
         completed
+    }
+
+    fn clear_notice_sequence(&mut self, sequence: u64) -> bool {
+        let cleared = if self.sequence == sequence {
+            self.notice.take().is_some()
+        } else {
+            false
+        };
+        let cleared_suspended = self
+            .suspended
+            .as_mut()
+            .is_some_and(|slot| slot.clear_notice_sequence(sequence));
+        cleared || cleared_suspended
     }
 }
 
@@ -293,6 +312,27 @@ impl NoticeCenter {
 
     pub(crate) fn clear(&mut self, source: NoticeSource) {
         self.slots.remove(&source);
+    }
+
+    pub(crate) fn success_token(&self, source: NoticeSource) -> Option<NoticeToken> {
+        let slot = self.slots.get(&source)?;
+        (slot.notice.as_ref()?.level() == NoticeLevel::Success).then_some(NoticeToken {
+            source,
+            sequence: slot.sequence,
+        })
+    }
+
+    pub(crate) fn clear_token(&mut self, token: NoticeToken) -> bool {
+        let remove_slot = self.slots.get(&token.source).is_some_and(|slot| {
+            slot.suspended.is_none() && slot.sequence == token.sequence && slot.notice.is_some()
+        });
+        if remove_slot {
+            self.slots.remove(&token.source);
+            return true;
+        }
+        self.slots
+            .get_mut(&token.source)
+            .is_some_and(|slot| slot.clear_notice_sequence(token.sequence))
     }
 
     pub(crate) fn current(&self) -> Option<&Notice> {
@@ -450,6 +490,41 @@ mod tests {
         assert_eq!(center.current().map(Notice::summary), Some("success"));
         center.clear(NoticeSource::Editor);
         assert_eq!(center.current().map(Notice::summary), Some("info"));
+    }
+
+    #[test]
+    fn a_success_token_cannot_clear_a_newer_notice() {
+        let mut center = NoticeCenter::default();
+        center.replace(NoticeSource::Workspace, Notice::success("Saved document"));
+        let token = center.success_token(NoticeSource::Workspace).unwrap();
+        center.replace(
+            NoticeSource::Workspace,
+            Notice::plain(NoticeLevel::Error, "Could not save document"),
+        );
+
+        assert!(!center.clear_token(token));
+        assert_eq!(
+            center.current().map(Notice::summary),
+            Some("Could not save document")
+        );
+    }
+
+    #[test]
+    fn a_success_token_clears_a_completion_suspended_by_pending_work() {
+        let mut center = NoticeCenter::default();
+        center.begin(NoticeSource::Workspace, 7, Notice::info("Saving document"));
+        center.begin_pending(NoticeSource::Workspace, 8);
+        assert!(center.complete(
+            NoticeSource::Workspace,
+            7,
+            Some(Notice::success("Saved document")),
+        ));
+        let token = center.success_token(NoticeSource::Workspace).unwrap();
+
+        assert!(center.clear_token(token));
+        assert!(center.current().is_none());
+        assert!(center.cancel(NoticeSource::Workspace, 8));
+        assert!(center.current().is_none());
     }
 
     #[test]
